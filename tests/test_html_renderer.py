@@ -13,6 +13,7 @@ from pipeview.model import Report
 
 MAKE_FIXTURES = Path(__file__).parent / "fixtures" / "make"
 GITLAB_FIXTURES = Path(__file__).parent / "fixtures" / "gitlab"
+EXAMPLES = Path(__file__).parent.parent / "examples"
 
 
 @pytest.fixture
@@ -103,6 +104,18 @@ class TestNoNetworkResources:
 
     def test_no_external_resources_empty_report(self, tmpdir):
         report = Report(root="test", format="makefile")
+        path = os.path.join(tmpdir, "report.html")
+        render_html(report, path)
+        self._assert_no_network_refs(path)
+
+    def test_no_external_resources_make_example(self, tmpdir):
+        report = parse_makefile(str(EXAMPLES / "make-project" / "Makefile"))
+        path = os.path.join(tmpdir, "report.html")
+        render_html(report, path)
+        self._assert_no_network_refs(path)
+
+    def test_no_external_resources_gitlab_example(self, tmpdir):
+        report = parse_gitlab(str(EXAMPLES / "gitlab-project" / ".gitlab-ci.yml"))
         path = os.path.join(tmpdir, "report.html")
         render_html(report, path)
         self._assert_no_network_refs(path)

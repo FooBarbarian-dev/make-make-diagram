@@ -9,6 +9,7 @@ from pipeview.cli import main
 
 MAKE_FIXTURES = Path(__file__).parent / "fixtures" / "make"
 GITLAB_FIXTURES = Path(__file__).parent / "fixtures" / "gitlab"
+EXAMPLES = Path(__file__).parent.parent / "examples"
 
 
 @pytest.fixture
@@ -123,6 +124,38 @@ class TestCliGitlab:
             "-o", tmpdir,
         ])
         assert code == 1
+
+
+class TestExamples:
+    def test_make_example(self, tmpdir):
+        code = main([
+            str(EXAMPLES / "make-project"),
+            "-o", tmpdir,
+            "--no-enrich",
+        ])
+        assert code == 0
+        assert os.path.isfile(os.path.join(tmpdir, "Makefile.report.html"))
+        assert os.path.isfile(os.path.join(tmpdir, "Makefile.model.json"))
+
+    def test_gitlab_example(self, tmpdir):
+        code = main([
+            str(EXAMPLES / "gitlab-project"),
+            "-o", tmpdir,
+        ])
+        assert code in (0, 1)
+        assert os.path.isfile(os.path.join(tmpdir, "gitlab-ci.report.html"))
+        assert os.path.isfile(os.path.join(tmpdir, "gitlab-ci.model.json"))
+
+    def test_python_m_pipeview(self, tmpdir):
+        import subprocess
+        import sys
+        result = subprocess.run(
+            [sys.executable, "-m", "pipeview",
+             str(EXAMPLES / "make-project"), "-o", tmpdir, "--no-enrich"],
+            capture_output=True, text=True,
+        )
+        assert result.returncode == 0
+        assert os.path.isfile(os.path.join(tmpdir, "Makefile.report.html"))
 
 
 class TestExitCodes:

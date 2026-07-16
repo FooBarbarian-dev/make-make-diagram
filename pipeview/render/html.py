@@ -7,7 +7,7 @@ from pathlib import Path
 from pipeview.model import Report
 
 _TEMPLATE_DIR = Path(__file__).parent / "templates"
-_VENDOR_DIR = Path(__file__).parent.parent.parent / "vendor"
+_VENDOR_DIR = Path(__file__).parent.parent / "vendor"
 
 
 def render_html(report: Report, output_path: str) -> None:

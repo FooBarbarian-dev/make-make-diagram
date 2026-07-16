@@ -1,0 +1,121 @@
+# Example GitLab CI pipeline for pipeview
+#
+# Run:  pipeview examples/gitlab-project -o /tmp/pipeview-demo-gl
+#
+# This pipeline demonstrates stages, a needs: DAG that differs from stage
+# order, extends: chains, local and remote includes, variables at multiple
+# scopes, manual gates, and graceful handling of unresolvable references.
+
+stages:
+  - build
+  - test
+  - staging
+  - production
+
+variables:
+  DOCKER_REGISTRY: registry.example.com
+  APP_NAME: myapp
+  DEPLOY_TIMEOUT: "300"
+
+include:
+  - local: 'ci/deploy.yml'
+  - project: 'devops/shared-templates'
+    file: 'ci/notify.yml'
+
+# --- Templates -----------------------------------------------------------
+
+.base:
+  image: python:3.12-slim
+  before_script:
+    - pip install -r requirements.txt
+  variables:
+    PIP_CACHE_DIR: .pip-cache
+
+.docker_base:
+  extends: .base
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+  services:
+    - docker:dind
+
+# --- Build ----------------------------------------------------------------
+
+## Compile the application and produce a wheel
+build_wheel:
+  extends: .base
+  stage: build
+  script:
+    - python -m build
+  variables:
+    BUILD_TARGET: dist
+
+## Build the Docker image
+build_image:
+  extends: .docker_base
+  stage: build
+  script:
+    - docker build -t $DOCKER_REGISTRY/$APP_NAME:$CI_COMMIT_SHA .
+
+# --- Test -----------------------------------------------------------------
+
+## Run unit tests (needs only the wheel, not the image)
+unit_tests:
+  extends: .base
+  stage: test
+  script:
+    - pytest tests/ -v --junitxml=report.xml
+  needs:
+    - build_wheel
+
+## Run integration tests (needs the Docker image)
+integration_tests:
+  extends: .docker_base
+  stage: test
+  script:
+    - docker-compose up -d
+    - pytest tests/integration/ -v
+  needs:
+    - build_image
+
+## Lint and type-check (can run as soon as the wheel builds)
+lint:
+  extends: .base
+  stage: test
+  script:
+    - ruff check .
+    - mypy src/
+  needs:
+    - build_wheel
+
+# --- Staging --------------------------------------------------------------
+
+## Deploy to the staging environment (automatic after tests pass)
+deploy_staging:
+  extends: .notify_on_deploy
+  stage: staging
+  script:
+    - ./deploy.sh staging
+  needs:
+    - unit_tests
+    - integration_tests
+    - lint
+  variables:
+    ENVIRONMENT: staging
+
+# --- Production -----------------------------------------------------------
+
+## Deploy to production (manual gate)
+deploy_production:
+  stage: production
+  when: manual
+  allow_failure: false
+  script:
+    - ./deploy.sh production
+  needs:
+    - deploy_staging
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: manual
+    - when: never
+  variables:
+    ENVIRONMENT: production
