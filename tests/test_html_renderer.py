@@ -120,6 +120,12 @@ class TestNoNetworkResources:
         render_html(report, path)
         self._assert_no_network_refs(path)
 
+    def test_no_external_resources_torture_example(self, tmpdir):
+        report = parse_makefile(str(EXAMPLES / "torture-project" / "Makefile"))
+        path = os.path.join(tmpdir, "report.html")
+        render_html(report, path)
+        self._assert_no_network_refs(path)
+
     def _assert_no_network_refs(self, path: str) -> None:
         with open(path, "r", encoding="utf-8") as f:
             content = f.read()
@@ -148,3 +154,28 @@ class TestNoNetworkResources:
             "Generated HTML contains external resource references "
             "(offline constraint violated):\n" + "\n".join(violations)
         )
+
+
+class TestTortureExample:
+    """The overflow torture fixture must parse and carry its long tokens
+    through to the rendered report (the visual overflow check itself runs
+    in a browser; see docs/ux-audit.md)."""
+
+    def test_torture_report_renders_long_tokens(self, tmpdir):
+        report = parse_makefile(str(EXAMPLES / "torture-project" / "Makefile"))
+        long_values = [
+            e.raw_value for var in report.variables for e in var.events
+            if len(e.raw_value) >= 200
+        ]
+        assert long_values, "expected a 200-char variable value in the fixture"
+        long_recipes = [
+            line for n in report.nodes for line in n.recipe if len(line) >= 300
+        ]
+        assert long_recipes, "expected a 300-char one-line recipe in the fixture"
+
+        path = os.path.join(tmpdir, "report.html")
+        render_html(report, path)
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+        assert long_values[0] in content
+        assert "torture-build" in content

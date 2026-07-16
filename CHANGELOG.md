@@ -1,5 +1,36 @@
 # Changelog
 
+## Unreleased
+
+Report UI overhaul (see `docs/ux-audit.md` for the full audit):
+
+- Repo-wide text overflow policy: ellipsis + full value on hover/in the
+  detail panel for single-line contexts, horizontal scroll inside code
+  blocks (with a soft-wrap toggle), middle-truncated paths. Verified
+  against a new overflow torture example (`examples/torture-project`).
+- Resizable, collapsible detail panel: drag splitter with min/max widths,
+  double-click to reset, keyboard-resizable, width kept in memory for the
+  session.
+- Design token system (type scale, spacing scale, semantic colors) with
+  automatic light/dark themes and a manual theme toggle.
+- Graph: zoom in/out/fit/reset controls with a live zoom readout,
+  selection/focus/dimmed node states, edge kinds distinguished by dash
+  pattern (not color alone), collapsible legend that doubles as the edge
+  filter, and pan-into-view when a node is selected from search.
+- Tasks: sortable catalog with copy-to-clipboard invocations and labeled
+  flag chips.
+- Variables: sticky sortable table, labeled "unresolved" state, and a
+  redesigned event timeline showing override diffs (old vs new together).
+- Files: directory tree with per-file status chips, inline diagnostics,
+  and severity icons + labels.
+- Keyboard-first search (`/` or `Ctrl/Cmd-K`, arrow keys, Enter, Esc) with
+  results grouped by type and matched substrings highlighted.
+- Accessibility floor: visible focus everywhere, keyboard-operable tabs,
+  rows, and splitter, WCAG AA contrast in both themes, reduced-motion
+  support, ≥32px hit targets, tooltips on focus as well as hover, print
+  stylesheet, inline SVG favicon (no favicon 404 from file://).
+- Designed empty states, including "No diagnostics — everything resolved."
+
 ## 0.1.0
 
 Initial release.

@@ -18,6 +18,7 @@ lint:
 examples: install
 	pipeview examples/make-project -o examples/out
 	pipeview examples/gitlab-project -o examples/out || test $$? -eq 1
+	pipeview examples/torture-project -o examples/out/torture || test $$? -eq 1
 
 ## Run pipeview on this repo's own Makefile
 self: install
