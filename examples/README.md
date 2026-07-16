@@ -55,3 +55,21 @@ What to look for in the report:
   with an event timeline showing inheritance through `extends:`.
 - **File Map**: the local include resolves; the `project:` include shows
   as unresolved with a diagnostic.
+
+## torture-project
+
+A deliberately hostile Makefile that stress-tests the report UI's overflow
+policy: a 200-character unbroken variable value, a 150-character include
+path (which is also unresolvable, exercising the diagnostics list), a
+300-character one-line recipe, and a very long target name.
+
+```bash
+pipeview examples/torture-project -o examples/out/torture
+open examples/out/torture/Makefile.report.html
+```
+
+What to look for in the report: nothing. Nothing should escape its
+container at any viewport width from 1280px up — long values truncate with
+the full text available on hover and in the detail panel, code blocks
+scroll horizontally inside themselves, and paths middle-truncate keeping
+the tail.
