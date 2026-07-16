@@ -1,0 +1,19 @@
+# Shared deployment helpers included by the root pipeline.
+#
+# This file is resolved via `include: local:` — pipeview sees it.
+# The `project:` include in the root file is NOT resolved (it would
+# require fetching from another GitLab repo), so it appears as a
+# ghost node with a diagnostic in the report.
+
+.deploy_base:
+  before_script:
+    - echo "Preparing deployment to $ENVIRONMENT"
+    - aws configure set region us-east-1
+  variables:
+    DEPLOY_STRATEGY: rolling
+
+## Send Slack notification after deploy
+.notify_on_deploy:
+  extends: .deploy_base
+  after_script:
+    - curl -X POST "$SLACK_WEBHOOK" -d "{\"text\":\"Deployed to $ENVIRONMENT\"}"

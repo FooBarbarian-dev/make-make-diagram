@@ -21,6 +21,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="pipeview",
         description="Generate offline interactive HTML reports for GNU Make and GitLab CI pipelines.",
+        epilog=(
+            "examples:\n"
+            "  pipeview Makefile                  Analyze a Makefile\n"
+            "  pipeview .                         Discover Makefile and .gitlab-ci.yml in cwd\n"
+            "  pipeview .gitlab-ci.yml -o report  Analyze GitLab CI, output to report/\n"
+            "  pipeview src/ --no-enrich          Skip make -pqn enrichment pass\n"
+            "  pipeview Makefile --format html,svg Export as HTML and SVG\n"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
         "path",
