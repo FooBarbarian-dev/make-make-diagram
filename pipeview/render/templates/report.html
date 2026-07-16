@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PipeView Report — {{ROOT}}</title>
+<style>
+:root {
+  --bg: #ffffff; --bg2: #f5f6f8; --fg: #1a1a2e; --fg2: #555;
+  --border: #ddd; --accent: #2563eb; --accent2: #1d4ed8;
+  --ghost: #999; --badge-warn: #f59e0b; --badge-err: #ef4444;
+  --badge-info: #3b82f6; --node-bg: #fff; --node-border: #333;
+  --phony-bg: #dcfce7; --stage-bg: #dbeafe; --ghost-bg: #f3f4f6;
+  --edge-color: #888; --selected-bg: #eff6ff; --panel-bg: #fff;
+  --tag-bg: #e5e7eb; --recipe-bg: #f8f9fa; --search-bg: #fff;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a; --bg2: #1e293b; --fg: #e2e8f0; --fg2: #94a3b8;
+    --border: #334155; --accent: #60a5fa; --accent2: #93c5fd;
+    --ghost: #64748b; --node-bg: #1e293b; --node-border: #94a3b8;
+    --phony-bg: #14532d; --stage-bg: #1e3a5f; --ghost-bg: #334155;
+    --edge-color: #64748b; --selected-bg: #1e3a5f; --panel-bg: #1e293b;
+    --tag-bg: #334155; --recipe-bg: #0f172a; --search-bg: #1e293b;
+  }
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg); color: var(--fg); display: flex; flex-direction: column; height: 100vh; }
+a { color: var(--accent); text-decoration: none; cursor: pointer; }
+a:hover { text-decoration: underline; }
+
+/* Header */
+.header { background: var(--bg2); border-bottom: 1px solid var(--border); padding: 8px 16px;
+  display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+.header h1 { font-size: 16px; font-weight: 600; white-space: nowrap; }
+.header .meta { font-size: 12px; color: var(--fg2); white-space: nowrap; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 11px;
+  font-weight: 600; color: #fff; }
+.badge-warn { background: var(--badge-warn); }
+.badge-err { background: var(--badge-err); }
+.badge-info { background: var(--badge-info); }
+.search-box { margin-left: auto; }
+.search-box input { padding: 5px 10px; border: 1px solid var(--border); border-radius: 4px;
+  background: var(--search-bg); color: var(--fg); font-size: 13px; width: 220px; }
+
+/* Tabs */
+.tabs { display: flex; background: var(--bg2); border-bottom: 1px solid var(--border); flex-shrink: 0; }
+.tab { padding: 8px 20px; cursor: pointer; font-size: 13px; font-weight: 500;
+  border-bottom: 2px solid transparent; color: var(--fg2); transition: all 0.15s; }
+.tab:hover { color: var(--fg); background: var(--bg); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+
+/* Main layout */
+.main { display: flex; flex: 1; overflow: hidden; }
+.content { flex: 1; overflow: auto; position: relative; }
+.panel { width: 380px; border-left: 1px solid var(--border); background: var(--panel-bg);
+  overflow-y: auto; padding: 16px; display: none; flex-shrink: 0; }
+.panel.open { display: block; }
+.panel h2 { font-size: 15px; margin-bottom: 12px; display: flex; justify-content: space-between; }
+.panel-close { cursor: pointer; font-size: 18px; color: var(--fg2); background: none; border: none; }
+.panel-section { margin-bottom: 16px; }
+.panel-section h3 { font-size: 12px; text-transform: uppercase; color: var(--fg2);
+  margin-bottom: 6px; letter-spacing: 0.5px; }
+.panel-section .value { font-size: 13px; }
+
+/* Tags / Flags */
+.tag { display: inline-block; padding: 1px 7px; border-radius: 3px; font-size: 11px;
+  background: var(--tag-bg); margin: 1px 2px; }
+.tag-phony { background: var(--phony-bg); }
+.tag-manual { background: #fef3c7; color: #92400e; }
+.tag-ghost { background: var(--ghost-bg); color: var(--ghost); border: 1px dashed var(--ghost); }
+
+/* Recipe */
+.recipe { background: var(--recipe-bg); border: 1px solid var(--border); border-radius: 4px;
+  padding: 8px 12px; font-family: 'SF Mono', 'Fira Code', monospace; font-size: 12px;
+  white-space: pre-wrap; word-break: break-all; line-height: 1.6; overflow-x: auto; }
+.recipe .var-ref { color: var(--accent); cursor: pointer; }
+
+/* View: Graph */
+.graph-container { width: 100%; height: 100%; position: relative; overflow: hidden; }
+.graph-svg { position: absolute; top: 0; left: 0; }
+.graph-controls { position: absolute; top: 10px; right: 10px; display: flex; flex-direction: column;
+  gap: 4px; z-index: 10; }
+.graph-controls button { width: 32px; height: 32px; border: 1px solid var(--border);
+  border-radius: 4px; background: var(--bg); color: var(--fg); cursor: pointer; font-size: 16px; }
+.graph-legend { position: absolute; bottom: 10px; left: 10px; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; font-size: 11px;
+  z-index: 10; }
+.legend-item { display: flex; align-items: center; gap: 6px; margin: 3px 0; }
+.legend-line { width: 24px; height: 2px; }
+.filter-row { display: flex; gap: 10px; flex-wrap: wrap; padding: 8px 10px;
+  background: var(--bg2); border-bottom: 1px solid var(--border); font-size: 12px; }
+.filter-row label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+
+/* View: Task catalog */
+.catalog { padding: 16px; max-width: 900px; }
+.catalog h2 { font-size: 18px; margin-bottom: 12px; }
+.catalog-table { width: 100%; border-collapse: collapse; }
+.catalog-table th { text-align: left; font-size: 12px; text-transform: uppercase;
+  color: var(--fg2); border-bottom: 2px solid var(--border); padding: 6px 8px; }
+.catalog-table td { padding: 8px; border-bottom: 1px solid var(--border);
+  font-size: 13px; vertical-align: top; cursor: pointer; }
+.catalog-table tr:hover td { background: var(--selected-bg); }
+.catalog-table .no-doc { color: var(--fg2); font-style: italic; font-size: 12px; }
+.invocation { font-family: monospace; font-size: 12px; background: var(--recipe-bg);
+  padding: 2px 6px; border-radius: 3px; }
+
+/* View: Variable explorer */
+.var-explorer { padding: 16px; }
+.var-explorer h2 { font-size: 18px; margin-bottom: 12px; }
+.var-search { margin-bottom: 12px; }
+.var-search input { padding: 6px 10px; border: 1px solid var(--border); border-radius: 4px;
+  width: 100%; max-width: 400px; background: var(--search-bg); color: var(--fg); font-size: 13px; }
+.var-table { width: 100%; border-collapse: collapse; max-width: 900px; }
+.var-table th { text-align: left; font-size: 12px; text-transform: uppercase; color: var(--fg2);
+  border-bottom: 2px solid var(--border); padding: 6px 8px; }
+.var-table td { padding: 8px; border-bottom: 1px solid var(--border); font-size: 13px;
+  cursor: pointer; }
+.var-table tr:hover td { background: var(--selected-bg); }
+.var-detail { margin-top: 16px; background: var(--bg2); border-radius: 6px; padding: 16px; max-width: 900px; }
+.event-timeline { list-style: none; }
+.event-timeline li { padding: 6px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.event-op { font-weight: 600; font-family: monospace; }
+.event-source { color: var(--fg2); }
+
+/* View: File map */
+.file-map { padding: 16px; max-width: 900px; }
+.file-map h2 { font-size: 18px; margin-bottom: 12px; }
+.file-tree { list-style: none; }
+.file-tree li { padding: 4px 0; }
+.file-tree .file-item { display: flex; align-items: center; gap: 8px; padding: 4px 8px;
+  border-radius: 4px; font-size: 13px; }
+.file-tree .file-item:hover { background: var(--selected-bg); }
+.file-status { font-size: 11px; padding: 1px 6px; border-radius: 3px; }
+.file-status-ok { background: #dcfce7; color: #166534; }
+.file-status-error { background: #fee2e2; color: #991b1b; }
+.file-status-unresolved { background: #fef3c7; color: #92400e; }
+.diag-list { margin-top: 16px; }
+.diag-item { padding: 8px 12px; margin: 4px 0; border-radius: 4px; font-size: 13px;
+  display: flex; gap: 8px; align-items: flex-start; }
+.diag-item.info { background: #dbeafe; color: #1e40af; }
+.diag-item.warning { background: #fef3c7; color: #92400e; }
+.diag-item.error { background: #fee2e2; color: #991b1b; }
+.diag-sev { font-weight: 600; text-transform: uppercase; font-size: 11px; min-width: 55px; }
+
+/* Search results overlay */
+.search-results { position: absolute; top: 100%; right: 0; background: var(--bg);
+  border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+  max-height: 300px; overflow-y: auto; width: 320px; z-index: 100; display: none; }
+.search-results.open { display: block; }
+.search-result { padding: 8px 12px; cursor: pointer; font-size: 13px; border-bottom: 1px solid var(--border); }
+.search-result:hover { background: var(--selected-bg); }
+.search-result .sr-type { font-size: 11px; color: var(--fg2); }
+</style>
+</head>
+<body>
+
+<div class="header">
+  <h1>PipeView</h1>
+  <span class="meta">{{ROOT}} &mdash; {{GENERATED_AT}}</span>
+  <span id="diag-badge"></span>
+  <div class="search-box" style="position:relative;">
+    <input type="text" id="global-search" placeholder="Search nodes, variables, files…"
+      autocomplete="off">
+    <div class="search-results" id="search-results"></div>
+  </div>
+</div>
+
+<div class="tabs">
+  <div class="tab active" data-view="graph">Dependency Graph</div>
+  <div class="tab" data-view="catalog">Task Catalog</div>
+  <div class="tab" data-view="variables">Variables</div>
+  <div class="tab" data-view="filemap">File Map</div>
+</div>
+
+<div class="main">
+  <div class="content">
+    <!-- Graph view -->
+    <div class="view" id="view-graph" style="display:flex;flex-direction:column;height:100%;">
+      <div class="filter-row" id="edge-filters"></div>
+      <div class="graph-container" id="graph-container">
+        <svg class="graph-svg" id="graph-svg"></svg>
+        <div class="graph-controls">
+          <button id="zoom-in" title="Zoom in">+</button>
+          <button id="zoom-out" title="Zoom out">&minus;</button>
+          <button id="zoom-fit" title="Fit">&#x26F6;</button>
+        </div>
+        <div class="graph-legend" id="graph-legend"></div>
+      </div>
+    </div>
+
+    <!-- Task catalog view -->
+    <div class="view" id="view-catalog" style="display:none;">
+      <div class="catalog" id="catalog"></div>
+    </div>
+
+    <!-- Variable explorer view -->
+    <div class="view" id="view-variables" style="display:none;">
+      <div class="var-explorer" id="var-explorer"></div>
+    </div>
+
+    <!-- File map view -->
+    <div class="view" id="view-filemap" style="display:none;">
+      <div class="file-map" id="file-map"></div>
+    </div>
+  </div>
+
+  <div class="panel" id="detail-panel">
+    <h2><span id="panel-title"></span>
+      <button class="panel-close" id="panel-close">&times;</button>
+    </h2>
+    <div id="panel-content"></div>
+  </div>
+</div>
+
+<script>
+/*DAGRE_PLACEHOLDER*/
+</script>
+<script>
+const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
+
+(function() {
+  'use strict';
+
+  const nodeMap = {};
+  REPORT.nodes.forEach(n => { nodeMap[n.id] = n; });
+  const varMap = {};
+  REPORT.variables.forEach(v => { varMap[v.name] = v; });
+
+  // --- Diagnostics badge ---
+  const diagCounts = {info:0, warning:0, error:0};
+  REPORT.diagnostics.forEach(d => { diagCounts[d.severity]++; });
+  const badgeEl = document.getElementById('diag-badge');
+  const total = diagCounts.info + diagCounts.warning + diagCounts.error;
+  if (total > 0) {
+    const cls = diagCounts.error > 0 ? 'badge-err' : diagCounts.warning > 0 ? 'badge-warn' : 'badge-info';
+    badgeEl.className = 'badge ' + cls;
+    badgeEl.textContent = total + ' diagnostic' + (total > 1 ? 's' : '');
+  }
+
+  // --- Tab navigation ---
+  const tabs = document.querySelectorAll('.tab');
+  const views = document.querySelectorAll('.view');
+  tabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      tabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      const viewId = 'view-' + tab.dataset.view;
+      views.forEach(v => { v.style.display = v.id === viewId ? (viewId === 'view-graph' ? 'flex' : 'block') : 'none'; });
+      if (viewId === 'view-graph') requestAnimationFrame(layoutGraph);
+    });
+  });
+
+  // --- Detail Panel ---
+  const panel = document.getElementById('detail-panel');
+  const panelTitle = document.getElementById('panel-title');
+  const panelContent = document.getElementById('panel-content');
+  document.getElementById('panel-close').addEventListener('click', () => {
+    panel.classList.remove('open');
+  });
+
+  function showNodeDetail(nodeId) {
+    const node = nodeMap[nodeId];
+    if (!node) return;
+    panelTitle.textContent = node.name;
+    let html = '';
+    html += '<div class="panel-section"><h3>Kind</h3><div class="value">' + esc(node.kind) + '</div></div>';
+    if (node.source) {
+      html += '<div class="panel-section"><h3>Source</h3><div class="value">'
+        + esc(node.source.file) + ':' + node.source.line + '</div></div>';
+    }
+    if (node.doc) {
+      html += '<div class="panel-section"><h3>Description</h3><div class="value">' + esc(node.doc) + '</div></div>';
+    }
+    if (node.flags && node.flags.length) {
+      html += '<div class="panel-section"><h3>Flags</h3><div class="value">'
+        + node.flags.map(f => '<span class="tag tag-' + f + '">' + esc(f) + '</span>').join(' ')
+        + '</div></div>';
+    }
+    if (node.recipe && node.recipe.length) {
+      html += '<div class="panel-section"><h3>Recipe</h3><div class="recipe">'
+        + node.recipe.map(r => highlightVarRefs(esc(r))).join('\n')
+        + '</div></div>';
+    }
+    const inEdges = REPORT.edges.filter(e => e.dst === nodeId);
+    const outEdges = REPORT.edges.filter(e => e.src === nodeId);
+    if (inEdges.length) {
+      html += '<div class="panel-section"><h3>Depended on by</h3><div class="value">'
+        + inEdges.map(e => '<a class="node-link" data-id="' + esc(e.src) + '">' + esc(e.src) + '</a>'
+          + ' <span class="tag">' + esc(e.kind) + '</span>').join('<br>')
+        + '</div></div>';
+    }
+    if (outEdges.length) {
+      html += '<div class="panel-section"><h3>Depends on</h3><div class="value">'
+        + outEdges.map(e => '<a class="node-link" data-id="' + esc(e.dst) + '">' + esc(e.dst) + '</a>'
+          + ' <span class="tag">' + esc(e.kind) + '</span>').join('<br>')
+        + '</div></div>';
+    }
+    if (node.annotations && Object.keys(node.annotations).length) {
+      html += '<div class="panel-section"><h3>Annotations</h3><div class="recipe">'
+        + esc(JSON.stringify(node.annotations, null, 2)) + '</div></div>';
+    }
+    panelContent.innerHTML = html;
+    panel.classList.add('open');
+    panelContent.querySelectorAll('.node-link').forEach(el => {
+      el.addEventListener('click', () => showNodeDetail(el.dataset.id));
+    });
+    panelContent.querySelectorAll('.var-link').forEach(el => {
+      el.addEventListener('click', () => {
+        switchToView('variables');
+        showVarDetail(el.dataset.name);
+      });
+    });
+  }
+
+  function showVarDetail(varName) {
+    const v = varMap[varName];
+    if (!v) return;
+    panelTitle.textContent = '$(' + v.name + ')';
+    let html = '';
+    html += '<div class="panel-section"><h3>Event Timeline</h3><ul class="event-timeline">';
+    v.events.forEach(evt => {
+      html += '<li><span class="event-op">' + esc(evt.operator) + '</span> '
+        + '<span class="event-source">' + esc(evt.source.file) + ':' + evt.source.line + '</span>'
+        + ' scope: ' + esc(evt.scope)
+        + '<br>raw: <code>' + esc(evt.raw_value) + '</code>';
+      if (evt.resolved_value != null) {
+        html += '<br>resolved: <code>' + esc(evt.resolved_value) + '</code>';
+      }
+      html += '</li>';
+    });
+    html += '</ul></div>';
+    if (v.used_by && v.used_by.length) {
+      html += '<div class="panel-section"><h3>Used by</h3><div class="value">'
+        + v.used_by.map(u => {
+          if (nodeMap[u]) return '<a class="node-link" data-id="' + esc(u) + '">' + esc(u) + '</a>';
+          return esc(u);
+        }).join(', ')
+        + '</div></div>';
+    }
+    panelContent.innerHTML = html;
+    panel.classList.add('open');
+    panelContent.querySelectorAll('.node-link').forEach(el => {
+      el.addEventListener('click', () => showNodeDetail(el.dataset.id));
+    });
+  }
+
+  // --- Graph view ---
+  let graphScale = 1, graphTx = 0, graphTy = 0;
+  const graphSvg = document.getElementById('graph-svg');
+  const graphContainer = document.getElementById('graph-container');
+  let graphG = null;
+  const edgeKinds = new Set(REPORT.edges.map(e => e.kind));
+  const hiddenEdgeKinds = new Set();
+
+  const edgeColors = {
+    prerequisite: '#333', order_only: '#e67e22', needs: '#2563eb',
+    stage_order: '#8b5cf6', includes: '#059669', invokes: '#dc2626', extends: '#6366f1'
+  };
+  const edgeDash = {
+    prerequisite: '', order_only: '6,3', needs: '',
+    stage_order: '3,3', includes: '', invokes: '', extends: '6,3'
+  };
+
+  // Edge filters
+  const filterRow = document.getElementById('edge-filters');
+  edgeKinds.forEach(kind => {
+    const label = document.createElement('label');
+    const cb = document.createElement('input');
+    cb.type = 'checkbox'; cb.checked = true; cb.dataset.kind = kind;
+    cb.addEventListener('change', () => {
+      if (cb.checked) hiddenEdgeKinds.delete(kind);
+      else hiddenEdgeKinds.add(kind);
+      layoutGraph();
+    });
+    label.appendChild(cb);
+    label.appendChild(document.createTextNode(' ' + kind));
+    filterRow.appendChild(label);
+  });
+
+  // Legend
+  const legendEl = document.getElementById('graph-legend');
+  let legendHtml = '';
+  edgeKinds.forEach(kind => {
+    const color = edgeColors[kind] || '#666';
+    const dash = edgeDash[kind] ? 'stroke-dasharray:' + edgeDash[kind] : '';
+    legendHtml += '<div class="legend-item">'
+      + '<svg width="24" height="6"><line x1="0" y1="3" x2="24" y2="3" stroke="' + color + '" stroke-width="2" style="' + dash + '"/></svg>'
+      + '<span>' + kind + '</span></div>';
+  });
+  legendEl.innerHTML = legendHtml;
+
+  function layoutGraph() {
+    if (typeof dagre === 'undefined') {
+      graphSvg.innerHTML = '<text x="20" y="40" fill="var(--fg)">dagre library not loaded</text>';
+      return;
+    }
+
+    const visibleEdges = REPORT.edges.filter(e => !hiddenEdgeKinds.has(e.kind));
+    const visibleNodeIds = new Set();
+    REPORT.nodes.forEach(n => visibleNodeIds.add(n.id));
+
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({ rankdir: 'LR', nodesep: 30, ranksep: 80, marginx: 20, marginy: 20 });
+    g.setDefaultEdgeLabel(() => ({}));
+
+    const visibleNodes = REPORT.nodes.filter(n => visibleNodeIds.has(n.id));
+    visibleNodes.forEach(n => {
+      const label = n.name.length > 25 ? n.name.substring(0, 22) + '...' : n.name;
+      g.setNode(n.id, { label: label, width: Math.max(100, label.length * 8 + 20), height: 36 });
+    });
+    visibleEdges.forEach(e => {
+      if (visibleNodeIds.has(e.src) && visibleNodeIds.has(e.dst)) {
+        g.setEdge(e.src, e.dst, { kind: e.kind });
+      }
+    });
+
+    dagre.layout(g);
+
+    const graph = g.graph();
+    const svgW = graph.width || 800;
+    const svgH = graph.height || 600;
+
+    let svgContent = '<defs>'
+      + '<marker id="arrowhead" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">'
+      + '<polygon points="0 0,10 3.5,0 7" fill="var(--edge-color)"/></marker>';
+    Object.keys(edgeColors).forEach(kind => {
+      svgContent += '<marker id="arrow-' + kind + '" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">'
+        + '<polygon points="0 0,10 3.5,0 7" fill="' + edgeColors[kind] + '"/></marker>';
+    });
+    svgContent += '</defs>';
+
+    // Edges
+    g.edges().forEach(e => {
+      const edge = g.edge(e);
+      const kind = edge.kind || 'prerequisite';
+      const points = edge.points || [];
+      if (points.length < 2) return;
+      let d = 'M' + points[0].x + ',' + points[0].y;
+      for (let i = 1; i < points.length; i++) d += ' L' + points[i].x + ',' + points[i].y;
+      const color = edgeColors[kind] || '#666';
+      const dash = edgeDash[kind] || '';
+      svgContent += '<path d="' + d + '" fill="none" stroke="' + color + '" stroke-width="1.5"'
+        + (dash ? ' stroke-dasharray="' + dash + '"' : '')
+        + ' marker-end="url(#arrow-' + kind + ')" class="graph-edge" data-src="' + esc(e.v) + '" data-dst="' + esc(e.w) + '"/>';
+    });
+
+    // Nodes
+    g.nodes().forEach(nid => {
+      const layout = g.node(nid);
+      const node = nodeMap[nid];
+      if (!node || !layout) return;
+      const x = layout.x - layout.width / 2;
+      const y = layout.y - layout.height / 2;
+      let fill = 'var(--node-bg)', stroke = 'var(--node-border)', dashArr = '';
+      if (node.kind === 'ghost') { fill = 'var(--ghost-bg)'; stroke = 'var(--ghost)'; dashArr = '5,3'; }
+      else if (node.kind === 'stage') { fill = 'var(--stage-bg)'; }
+      else if (node.flags && node.flags.indexOf('phony') >= 0) { fill = 'var(--phony-bg)'; }
+
+      const rx = node.kind === 'stage' ? layout.height / 2 : 4;
+      svgContent += '<g class="graph-node" data-id="' + esc(nid) + '" style="cursor:pointer">'
+        + '<rect x="' + x + '" y="' + y + '" width="' + layout.width + '" height="' + layout.height + '"'
+        + ' rx="' + rx + '" fill="' + fill + '" stroke="' + stroke + '" stroke-width="1.5"'
+        + (dashArr ? ' stroke-dasharray="' + dashArr + '"' : '') + '/>'
+        + '<text x="' + layout.x + '" y="' + (layout.y + 4) + '" text-anchor="middle"'
+        + ' fill="var(--fg)" font-size="12">' + esc(layout.label) + '</text>'
+        + '</g>';
+    });
+
+    graphSvg.setAttribute('viewBox', '0 0 ' + svgW + ' ' + svgH);
+    graphSvg.innerHTML = svgContent;
+
+    // Fit to container
+    const cw = graphContainer.clientWidth;
+    const ch = graphContainer.clientHeight - (document.querySelector('.filter-row')?.offsetHeight || 0);
+    graphScale = Math.min(cw / svgW, ch / svgH, 2) * 0.95;
+    graphTx = (cw - svgW * graphScale) / 2;
+    graphTy = (ch - svgH * graphScale) / 2;
+    applyGraphTransform();
+
+    // Click handlers
+    graphSvg.querySelectorAll('.graph-node').forEach(el => {
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation();
+        showNodeDetail(el.dataset.id);
+        highlightReachable(el.dataset.id);
+      });
+    });
+  }
+
+  function applyGraphTransform() {
+    graphSvg.style.transform = 'translate(' + graphTx + 'px,' + graphTy + 'px) scale(' + graphScale + ')';
+    graphSvg.style.transformOrigin = '0 0';
+  }
+
+  // Zoom controls
+  document.getElementById('zoom-in').addEventListener('click', () => {
+    graphScale *= 1.25; applyGraphTransform();
+  });
+  document.getElementById('zoom-out').addEventListener('click', () => {
+    graphScale *= 0.8; applyGraphTransform();
+  });
+  document.getElementById('zoom-fit').addEventListener('click', () => { layoutGraph(); });
+
+  // Pan
+  let isPanning = false, panStartX = 0, panStartY = 0;
+  graphContainer.addEventListener('mousedown', e => {
+    if (e.target.closest('.graph-node')) return;
+    isPanning = true; panStartX = e.clientX - graphTx; panStartY = e.clientY - graphTy;
+  });
+  graphContainer.addEventListener('mousemove', e => {
+    if (!isPanning) return;
+    graphTx = e.clientX - panStartX; graphTy = e.clientY - panStartY;
+    applyGraphTransform();
+  });
+  document.addEventListener('mouseup', () => { isPanning = false; });
+
+  // Wheel zoom
+  graphContainer.addEventListener('wheel', e => {
+    e.preventDefault();
+    const factor = e.deltaY < 0 ? 1.1 : 0.9;
+    graphScale *= factor;
+    applyGraphTransform();
+  }, { passive: false });
+
+  // Highlight reachable subgraph
+  function highlightReachable(startId) {
+    const reachable = new Set();
+    const queue = [startId];
+    while (queue.length) {
+      const cur = queue.shift();
+      if (reachable.has(cur)) continue;
+      reachable.add(cur);
+      REPORT.edges.filter(e => e.src === cur).forEach(e => queue.push(e.dst));
+    }
+    graphSvg.querySelectorAll('.graph-node').forEach(el => {
+      el.style.opacity = reachable.has(el.dataset.id) ? '1' : '0.2';
+    });
+    graphSvg.querySelectorAll('.graph-edge').forEach(el => {
+      const src = el.dataset.src, dst = el.dataset.dst;
+      el.style.opacity = (reachable.has(src) && reachable.has(dst)) ? '1' : '0.1';
+    });
+  }
+  graphSvg.addEventListener('click', e => {
+    if (!e.target.closest('.graph-node')) {
+      graphSvg.querySelectorAll('.graph-node, .graph-edge').forEach(el => { el.style.opacity = '1'; });
+    }
+  });
+
+  // --- Task Catalog ---
+  function renderCatalog() {
+    const container = document.getElementById('catalog');
+    const runnables = REPORT.nodes.filter(n =>
+      (n.kind === 'target' && n.flags && n.flags.indexOf('phony') >= 0)
+      || (n.kind === 'job' && (!n.flags || n.flags.indexOf('template') < 0))
+    );
+
+    let html = '<h2>Task Catalog</h2>';
+    if (runnables.length === 0) {
+      html += '<p>No runnable tasks found.</p>';
+      container.innerHTML = html;
+      return;
+    }
+
+    html += '<table class="catalog-table"><thead><tr>'
+      + '<th>Name</th><th>Description</th><th>Invocation</th><th>Flags</th>'
+      + '</tr></thead><tbody>';
+
+    runnables.forEach(n => {
+      const invocation = n.kind === 'target'
+        ? 'make ' + n.name
+        : n.name + (n.annotations && n.annotations.stage ? ' (stage: ' + n.annotations.stage + ')' : '');
+      const doc = n.doc
+        ? esc(n.doc)
+        : '<span class="no-doc">no description — add a <code>## comment</code></span>';
+      const flags = (n.flags || []).map(f => '<span class="tag tag-' + f + '">' + esc(f) + '</span>').join(' ');
+
+      html += '<tr data-id="' + esc(n.id) + '"><td>' + esc(n.name) + '</td>'
+        + '<td>' + doc + '</td>'
+        + '<td><span class="invocation">' + esc(invocation) + '</span></td>'
+        + '<td>' + flags + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    container.innerHTML = html;
+
+    container.querySelectorAll('tr[data-id]').forEach(tr => {
+      tr.addEventListener('click', () => showNodeDetail(tr.dataset.id));
+    });
+  }
+
+  // --- Variable Explorer ---
+  function renderVariables() {
+    const container = document.getElementById('var-explorer');
+    let html = '<h2>Variables</h2>';
+    html += '<div class="var-search"><input type="text" id="var-filter" placeholder="Filter variables…"></div>';
+    html += '<table class="var-table" id="var-table"><thead><tr>'
+      + '<th>Name</th><th>Value</th><th>Events</th><th>Used by</th>'
+      + '</tr></thead><tbody>';
+
+    REPORT.variables.forEach(v => {
+      const lastEvt = v.events.length ? v.events[v.events.length - 1] : null;
+      const val = lastEvt
+        ? (lastEvt.resolved_value != null ? lastEvt.resolved_value : lastEvt.raw_value)
+        : 'unresolved';
+      const truncVal = val.length > 40 ? val.substring(0, 37) + '...' : val;
+      html += '<tr data-var="' + esc(v.name) + '">'
+        + '<td><code>' + esc(v.name) + '</code></td>'
+        + '<td><code>' + esc(truncVal) + '</code></td>'
+        + '<td>' + v.events.length + '</td>'
+        + '<td>' + v.used_by.length + '</td></tr>';
+    });
+    html += '</tbody></table>';
+    html += '<div class="var-detail" id="var-detail-area" style="display:none"></div>';
+    container.innerHTML = html;
+
+    container.querySelectorAll('tr[data-var]').forEach(tr => {
+      tr.addEventListener('click', () => {
+        showVarDetail(tr.dataset.var);
+        showVarInlineDetail(tr.dataset.var);
+      });
+    });
+
+    const filterInput = document.getElementById('var-filter');
+    if (filterInput) {
+      filterInput.addEventListener('input', () => {
+        const q = filterInput.value.toLowerCase();
+        container.querySelectorAll('tr[data-var]').forEach(tr => {
+          tr.style.display = tr.dataset.var.toLowerCase().includes(q) ? '' : 'none';
+        });
+      });
+    }
+  }
+
+  function showVarInlineDetail(varName) {
+    const v = varMap[varName];
+    if (!v) return;
+    const area = document.getElementById('var-detail-area');
+    if (!area) return;
+    area.style.display = 'block';
+    let html = '<h3 style="margin-bottom:8px">$(' + esc(v.name) + ') — Event Timeline</h3>';
+    html += '<ul class="event-timeline">';
+    v.events.forEach(evt => {
+      html += '<li><span class="event-op">' + esc(evt.operator) + '</span> '
+        + '<span class="event-source">' + esc(evt.source.file) + ':' + evt.source.line + '</span>'
+        + ' [scope: ' + esc(evt.scope) + ']'
+        + '<br>value: <code>' + esc(evt.raw_value) + '</code>';
+      if (evt.resolved_value != null) {
+        html += ' → <code>' + esc(evt.resolved_value) + '</code>';
+      }
+      html += '</li>';
+    });
+    html += '</ul>';
+    if (v.used_by.length) {
+      html += '<p style="margin-top:8px"><strong>Used by:</strong> '
+        + v.used_by.map(u => {
+          if (nodeMap[u]) return '<a class="node-link" data-id="' + esc(u) + '">' + esc(u) + '</a>';
+          return esc(u);
+        }).join(', ') + '</p>';
+    }
+    area.innerHTML = html;
+    area.querySelectorAll('.node-link').forEach(el => {
+      el.addEventListener('click', () => showNodeDetail(el.dataset.id));
+    });
+  }
+
+  // --- File Map ---
+  function renderFileMap() {
+    const container = document.getElementById('file-map');
+    let html = '<h2>File Map</h2>';
+    html += '<ul class="file-tree">';
+    REPORT.files.forEach(f => {
+      const statusCls = 'file-status-' + f.status;
+      html += '<li><div class="file-item">'
+        + '<span>' + esc(f.path) + '</span>'
+        + ' <span class="file-status ' + statusCls + '">' + esc(f.status) + '</span>'
+        + ' <span class="tag">' + esc(f.kind) + '</span>'
+        + '</div></li>';
+    });
+    html += '</ul>';
+
+    // Include/invokes edges as tree
+    const incEdges = REPORT.edges.filter(e => e.kind === 'includes' || e.kind === 'invokes');
+    if (incEdges.length) {
+      html += '<h3 style="margin-top:16px">Include/Invocation Graph</h3><ul class="file-tree">';
+      incEdges.forEach(e => {
+        html += '<li><div class="file-item">'
+          + esc(e.src) + ' <span class="tag">' + esc(e.kind) + '</span> → ' + esc(e.dst)
+          + '</div></li>';
+      });
+      html += '</ul>';
+    }
+
+    // All diagnostics
+    if (REPORT.diagnostics.length) {
+      html += '<div class="diag-list"><h3 style="margin:16px 0 8px">All Diagnostics</h3>';
+      REPORT.diagnostics.forEach(d => {
+        html += '<div class="diag-item ' + d.severity + '">'
+          + '<span class="diag-sev">' + d.severity + '</span>'
+          + '<span>' + esc(d.message);
+        if (d.source) html += ' (' + esc(d.source.file) + ':' + d.source.line + ')';
+        html += '</span></div>';
+      });
+      html += '</div>';
+    }
+    container.innerHTML = html;
+  }
+
+  // --- Global Search ---
+  const searchInput = document.getElementById('global-search');
+  const searchResults = document.getElementById('search-results');
+  searchInput.addEventListener('input', () => {
+    const q = searchInput.value.toLowerCase().trim();
+    if (!q) { searchResults.classList.remove('open'); return; }
+    let results = [];
+    REPORT.nodes.forEach(n => {
+      if (n.name.toLowerCase().includes(q) || n.id.toLowerCase().includes(q)) {
+        results.push({ type: n.kind, label: n.name, action: () => { switchToView('graph'); showNodeDetail(n.id); } });
+      }
+    });
+    REPORT.variables.forEach(v => {
+      if (v.name.toLowerCase().includes(q)) {
+        results.push({ type: 'variable', label: '$(' + v.name + ')', action: () => { switchToView('variables'); showVarDetail(v.name); showVarInlineDetail(v.name); } });
+      }
+    });
+    REPORT.files.forEach(f => {
+      if (f.path.toLowerCase().includes(q)) {
+        results.push({ type: 'file', label: f.path, action: () => switchToView('filemap') });
+      }
+    });
+    results = results.slice(0, 20);
+    if (results.length === 0) { searchResults.classList.remove('open'); return; }
+    searchResults.innerHTML = results.map((r, i) =>
+      '<div class="search-result" data-idx="' + i + '">'
+      + '<span class="sr-type">' + r.type + '</span> ' + esc(r.label) + '</div>'
+    ).join('');
+    searchResults.classList.add('open');
+    searchResults.querySelectorAll('.search-result').forEach((el, i) => {
+      el.addEventListener('click', () => {
+        results[i].action();
+        searchResults.classList.remove('open');
+        searchInput.value = '';
+      });
+    });
+  });
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.search-box')) searchResults.classList.remove('open');
+  });
+
+  function switchToView(name) {
+    tabs.forEach(t => {
+      t.classList.toggle('active', t.dataset.view === name);
+    });
+    views.forEach(v => {
+      const match = v.id === 'view-' + name;
+      v.style.display = match ? (name === 'graph' ? 'flex' : 'block') : 'none';
+    });
+    if (name === 'graph') requestAnimationFrame(layoutGraph);
+  }
+
+  // --- Var ref highlighting ---
+  function highlightVarRefs(text) {
+    return text.replace(/\$\(([A-Za-z_][A-Za-z0-9_]*)\)|\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g,
+      (match, g1, g2) => {
+        const name = g1 || g2;
+        return '<a class="var-link var-ref" data-name="' + esc(name) + '">' + match + '</a>';
+      });
+  }
+
+  function esc(s) {
+    if (s == null) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  // Init
+  renderCatalog();
+  renderVariables();
+  renderFileMap();
+  requestAnimationFrame(layoutGraph);
+})();
+</script>
+</body>
+</html>

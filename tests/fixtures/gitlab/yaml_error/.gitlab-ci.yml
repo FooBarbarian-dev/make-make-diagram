@@ -1,0 +1,12 @@
+stages:
+  - build
+  - test
+
+build_job:
+  stage: build
+  script:
+    - echo "build"
+
+  bad_indent:
+   - this: is
+  wrong: yaml: syntax: [unterminated

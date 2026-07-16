@@ -1,0 +1,7 @@
+## Compile step
+compile_job:
+  stage: build
+  script:
+    - gcc -o app main.c
+  variables:
+    CC: gcc
