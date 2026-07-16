@@ -1,0 +1,13 @@
+stages:
+  - build
+  - test
+
+include:
+  - local: 'ci/build.yml'
+  - project: 'other/repo'
+    file: 'templates/test.yml'
+
+build_job:
+  stage: build
+  script:
+    - echo "building"

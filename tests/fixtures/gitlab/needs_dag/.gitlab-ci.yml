@@ -1,0 +1,37 @@
+stages:
+  - build
+  - test
+  - deploy
+
+build_a:
+  stage: build
+  script:
+    - echo "build a"
+
+build_b:
+  stage: build
+  script:
+    - echo "build b"
+
+test_a:
+  stage: test
+  script:
+    - echo "test a"
+  needs:
+    - build_a
+
+test_b:
+  stage: test
+  script:
+    - echo "test b"
+  needs:
+    - build_a
+    - build_b
+
+deploy:
+  stage: deploy
+  script:
+    - echo "deploy"
+  needs:
+    - test_a
+    - test_b

@@ -1,0 +1,28 @@
+stages:
+  - build
+  - test
+
+.base:
+  image: alpine:latest
+  before_script:
+    - echo "base setup"
+  variables:
+    ENV: production
+
+.build_base:
+  extends: .base
+  stage: build
+  variables:
+    BUILD_TYPE: release
+
+build_job:
+  extends: .build_base
+  script:
+    - make build
+
+## Test with undefined parent
+test_job:
+  extends: .undefined_parent
+  stage: test
+  script:
+    - make test

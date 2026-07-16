@@ -1,0 +1,37 @@
+stages:
+  - build
+  - deploy
+
+variables:
+  DEPLOY_ENV: staging
+
+build_job:
+  stage: build
+  script:
+    - make build
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+      when: always
+    - when: manual
+
+deploy_staging:
+  stage: deploy
+  script:
+    - ./deploy.sh staging
+  when: manual
+  allow_failure: true
+  only:
+    - main
+  variables:
+    TARGET: staging
+
+deploy_prod:
+  stage: deploy
+  script:
+    - ./deploy.sh prod
+  when: manual
+  allow_failure: false
+  except:
+    - develop
+  trigger:
+    project: downstream/pipeline

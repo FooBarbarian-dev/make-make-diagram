@@ -1,0 +1,34 @@
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  APP_NAME: myapp
+  VERSION: "1.0"
+
+## Build the application
+build_job:
+  stage: build
+  image: gcc:latest
+  script:
+    - make build
+  tags:
+    - docker
+
+## Run tests
+test_job:
+  stage: test
+  script:
+    - make test
+  needs:
+    - build_job
+
+deploy_job:
+  stage: deploy
+  script:
+    - ./deploy.sh
+  when: manual
+  allow_failure: true
+  needs:
+    - test_job

@@ -1,0 +1,24 @@
+stages:
+  - build
+  - test
+
+.build_template:
+  stage: build
+  image: gcc:latest
+  before_script:
+    - echo "setup"
+
+.test_template:
+  stage: test
+  before_script:
+    - echo "test setup"
+
+build_app:
+  extends: .build_template
+  script:
+    - make build
+
+test_app:
+  extends: .test_template
+  script:
+    - make test
