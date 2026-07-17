@@ -1,6 +1,3 @@
-import os
-import json
-import pytest
 from pathlib import Path
 
 from pipeview.parsers.make_parser import parse_makefile
@@ -129,13 +126,13 @@ class TestConditionals:
         assert cflags is not None
         assert len(cflags.events) >= 2
 
-    def test_conditional_diagnostics(self):
+    def test_conditional_annotations_on_events(self):
+        # Conditional context rides on the variable event itself now, not on a
+        # noisy per-assignment info diagnostic.
         r = parse_makefile(str(FIXTURES / "conditionals" / "Makefile"))
-        cond_diags = [
-            d for d in r.diagnostics
-            if "condition" in d.message.lower()
-        ]
-        assert len(cond_diags) > 0
+        cflags = next(v for v in r.variables if v.name == "CFLAGS")
+        conds = [e.annotations.get("condition") for e in cflags.events]
+        assert any(c and "ifeq" in c for c in conds)
 
 
 class TestDocstrings:

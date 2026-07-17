@@ -4,8 +4,12 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-
-SCHEMA_VERSION = 1
+# Schema history:
+#   1 — initial model.
+#   2 — parser-audit pass: VariableEvent.annotations (exported/override/private/
+#       condition/inherited_from/…), Variable.exported, Variable.origin,
+#       Report.annotations (workflow_rules banner et al).
+SCHEMA_VERSION = 2
 
 
 @dataclass
@@ -28,6 +32,10 @@ class VariableEvent:
     scope: str
     raw_value: str
     resolved_value: str | None = None
+    # Event-level semantics the operator alone can't carry: exported/override/
+    # private marks, the conditional guard the assignment sits under, extends
+    # inheritance provenance, YAML-coercion notes. Format-neutral by contract.
+    annotations: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -36,6 +44,7 @@ class VariableEvent:
             "scope": self.scope,
             "raw_value": self.raw_value,
             "resolved_value": self.resolved_value,
+            "annotations": self.annotations,
         }
 
     @classmethod
@@ -46,6 +55,7 @@ class VariableEvent:
             scope=d["scope"],
             raw_value=d["raw_value"],
             resolved_value=d.get("resolved_value"),
+            annotations=d.get("annotations", {}),
         )
 
 
@@ -54,12 +64,23 @@ class Variable:
     name: str
     events: list[VariableEvent] = field(default_factory=list)
     used_by: list[str] = field(default_factory=list)
+    # True when the variable is passed into recipe/child-process environments
+    # (Make `export`, `.EXPORT_ALL_VARIABLES`; the event that set it carries
+    # annotations["exported"]).
+    exported: bool = False
+    # Where the value actually comes from: "makefile" | "environment" |
+    # "command line" | "default" | "override" | "automatic" (make -p origins),
+    # or the static labels "built-in default" (CC/RM/… referenced but never
+    # assigned) and "predefined" (GitLab CI_*/GITLAB_* runner variables).
+    origin: str | None = None
 
     def to_dict(self) -> dict:
         return {
             "name": self.name,
             "events": [e.to_dict() for e in self.events],
             "used_by": self.used_by,
+            "exported": self.exported,
+            "origin": self.origin,
         }
 
     @classmethod
@@ -68,6 +89,8 @@ class Variable:
             name=d["name"],
             events=[VariableEvent.from_dict(e) for e in d["events"]],
             used_by=d.get("used_by", []),
+            exported=d.get("exported", False),
+            origin=d.get("origin"),
         )
 
 
@@ -192,6 +215,9 @@ class Report:
     files: list[SourceFile] = field(default_factory=list)
     diagnostics: list[Diagnostic] = field(default_factory=list)
     default_goal: str | None = None
+    # Report-level semantics that gate or reframe the whole pipeline, e.g.
+    # workflow_rules (GitLab `workflow:rules` summary) — rendered as a banner.
+    annotations: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict:
         return {
@@ -206,6 +232,7 @@ class Report:
             "files": [f.to_dict() for f in self.files],
             "diagnostics": [d.to_dict() for d in self.diagnostics],
             "default_goal": self.default_goal,
+            "annotations": self.annotations,
         }
 
     def to_json(self, **kwargs: Any) -> str:
@@ -225,6 +252,7 @@ class Report:
             files=[SourceFile.from_dict(f) for f in d.get("files", [])],
             diagnostics=[Diagnostic.from_dict(diag) for diag in d.get("diagnostics", [])],
             default_goal=d.get("default_goal"),
+            annotations=d.get("annotations", {}),
         )
 
     @classmethod

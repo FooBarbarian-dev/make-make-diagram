@@ -1,4 +1,3 @@
-import pytest
 from pathlib import Path
 
 from pipeview.parsers.gitlab_parser import parse_gitlab
@@ -105,10 +104,12 @@ class TestExtendsChain:
         assert build.annotations.get("image") == "alpine:latest"
 
     def test_inherited_variables(self):
+        # Inheritance provenance rides on the event's annotations now; the
+        # operator stays "job" because that is what the flattened config says.
         r = parse_gitlab(str(FIXTURES / "extends_chain" / ".gitlab-ci.yml"))
         env_var = next((v for v in r.variables if v.name == "ENV"), None)
         assert env_var is not None
-        inherited = [e for e in env_var.events if e.operator == "extends-inherited"]
+        inherited = [e for e in env_var.events if e.annotations.get("inherited_from")]
         assert len(inherited) >= 1
 
 

@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import json
-import os
-from typing import Any
-
-from pipeview.model import Report, Edge, Node
+from pipeview.model import Edge, Node, Report
 
 _EDGE_STYLE = {
     "prerequisite": "solid",
@@ -147,7 +143,8 @@ def export_svg(report: Report, path: str) -> None:
     svg_lines = [
         f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {svg_w} {svg_h}" '
         f'width="{svg_w}" height="{svg_h}" style="font-family:sans-serif;font-size:12px;">',
-        '<defs><marker id="arrow" markerWidth="10" markerHeight="7" refX="10" refY="3.5" orient="auto">'
+        '<defs><marker id="arrow" markerWidth="10" markerHeight="7" '
+        'refX="10" refY="3.5" orient="auto">'
         '<polygon points="0 0, 10 3.5, 0 7" fill="#666"/></marker></defs>',
     ]
 
@@ -235,7 +232,9 @@ def _escape_mmd(s: str) -> str:
 
 
 def _mmd_id(s: str) -> str:
-    return s.replace(":", "_").replace("/", "_").replace(".", "_").replace("-", "_").replace(" ", "_")
+    for ch in ":/.-  ":
+        s = s.replace(ch, "_")
+    return s
 
 
 def _escape_svg(s: str) -> str:

@@ -168,6 +168,13 @@ code { font-family: var(--font-mono); font-size: var(--fs-1); }
 .codeblock.soft-wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
 .codeblock .var-ref { color: var(--accent); cursor: pointer; }
 .codeblock .var-ref:hover { text-decoration: underline; }
+/* hover-explained code glyphs: dotted underline signals "there's a meaning here" */
+.codeblock .auto-var,
+.codeblock .recipe-prefix {
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 2px;
+  cursor: help;
+}
 
 /* ============================================================
    Shared components
@@ -244,7 +251,11 @@ a.loc:hover, .loc.loc-link:hover { color: var(--accent); text-decoration: underl
   font: 400 var(--fs-0) var(--font-ui);
   padding: 3px 8px;
   border-radius: var(--radius-sm);
-  white-space: nowrap;
+  /* short tips stay one line; sentence-length tips wrap instead of
+     escaping the viewport (overflow policy) */
+  white-space: normal;
+  width: max-content;
+  max-width: 280px;
   z-index: 200;
   pointer-events: none;
 }
@@ -564,6 +575,7 @@ td .btn.copy-btn { min-height: var(--hit); }
 .tl-scope { font-size: var(--fs-0); color: var(--text-muted); }
 .tl-head .loc { margin-left: auto; }
 .tl-value { font-family: var(--font-mono); font-size: var(--fs-1); overflow-wrap: anywhere; }
+.tl-note { margin-top: 2px; font-size: var(--fs-0); color: var(--text-muted); overflow-wrap: anywhere; }
 .tl-diff { margin-top: 2px; font-family: var(--font-mono); font-size: var(--fs-1); }
 .tl-diff del {
   background: var(--error-bg); color: var(--error);
@@ -618,6 +630,16 @@ td .btn.copy-btn { min-height: var(--hit); }
   font-size: var(--fs-1);
   max-width: 860px;
 }
+/* Report-level banner: same visual language as an info diagnostic. */
+.report-banner {
+  background: var(--info-bg);
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  padding: var(--sp-2) var(--sp-4);
+  font-size: var(--fs-1);
+}
+.report-banner .diag-sev { color: var(--info); font-weight: 700; margin-right: var(--sp-2); }
+.report-banner code { background: transparent; }
 .diag-item.info    { background: var(--info-bg); }
 .diag-item.warning { background: var(--warn-bg); }
 .diag-item.error   { background: var(--error-bg); }
@@ -716,6 +738,10 @@ kbd {
   <button class="tab" role="tab" id="tab-variables" aria-controls="view-variables" data-view="variables">Variables<span class="tab-count" id="count-variables"></span></button>
   <button class="tab" role="tab" id="tab-filemap" aria-controls="view-filemap" data-view="filemap">Files<span class="tab-count" id="count-filemap"></span></button>
 </nav>
+
+<!-- Report-level gate (e.g. GitLab workflow:rules): shown on every view so
+     "why didn't my pipeline run" is never buried. -->
+<div class="report-banner" id="report-banner" hidden></div>
 
 <div class="main panel-closed" id="main">
   <div class="content">
@@ -821,8 +847,21 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     (n.kind === 'job' && (!n.flags || n.flags.indexOf('template') < 0));
   const tasks = REPORT.nodes.filter(isTask);
 
-  const FLAG_LABELS = { default_goal: 'default goal', allow_failure: 'allow failure' };
+  const FLAG_LABELS = {
+    default_goal: 'default goal', allow_failure: 'allow failure',
+    starts_immediately: 'starts immediately', parallel: 'parallel'
+  };
+  const FLAG_TIPS = {
+    starts_immediately: 'needs: [] — runs as soon as the pipeline starts, ignoring stage order',
+    parallel: 'one definition expands to several jobs',
+    delayed: 'starts after a configured delay',
+    manual: 'runs only when a person triggers it',
+    allow_failure: 'a failure does not fail the pipeline'
+  };
   const flagLabel = f => FLAG_LABELS[f] || f.replace(/_/g, ' ');
+  const flagChip = f => '<span class="chip"'
+    + (FLAG_TIPS[f] ? ' data-tip="' + esc(FLAG_TIPS[f]) + '"' : '')
+    + '>' + esc(flagLabel(f)) + '</span>';
   const KIND_LABELS = {
     target: 'target', pattern_rule: 'pattern rule', job: 'job',
     stage: 'stage', ghost: 'unresolved reference'
@@ -908,6 +947,21 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   /* ==========================================================
      Header
      ========================================================== */
+  // Report-level banner (GitLab workflow:rules pipeline gate).
+  (function () {
+    const ann = REPORT.annotations || {};
+    const rules = ann.workflow_rules;
+    if (!rules || !rules.length) return;
+    const el = document.getElementById('report-banner');
+    el.hidden = false;
+    el.innerHTML = '<span class="diag-sev">ⓘ Pipeline gate</span>'
+      + '<span class="wrap-any">'
+      + (ann.workflow_name ? 'workflow "' + esc(ann.workflow_name) + '" — ' : '')
+      + 'this pipeline runs only when: '
+      + rules.map(r => '<code>' + esc(r) + '</code>').join(' · ')
+      + '</span>';
+  })();
+
   const headerRoot = document.getElementById('header-root');
   headerRoot.textContent = midTruncPath(REPORT.root || '', 52);
   headerRoot.title = REPORT.root || '';
@@ -1099,13 +1153,50 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     return found;
   }
 
+  // Automatic variables: recognized, tooltipped with their meaning, and never
+  // treated as user variables. Keys are the raw (pre-escape) glyphs.
+  const AUTO_VAR_TIPS = {
+    '@': 'the target of this rule',
+    '<': 'the first prerequisite',
+    '^': 'all prerequisites (duplicates removed)',
+    '?': 'prerequisites newer than the target',
+    '*': 'the pattern stem (% match)',
+    '+': 'all prerequisites, duplicates kept',
+    '|': 'the order-only prerequisites'
+  };
+  function markAutoVars(escapedLine) {
+    // runs on escaped text, so `<` appears as `&lt;`
+    return escapedLine.replace(/\$\((@|&lt;|\^|\?|\*|\+|\|)([DF])\)|\$(@|&lt;|\^|\?|\*|\+|\|)/g,
+      (match, pg, pdf, bare) => {
+        const glyph = (pg || bare) === '&lt;' ? '<' : (pg || bare);
+        let tip = AUTO_VAR_TIPS[glyph] || '';
+        if (pdf === 'D') tip = 'directory part of ' + tip;
+        if (pdf === 'F') tip = 'file part of ' + tip;
+        return '<span class="auto-var" title="automatic variable — ' + esc(tip) + '">' + match + '</span>';
+      });
+  }
+
   function linkifyVarRefs(escapedLine) {
-    return escapedLine.replace(/\$[({]([A-Za-z_][A-Za-z0-9_]*)[)}]|\$([A-Za-z_][A-Za-z0-9_]*)/g,
+    const linked = escapedLine.replace(/\$[({]([A-Za-z_][A-Za-z0-9_.\-]*)[)}]|\$([A-Za-z_][A-Za-z0-9_]*)/g,
       (match, g1, g2) => {
         const name = g1 || g2;
         if (!varMap[name]) return match;
         return '<span class="var-ref" role="link" tabindex="0" data-var="' + esc(name) + '">' + match + '</span>';
       });
+    return markAutoVars(linked);
+  }
+
+  // Recipe-line prefixes @ / - / + (Make): strip nothing, explain on hover.
+  const RECIPE_PREFIX_TIPS = {
+    '@': '@ — this line is not echoed',
+    '-': '- — errors from this line are ignored',
+    '+': "+ — runs even under 'make -n' (dry run)"
+  };
+  function markRecipePrefixes(escapedLine) {
+    return escapedLine.replace(/^([@+-]+)/, run =>
+      run.split('').map(ch =>
+        '<span class="recipe-prefix" title="' + esc(RECIPE_PREFIX_TIPS[ch] || ch) + '">' + ch + '</span>'
+      ).join(''));
   }
 
   function invocationFor(node) {
@@ -1126,15 +1217,21 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     html += '<div class="panel-section"><div class="panel-idrow">'
       + '<span class="chip ' + (node.kind === 'ghost' ? 'chip-ghost' : 'chip-accent') + '">'
       + esc(KIND_LABELS[node.kind] || node.kind) + '</span>'
-      + (node.flags || []).map(f => '<span class="chip">' + esc(flagLabel(f)) + '</span>').join('')
+      + (node.flags || []).map(flagChip).join('')
       + '</div>'
       + (node.source ? '<div class="value">' + locHtml(node.source) + '</div>' : '')
       + '</div>';
 
     if (node.kind === 'ghost') {
+      const ref = node.annotations && node.annotations.external_reference;
       html += '<div class="panel-section"><div class="value wrap-any" style="color:var(--text-muted)">'
-        + 'This name is referenced as a dependency but never defined in the parsed files. '
-        + 'It may be a real file on disk, or a missing rule.</div></div>';
+        + (ref
+            ? 'Referenced via <code>' + esc(ref) + '</code> but defined outside the '
+              + 'parsed files — most likely in an include pipeview cannot fetch. '
+              + 'The referencing job still parsed completely.'
+            : 'This name is referenced as a dependency but never defined in the parsed files. '
+              + 'It may be a real file on disk, or a missing rule.')
+        + '</div></div>';
     }
 
     if (node.doc) {
@@ -1150,11 +1247,18 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }
 
     if (node.recipe && node.recipe.length) {
+      const hasPrefixes = node.annotations && node.annotations.recipe_prefixes;
+      const oneshell = node.annotations && node.annotations.oneshell;
       html += '<div class="panel-section"><h3>' + (node.kind === 'job' ? 'Script' : 'Recipe')
+        + (oneshell ? ' <span class="chip" data-tip=".ONESHELL — all lines run in one shell invocation, not one shell per line">one shell</span>' : '')
         + '<span class="section-action">'
         + '<button class="btn btn-quiet wrap-toggle" aria-pressed="false" data-tip="Toggle soft wrapping">Wrap</button>'
         + '</span></h3>'
-        + '<div class="codeblock">' + node.recipe.map(r => linkifyVarRefs(esc(r))).join('\n') + '</div></div>';
+        + '<div class="codeblock">' + node.recipe.map(r => {
+            let line = linkifyVarRefs(esc(r));
+            if (hasPrefixes) line = markRecipePrefixes(line);
+            return line;
+          }).join('\n') + '</div></div>';
     }
 
     const usedVars = varRefsInRecipe(node);
@@ -1186,12 +1290,29 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         + inEdges.map(edgeItem).join('') + '</ul></div>';
     }
 
-    if (node.annotations && Object.keys(node.annotations).length) {
+    // recipe_prefixes/oneshell are surfaced inline on the recipe itself.
+    const detailKeys = Object.keys(node.annotations || {})
+      .filter(k => k !== 'recipe_prefixes' && k !== 'oneshell');
+    if (detailKeys.length) {
+      const annValue = v => {
+        if (Array.isArray(v)) return v.map(x => esc(String(x))).join('<br>');
+        if (v && typeof v === 'object') {
+          return Object.keys(v).map(k2 => {
+            const inner = v[k2];
+            const shownInner = (inner && typeof inner === 'object')
+              ? Object.keys(inner).map(k3 => esc(k3) + ': ' + esc(
+                  Array.isArray(inner[k3]) ? inner[k3].join(', ') : String(inner[k3])
+                )).join('; ')
+              : esc(Array.isArray(inner) ? inner.join(', ') : String(inner));
+            return esc(k2.replace(/_/g, ' ')) + ': ' + shownInner;
+          }).join('<br>');
+        }
+        return esc(String(v));
+      };
       html += '<div class="panel-section"><h3>Details</h3><dl class="kv-list">';
-      Object.keys(node.annotations).forEach(k => {
-        const v = node.annotations[k];
-        const shown = Array.isArray(v) ? v.map(x => esc(String(x))).join('<br>') : esc(String(v));
-        html += '<dt>' + esc(k.replace(/_/g, ' ')) + '</dt><dd>' + shown + '</dd>';
+      detailKeys.forEach(k => {
+        html += '<dt>' + esc(k.replace(/_/g, ' ')) + '</dt><dd class="wrap-any">'
+          + annValue(node.annotations[k]) + '</dd>';
       });
       html += '</dl></div>';
     }
@@ -1216,6 +1337,44 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     return evt.resolved_value != null ? evt.resolved_value : evt.raw_value;
   }
 
+  const ORIGIN_TIPS = {
+    'makefile': 'assigned in a makefile',
+    'environment': 'value comes from the environment make runs in',
+    'command line': 'set on the make command line — beats makefile assignments (except override)',
+    'default': "one of make's built-in default variables",
+    'built-in default': "referenced but never assigned here — make supplies a built-in default",
+    'automatic': 'computed by make per rule',
+    'override': 'set with the override directive — beats command-line values',
+    'predefined': 'provided by the GitLab runner for every job'
+  };
+
+  // Event-level semantics carried in annotations: shown as small chips /
+  // notes on the timeline event.
+  function eventAnnotationsHtml(evt) {
+    const a = evt.annotations || {};
+    let chips = '';
+    if (a.export) chips += '<span class="chip chip-ok" data-tip="this assignment also exports the variable to recipe environments">exported</span>';
+    if (a.unexported) chips += '<span class="chip" data-tip="removed from recipe environments">unexported</span>';
+    if (a.override) chips += '<span class="chip chip-warn" data-tip="override directive — this assignment beats values given on the command line">override</span>';
+    if (a.private) chips += '<span class="chip" data-tip="private — not inherited by the target’s prerequisites">private</span>';
+    if (a.define) chips += '<span class="chip" data-tip="multi-line define … endef block">define</span>';
+    if (a.undefine) chips += '<span class="chip chip-warn" data-tip="undefine — the variable is removed from this point on">undefine</span>';
+    if (a.shell_assignment) chips += '<span class="chip" data-tip="!= shell assignment — the value is this command’s output at run time; pipeview never executes it">shell</span>';
+    if (a.computed_name) chips += '<span class="chip chip-warn" data-tip="the variable’s name is itself computed at run time">computed name</span>';
+    if (a.matrix_axis) chips += '<span class="chip chip-info" data-tip="parallel:matrix axis — each listed value becomes one job">matrix axis</span>';
+    let notes = '';
+    if (a.condition) notes += '<div class="tl-note">under condition: <code>' + esc(a.condition) + '</code></div>';
+    if (a.pattern) notes += '<div class="tl-note">applies to targets matching <code>' + esc(a.pattern) + '</code></div>';
+    if (a.propagates_to_prereqs) notes += '<div class="tl-note" data-tip="target-specific values are inherited by the target’s prerequisites — a frequent surprise">also applies to this target’s prerequisites</div>';
+    if (a.inherited_from) notes += '<div class="tl-note">inherited via extends from <code>' + esc(a.inherited_from) + '</code></div>';
+    if (a.rule) notes += '<div class="tl-note">only when rule matches: <code>' + esc(a.rule) + '</code></div>';
+    if (a.yaml_coercion) notes += '<div class="tl-note">' + esc(a.yaml_coercion) + ' — GitLab passes the quoted string shown here</div>';
+    if (a.via_reference) notes += '<div class="tl-note">value spliced from <code>' + esc(a.via_reference) + '</code></div>';
+    if (a.external_reference) notes += '<div class="tl-note">value defined externally via <code>' + esc(a.external_reference) + '</code></div>';
+    if (a.description) notes += '<div class="tl-note">description: ' + esc(a.description) + '</div>';
+    return { chips: chips, notes: notes };
+  }
+
   function showVarDetail(varName) {
     const v = varMap[varName];
     if (!v) return;
@@ -1227,13 +1386,24 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     const last = v.events.length ? v.events[v.events.length - 1] : null;
     html += '<div class="panel-section"><div class="panel-idrow">'
       + '<span class="chip chip-accent">variable</span>'
-      + (last ? '' : '<span class="chip chip-warn">unresolved</span>')
+      + (v.exported ? '<span class="chip chip-ok" data-tip="passed into recipe environments">exported</span>' : '')
+      + (v.origin ? '<span class="chip chip-info" data-tip="' + esc(ORIGIN_TIPS[v.origin] || '') + '">' + esc(v.origin) + '</span>' : '')
+      + (last || v.origin ? '' : '<span class="chip chip-warn">unresolved</span>')
       + '</div></div>';
 
     if (last) {
       html += '<div class="panel-section"><h3>Current value'
         + '<span class="section-action"><button class="btn copy-btn" data-copy="' + esc(effectiveValue(last)) + '">Copy</button></span></h3>'
         + '<div class="codeblock soft-wrap">' + esc(effectiveValue(last)) + '</div></div>';
+    } else if (v.origin === 'built-in default' || v.origin === 'default') {
+      html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
+        + 'Never assigned in the parsed files — make supplies a built-in default for this variable.</div></div>';
+    } else if (v.origin === 'predefined') {
+      html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
+        + 'A GitLab predefined variable: the runner provides its value for every job.</div></div>';
+    } else if (v.origin === 'environment') {
+      html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
+        + 'The value comes from the environment make runs in.</div></div>';
     } else {
       html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
         + 'No assignment was found in the parsed files. The value likely comes from the '
@@ -1246,9 +1416,11 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         const prev = i > 0 ? effectiveValue(v.events[i - 1]) : null;
         const cur = effectiveValue(evt);
         const isFinal = i === v.events.length - 1;
+        const ann = eventAnnotationsHtml(evt);
         html += '<li class="tl-event' + (isFinal ? ' tl-final' : '') + '">'
           + '<div class="tl-head">'
           + '<span class="op-badge">' + esc(evt.operator) + '</span>'
+          + ann.chips
           + '<span class="tl-scope">' + esc(evt.scope) + '</span>'
           + locHtml(evt.source, { max: 26 })
           + '</div>';
@@ -1261,6 +1433,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
             html += '<div class="tl-diff"><span class="tl-arrow">resolves to</span> <ins>' + esc(evt.resolved_value) + '</ins></div>';
           }
         }
+        html += ann.notes;
         html += '</li>';
       });
       html += '</ol></div>';
@@ -1647,7 +1820,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         : (isMake
             ? 'No description yet — a <code>##</code> comment above the rule will appear here.'
             : 'No description.');
-      const flags = (n.flags || []).map(f => '<span class="chip">' + esc(flagLabel(f)) + '</span>').join(' ');
+      const flags = (n.flags || []).map(flagChip).join(' ');
       html += '<tr data-id="' + esc(n.id) + '" tabindex="0">'
         + '<td class="cell-name"><span class="clip" style="display:block" title="' + esc(n.name) + '">' + esc(n.name) + '</span></td>'
         + '<td class="cell-doc' + (n.doc ? '' : ' no-doc') + '">' + doc + '</td>'
@@ -1724,11 +1897,19 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
 
     rows.forEach(v => {
       const val = varCurrentValue(v);
+      // A variable make/GitLab itself supplies is not "unresolved" — its
+      // origin chip says where the value actually comes from.
       const valCell = val == null
-        ? '<span class="chip chip-warn">unresolved</span>'
+        ? (v.origin
+            ? '<span class="chip chip-info" data-tip="' + esc(ORIGIN_TIPS[v.origin] || 'value supplied by the tool') + '">' + esc(v.origin) + '</span>'
+            : '<span class="chip chip-warn" data-tip="No assignment found in the parsed files; the value likely arrives from the environment at run time">unresolved</span>')
         : '<span class="clip" style="display:block" title="' + esc(val) + '"><code>' + esc(val) + '</code></span>';
+      const nameChips =
+        (v.exported ? ' <span class="chip chip-ok" title="exported — passed into recipe environments">exported</span>' : '')
+        + (v.origin && val != null ? ' <span class="chip chip-info" title="' + esc(ORIGIN_TIPS[v.origin] || '') + '">' + esc(v.origin) + '</span>' : '');
       html += '<tr data-var="' + esc(v.name) + '" tabindex="0">'
-        + '<td class="cell-name"><span class="clip" style="display:block" title="' + esc(v.name) + '"><code>' + esc(v.name) + '</code></span></td>'
+        + '<td class="cell-name"><span style="display:flex;align-items:center;gap:6px;min-width:0">'
+        + '<span class="clip" title="' + esc(v.name) + '"><code>' + esc(v.name) + '</code></span>' + nameChips + '</span></td>'
         + '<td class="cell-value">' + valCell + '</td>'
         + '<td class="num">' + v.events.length + '</td>'
         + '<td class="num">' + v.used_by.length + '</td>'

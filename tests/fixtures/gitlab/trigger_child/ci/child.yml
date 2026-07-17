@@ -1,0 +1,2 @@
+child_job:
+  script: [echo child work]

@@ -89,7 +89,7 @@ class TestCliMake:
         json_path = os.path.join(tmpdir, "Makefile.model.json")
         with open(json_path) as f:
             data = json.load(f)
-        assert data["schema_version"] == 1
+        assert data["schema_version"] == 2
         assert len(data["nodes"]) > 0
         assert data["format"] == "makefile"
 

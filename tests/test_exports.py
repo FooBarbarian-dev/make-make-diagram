@@ -5,9 +5,9 @@ from pathlib import Path
 
 import pytest
 
-from pipeview.parsers.make_parser import parse_makefile
 from pipeview.parsers.gitlab_parser import parse_gitlab
-from pipeview.render.exports import export_json, export_dot, export_mermaid, export_svg
+from pipeview.parsers.make_parser import parse_makefile
+from pipeview.render.exports import export_dot, export_json, export_mermaid, export_svg
 
 MAKE_FIXTURES = Path(__file__).parent / "fixtures" / "make"
 GITLAB_FIXTURES = Path(__file__).parent / "fixtures" / "gitlab"
@@ -35,7 +35,7 @@ class TestJsonExport:
         export_json(make_report, path)
         with open(path) as f:
             data = json.load(f)
-        assert data["schema_version"] == 1
+        assert data["schema_version"] == 2
         assert len(data["nodes"]) > 0
 
     def test_json_round_trips(self, make_report, tmpdir):
@@ -66,7 +66,12 @@ class TestDotExport:
         assert "dashed" in content
 
     def test_dot_ghost_nodes(self, tmpdir):
-        report = parse_makefile(str(MAKE_FIXTURES / "broken" / "Makefile"))
+        # minimal's main.c/utils.c are referenced but never defined as
+        # targets, so they stay ghosts and must render dashed. (The broken
+        # fixture no longer has ghosts: its `foo` is defined by a later rule,
+        # which now correctly upgrades the node from ghost to target.)
+        report = parse_makefile(str(MAKE_FIXTURES / "minimal" / "Makefile"))
+        assert any(n.kind == "ghost" for n in report.nodes)
         path = os.path.join(tmpdir, "graph.dot")
         export_dot(report, path)
         with open(path) as f:

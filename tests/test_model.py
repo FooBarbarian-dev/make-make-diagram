@@ -1,4 +1,3 @@
-import json
 from pipeview.model import (
     SCHEMA_VERSION,
     Diagnostic,
@@ -45,9 +44,12 @@ def _sample_report() -> Report:
                         scope="global",
                         raw_value="gcc",
                         resolved_value="gcc",
+                        annotations={"export": True, "condition": "ifeq (a,a)"},
                     ),
                 ],
                 used_by=["all"],
+                exported=True,
+                origin="makefile",
             ),
         ],
         files=[
@@ -62,6 +64,7 @@ def _sample_report() -> Report:
             ),
         ],
         default_goal="all",
+        annotations={"workflow_rules": ["if: $CI_COMMIT_BRANCH"]},
     )
 
 
@@ -171,3 +174,25 @@ class TestEmptyReport:
         assert restored.schema_version == SCHEMA_VERSION
         assert restored.nodes == []
         assert restored.default_goal is None
+
+
+class TestSchemaV1Compat:
+    def test_v1_json_still_loads(self):
+        # v1 payloads have no event annotations, exported/origin, or report
+        # annotations — from_dict must default them.
+        v1 = {
+            "schema_version": 1,
+            "nodes": [{"id": "a", "name": "a", "kind": "target"}],
+            "variables": [{
+                "name": "X",
+                "events": [{
+                    "source": {"file": "Makefile", "line": 1},
+                    "operator": "=", "scope": "global", "raw_value": "1",
+                }],
+            }],
+        }
+        r = Report.from_dict(v1)
+        assert r.variables[0].exported is False
+        assert r.variables[0].origin is None
+        assert r.variables[0].events[0].annotations == {}
+        assert r.annotations == {}

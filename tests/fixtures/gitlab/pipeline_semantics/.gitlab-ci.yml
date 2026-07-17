@@ -1,0 +1,42 @@
+workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+
+stages: [build, deploy]
+
+builder:
+  stage: build
+  script: [echo build]
+
+racer:
+  stage: deploy
+  needs: []
+  script: [echo go]
+
+waiter:
+  stage: deploy
+  needs:
+    - job: builder
+      optional: true
+      artifacts: false
+  dependencies: [builder]
+  script: [echo wait]
+
+stageless:
+  script: [echo where am i]
+
+wrong_stage:
+  stage: nonexistent
+  script: [echo x]
+
+fan_out:
+  stage: build
+  parallel:
+    matrix:
+      - PROVIDER: [aws, gcp]
+        REGION: [us, eu]
+  script: [echo $PROVIDER $REGION]
+
+pages:
+  stage: deploy
+  script: [mkdir public]

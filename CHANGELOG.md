@@ -2,7 +2,77 @@
 
 ## Unreleased
 
-Report UI overhaul (see `docs/ux-audit.md` for the full audit):
+Parser conformance pass (see `docs/parser-audit.md` for the full
+construct-by-construct matrix, verdicts, and accepted limitations). Model
+schema bumped to v2 (`VariableEvent.annotations`, `Variable.exported`,
+`Variable.origin`, `Report.annotations`); v1 JSON still loads.
+
+GNU Make parser:
+
+- Directive tokenization: `export`/`unexport`/`override`/`private`/
+  `undefine`/`define` peel off the front of a line in any stacking order —
+  `export VAR ?= value` is a variable event with an exported mark, not an
+  "Unparseable line" warning (the reported field failure), and
+  `export VAR := x` no longer silently fabricates rule nodes.
+- Assignment vs rule decided by reference-aware operator scanning, never by
+  the first colon: `URL := https://example.com`, `foo: PATH := /usr:/bin`,
+  the full operator set (`= := ::= :::= ?= += !=`), `\#` escapes, `$$`
+  shell forms, empty values with trailing comments.
+- Targets defined after first being referenced upgrade from ghost to real
+  nodes (the `all: build test` idiom no longer renders ghosts).
+- Static pattern rules (stem-substituted prerequisites), grouped targets
+  (`&:`), double-colon recipe accumulation, make-style "overriding recipe"
+  warnings, semicolon and explicit-empty recipes.
+- `.PHONY` with variables, `.DEFAULT_GOAL :=`, `.EXPORT_ALL_VARIABLES`,
+  `.ONESHELL`, `.SECONDEXPANSION` (named diagnostics), `.RECIPEPREFIX`
+  honored; special targets never become graph nodes.
+- Includes expand globs/`$(wildcard)` and simple `$(VAR)` paths; include and
+  sub-make cycles are named diagnostics; recursion detection understands
+  `${MAKE}`, `+$(MAKE)`, `cd dir && $(MAKE)`, `$(MAKE) -C $(VAR)`.
+- Built-in defaults (CC, RM, SHELL, …) labeled instead of "unresolved";
+  automatic variables excluded from the variable table and explained on
+  hover in recipes; enrichment now captures `make -p` variable origins.
+- CRLF/BOM tolerated; unclosed `define`/stray `endif` diagnosed; the
+  "Unparseable line" diagnosis is retired — if real make accepts a file,
+  an unparseable-class warning is treated as a pipeview bug (enforced by a
+  contract test).
+
+GitLab CI parser:
+
+- `!reference` tags handled by a SafeLoader subclass: local targets splice
+  per GitLab semantics; external targets (jobs from unfetchable includes)
+  degrade one value — placeholder + ghost + named diagnostic with the real
+  line — instead of erroring the whole file at line 1 (the reported field
+  failure).
+- Variable values keep the author's raw text (`yes`, `0777`, `12:30` no
+  longer display as `True`/`511`/`750`); ambiguous unquoted scalars get an
+  info note; hash-form variables parse value + description.
+- Duplicate mapping keys diagnosed (YAML's silent last-wins data loss).
+- `extends` follows GitLab's documented merge (hashes deep-merge, arrays
+  replace, later parents win); children inherit script/stage/needs;
+  replacement provenance shown ("script overrides `.base`"); cycles named.
+- `default:`, deprecated top-level defaults, `inherit:` opt-outs honored.
+- `needs: []` = "starts immediately" (no synthesized stage edges);
+  `dependencies:` treated as artifact flow, never ordering; default stage
+  list and `test` default for stage-less jobs; undeclared stages diagnosed
+  as the pipeline errors they are; `.pre`/`.post` ordering.
+- `pages` is a job again; `workflow:rules` becomes a report-level banner;
+  `parallel`/`parallel:matrix` render one node with expansion counts;
+  `environment`, `resource_group`, `retry`, `timeout`, `artifacts`, `cache`
+  surfaced; `trigger:include:local` child pipelines parsed as linked
+  sub-pipelines; `CI_*`/`GITLAB_*` labeled predefined; wildcard and
+  conditional includes; string-form scripts and nested script arrays.
+- Robustness: bool/int job keys no longer crash; multi-document files
+  salvage the first document; big-file parse time roughly halved.
+
+Report UI (existing component vocabulary only): exported/origin chips in
+the variable explorer, event-level chips and notes on the timeline,
+starts-immediately/parallel/delayed flags, matrix details, a pipeline-gate
+banner, and hover explanations for automatic variables and recipe-line
+prefixes.
+
+Also in this release — report UI overhaul (see `docs/ux-audit.md` for the
+full audit):
 
 - Repo-wide text overflow policy: ellipsis + full value on hover/in the
   detail panel for single-line contexts, horizontal scroll inside code

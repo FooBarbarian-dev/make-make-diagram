@@ -1,0 +1,9 @@
+generate:
+  stage: build
+  script: [echo gen]
+
+run_child:
+  trigger:
+    include:
+      - local: ci/child.yml
+    strategy: depend

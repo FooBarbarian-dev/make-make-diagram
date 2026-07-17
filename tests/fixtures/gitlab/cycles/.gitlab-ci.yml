@@ -1,0 +1,24 @@
+include:
+  - local: loop_a.yml
+
+.a:
+  extends: .b
+  image: a-img
+.b:
+  extends: .a
+  image: b-img
+
+cyclic_extends_user:
+  extends: .a
+  script: [echo hi]
+
+.ref_x:
+  script:
+    - !reference [.ref_y, script]
+.ref_y:
+  script:
+    - !reference [.ref_x, script]
+
+cyclic_ref_user:
+  script:
+    - !reference [.ref_x, script]

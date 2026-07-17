@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from pipeview.parsers.make_parser import parse_makefile
-from pipeview.parsers.gitlab_parser import parse_gitlab
-from pipeview.render.html import render_html
 from pipeview.model import Report
+from pipeview.parsers.gitlab_parser import parse_gitlab
+from pipeview.parsers.make_parser import parse_makefile
+from pipeview.render.html import render_html
 
 MAKE_FIXTURES = Path(__file__).parent / "fixtures" / "make"
 GITLAB_FIXTURES = Path(__file__).parent / "fixtures" / "gitlab"
