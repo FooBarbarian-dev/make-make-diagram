@@ -1,0 +1,28 @@
+stages: [build, deploy]
+
+include:
+  - project: 'devops/pipeline-repo'
+    file: 'ci/docker.yml'
+
+build_local:
+  stage: build
+  script:
+    - echo build
+
+deploy_job:
+  stage: deploy
+  script:
+    - echo before
+    - !reference [MR Docker Build & Push, script]
+    - echo after
+
+.local_steps:
+  script:
+    - echo shared-one
+    - echo shared-two
+
+uses_local_reference:
+  stage: build
+  script:
+    - !reference [.local_steps, script]
+    - echo own-step

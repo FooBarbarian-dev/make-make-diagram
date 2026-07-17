@@ -235,8 +235,217 @@ GitLab CI + robustness: 41 rows — 19 wrong, 12 missing, 4 degrades-honestly, 6
 
 ## Fixes applied
 
-*(Filled in as fixes land.)*
+All P1 and P2 rows above are fixed; P3 rows are fixed where cheap or degrade
+honestly with a named diagnostic; P4 rows are fixed in the renderer. The
+per-area summaries below map fixes to the matrix. Model changes shipped as
+**schema_version 2** (`VariableEvent.annotations`, `Variable.exported`,
+`Variable.origin`, `Report.annotations`); v1 JSON still loads via defaults
+(`tests/test_model.py::TestSchemaV1Compat`).
+
+### GNU Make (`pipeview/parsers/make_parser.py`)
+
+- **Directive peeling.** `export` / `unexport` / `override` / `private` /
+  `undefine` / `define` are peeled iteratively off the front of each logical
+  line before classification, so every stacking combination works
+  (`override export VAR := x`, `export define …`). The reported field failure
+  is the acceptance test:
+  `tests/test_parser_audit.py::TestReportedExportRegression`.
+- **Operator-first tokenization.** Assignment vs rule is decided by the first
+  depth-0 token (`_split_outside_refs` tracks `$()`/`${}` nesting and `$$`),
+  never by splitting on the first colon. `URL := https://example.com`,
+  `foo: PATH := /usr:/bin`, `VAR?=x`, and the full operator set
+  (`= := ::= :::= ?= += !=`) all classify correctly; `!=` records the raw
+  command and never executes it.
+- **Values.** Trailing comments stripped respecting `\#` escapes; `$$` pairs
+  removed before reference extraction (`$$(pwd)` / `$${USER}` no longer create
+  phantom variables); the reference regex now accepts hyphens/dots and
+  substitution refs (`$(SRCS:.c=.o)`), so canned recipes (`$(run-tests)`)
+  link usage to definition.
+- **Ghost upgrade.** A name first seen as a prerequisite and later defined by
+  a rule is upgraded from ghost to target with the defining location — the
+  `all: build test` idiom no longer renders its targets as unresolved.
+- **Rules.** Static pattern rules parse the target/pattern/prereq-pattern
+  triple with per-target stem substitution (`a.o → a.c`); grouped targets
+  (`&:`), double-colon recipe accumulation, duplicate-recipe warnings
+  mirroring make's own "overriding recipe", semicolon recipes, and explicit
+  empty recipes (`t: ;`, built-in rule cancellation) are all modeled.
+- **Special targets** are directives, never nodes: `.PHONY` (with static
+  expansion of `$(VAR)` lists and a diagnostic when unresolvable),
+  `.DEFAULT_GOAL` (both `:=` and `:` forms), `.EXPORT_ALL_VARIABLES`,
+  `.ONESHELL` (annotates recipes), `.SECONDEXPANSION` (report diagnostic that
+  prerequisite analysis may be incomplete), `.RECIPEPREFIX` (honored — recipe
+  collection switches prefix), and the `.SECONDARY`/`.PRECIOUS`/… family.
+- **Structure.** Includes expand globs and `$(wildcard …)` statically and
+  resolve `$(VAR)` paths from the static table; include cycles and recursion
+  cycles are named diagnostics (with depth caps as backstops); recursion
+  detection understands `${MAKE}`, `+$(MAKE)`, `cd dir && $(MAKE)`, and
+  `$(MAKE) -C $(VAR)` (resolvable → parsed, unresolvable → ghost + note);
+  vpath is acknowledged with a named info diagnostic; CRLF and UTF-8 BOM are
+  tolerated; unclosed `define` and stray `endif`/`else` get the make-rejects
+  framing.
+- **Variables.** Built-in defaults (CC, RM, MAKE, SHELL, …) referenced but
+  never assigned are labeled `built-in default`, not unresolved; automatic
+  variables never enter the variable table (renderer tooltips them);
+  target-/pattern-specific events carry `propagates_to_prereqs` / `pattern`
+  annotations; conditional context rides on the event (`condition`), replacing
+  the old per-assignment info-diagnostic noise.
+- **Taxonomy.** "Unparseable line" no longer exists. Valid-but-unmodeled
+  constructs get named info diagnostics with the consequence stated
+  (`$(eval …) at top level …`); the warning wording for genuinely bad lines
+  says real make likely rejects them. Permanent enforcement:
+  `TestMakeAcceptsContract` (make -pqn accepts the composition fixture ⇒ zero
+  unparseable-class diagnostics).
+
+### Enrichment (`pipeview/parsers/enrich.py`)
+
+- Captures make -p origin comments (`# makefile`, `# environment`,
+  `# default`, `# command line`, `# automatic`, `# 'override' directive`)
+  into `Variable.origin` — ground truth overrides the static guess. The demo
+  now correctly shows `CC ?= gcc` NOT taking effect (make's built-in `cc`
+  wins, origin `default`), which the old report silently got wrong.
+
+### GitLab CI (`pipeview/parsers/gitlab_parser.py`)
+
+- **`!reference`** is captured by a SafeLoader subclass as a value object (no
+  arbitrary construction — still safe). Local targets splice per GitLab
+  semantics (arrays into lists, nested references, any job name including
+  spaces/&/unicode, `[job, variables, KEY]` forms, resolution deferred until
+  every included file's jobs are known). External targets degrade exactly one
+  value: placeholder line, ghost node named after the target, and a
+  diagnostic naming both the reference and the likely unresolved include —
+  with the real line number. The reported field failure is the acceptance
+  test: `TestReportedReferenceRegression`.
+- **Blast radius.** File-level `error` now occurs only for input GitLab also
+  rejects (true YAML syntax errors, multi-document files — where the first
+  document is still salvaged and shown, non-mapping roots).
+- **Duplicate keys** are detected in the loader (after merge-key flattening)
+  and diagnosed with their line — PyYAML's silent last-wins no longer hides
+  dead definitions.
+- **YAML 1.1 coercion.** Variable values are read from the composed node
+  tree's raw scalar text, so `yes`, `0777`, `12:30`, `1.10` display exactly
+  as GitLab passes them; genuinely ambiguous unquoted scalars get an info
+  diagnostic suggesting quotes. Hash-form variables (`value:`/`description:`)
+  parse into the effective value plus a description annotation.
+- **Scripts.** String-form `script:` (previously dropped silently!) and
+  nested arrays (previously Python-repr'd) both flatten per GitLab semantics;
+  block scalars keep their exact content.
+- **`extends`.** Real GitLab merge semantics: hashes deep-merge, arrays and
+  scalars replace, multiple parents fold left-to-right with later parents
+  winning, child on top. Children inherit *everything* they don't define
+  (script/stage/needs included — previously only image/before_script/
+  variables). Provenance is displayed: `overrides` ("script: replaces .base's
+  script entirely…") and `inherited` annotations. Cycles are named
+  diagnostics. `default:`, deprecated top-level defaults (with an info
+  diagnostic), and `inherit:default`/`inherit:variables` opt-outs are honored.
+- **Keywords.** `pages` was wrongly blocklisted — it is a job again;
+  `workflow:` surfaces as a report-level banner ("pipeline runs only when:
+  …"); `types` recognized; non-mapping unknown root keys diagnosed as the
+  errors GitLab treats them as; boolean/int keys no longer crash the parser.
+- **Pipeline semantics.** `needs: []` sets a `starts_immediately` flag and
+  suppresses synthesized stage-order edges; needs hash forms keep
+  optional/artifacts detail; cross-project/cross-pipeline needs become
+  annotated ghosts; needs resolve against the full job table (no more stale
+  "not yet defined" notices); `dependencies:` is artifact flow only
+  (annotation, never an edge). Default stages (`.pre`…`.post`) apply when
+  `stages:` is absent; stage-less jobs land in `test` (was `.pre`);
+  undeclared stages are error diagnostics ("chosen stage does not exist");
+  `.pre`/`.post` get stage nodes and ordering.
+- **More keywords.** `rules:` summaries keep `when: never`/`delayed` +
+  `start_in`/`allow_failure`, and `rules:variables` create scoped events;
+  `parallel: N` and `parallel:matrix` render as one node with a parallel flag,
+  expansion count, and axis variables (matrix axes no longer leak as
+  phantom unresolved variables); `environment`, `resource_group`, `retry`,
+  `timeout`, `interruptible`, `artifacts`, `cache` become annotations;
+  `trigger:include:local` child pipelines are parsed as namespaced linked
+  sub-pipelines with `strategy: depend` annotated (project triggers stay
+  ghosts, without the old dict-repr names); `CI_*`/`GITLAB_*` variables are
+  labeled `predefined` instead of polluting the unresolved list; includes
+  accept bare-string/list/dict forms, local wildcards, `rules:` (annotated as
+  conditional), components (honest unresolved ghosts), and cycles are named.
+- **Performance.** One compose pass per file replaces the per-key full-file
+  regex rescans: 2000 jobs 5.0s → 2.4s; the include-depth cap matches
+  GitLab's documented 150.
+
+### Renderer (`pipeview/render/templates/report.html`)
+
+New data surfaces strictly through the existing component vocabulary:
+- Variable explorer and detail panel: `exported` chip (tooltip "passed into
+  recipe environments") and origin chips (`makefile`, `default`,
+  `built-in default`, `predefined`, …) — an event-less variable with an
+  origin shows that chip instead of the misleading `unresolved`.
+- Timeline events: chips for export/override/private/define/shell/undefine
+  marks; muted notes for conditions, extends inheritance, rule scoping,
+  YAML-coercion warnings, and `!reference` provenance.
+- Jobs: `starts immediately`/`parallel`/`delayed` flag chips with tooltips;
+  matrix count + axis variables, needs details, artifact dependencies,
+  environment/retry/cache/etc. in the existing Details section (object values
+  now render as key–value lines instead of `[object Object]`).
+- Report-level banner (info-diagnostic styling) for `workflow:rules`.
+- Make recipes: automatic variables (`$@`, `$<`, `$(@D)`, …) get dotted-
+  underline hover explanations; recipe-line prefixes `@`/`-`/`+` are
+  explained on hover (gated on the parser annotation, so GitLab scripts are
+  untouched); `.ONESHELL` recipes carry a "one shell" chip.
+- Tooltips can wrap (max-width) instead of escaping the viewport.
+
+### Test/snapshot churn — line-by-line justification
+
+- `tests/test_cli.py` / `tests/test_exports.py`: `schema_version == 1` → `2`
+  (schema bump).
+- `tests/test_exports.py::test_dot_ghost_nodes`: switched fixture from
+  `broken` to `minimal` — the assertion's intent is "ghosts render dashed",
+  and `broken`'s `foo` is no longer a ghost because the ghost-upgrade fix
+  correctly recognizes its defining rule. `minimal`'s `main.c`/`utils.c`
+  remain genuine ghosts; the test now also asserts a ghost exists.
+- `tests/test_make_parser.py::test_conditional_diagnostics` →
+  `test_conditional_annotations_on_events`: conditional context moved from
+  per-assignment info diagnostics (noise) to `event.annotations.condition`
+  (data). The new test asserts the annotation.
+- `tests/test_gitlab_parser.py::test_inherited_variables`: inheritance
+  provenance moved from a fake operator (`extends-inherited`) to
+  `annotations.inherited_from`; the operator now truthfully reports what the
+  flattened config contains.
+- `tests/test_model.py`: sample report extended to cover the new schema-v2
+  fields in round-trip; added `TestSchemaV1Compat` for v1 payloads.
 
 ## Accepted limitations
 
-*(Filled in at the end of the fix pass.)*
+- **Conditional branches are recorded unconditionally.** The static pass
+  captures assignments from *every* `ifeq`/`ifdef` branch (each event carries
+  its `condition` annotation), so a variable's final static value may come
+  from a branch real make skips — e.g. `ifndef CC / CC := gcc / endif` never
+  fires because make's built-in `CC = cc` exists. The enrichment pass
+  supplies the ground-truth resolved value and origin; the timeline shows
+  both the static events (with their conditions) and the resolution.
+- **v1 non-goals stand:** `$(eval)`/`$(call)` expansion, `$(shell)`
+  simulation, and full second-expansion are not modeled; each is named in a
+  diagnostic when seen at a point where it hides structure.
+- **`:::=` (make 4.4)** parses correctly but could not be ground-truthed
+  locally (environment ships GNU Make 4.3); semantics cited from the manual.
+- **Static variable expansion** (include paths, target lists, `.PHONY`
+  lists, `$(MAKE) -C $(VAR)`) substitutes simple `$(VAR)` chains only
+  (depth-capped); function calls inside those positions degrade to a named
+  info diagnostic.
+- **Enrichment granularity:** `make -p` resolved values attach to a
+  variable's final global event; target-/pattern-scoped events keep static
+  values only (make prints target-specific values in a separate section the
+  enrichment pass doesn't yet parse).
+- **Namespaced re-parses:** a makefile already parsed under one namespace is
+  not re-parsed when reached again via another recursion path (first parse
+  wins); the invokes edge is still recorded.
+- **PyYAML key coercion:** unquoted `on:` and `true:` job keys both construct
+  as boolean true and collapse into one key (diagnosed as a duplicate); the
+  parser cannot recover the author's spelling for *keys* (values are
+  recovered via the node tree). Quote such job names.
+- **Merge-key provenance** is annotated at job level (`merged_via_anchor`),
+  not per-value; YAML aliases genuinely lose per-value source positions.
+- **`workflow:rules` gating is displayed, not evaluated** — pipeview cannot
+  know branch/MR context offline. Same for `include:rules` and `rules:` on
+  jobs (order and conditions are shown; outcomes are not simulated).
+- **Trigger child pipelines** are parsed for jobs/scripts/variables; their
+  own `stages:`/`workflow:` are intentionally not merged into the parent
+  pipeline's stage graph (child jobs carry a `child_pipeline` annotation
+  instead).
+- **Repo Makefile quirk (pre-existing):** `make examples && make self` write
+  `Makefile.report.html` from two different sources into `examples/out/`
+  (the make-project example and the repo's own Makefile collide on basename);
+  the last writer wins. Out of scope for the parser pass.

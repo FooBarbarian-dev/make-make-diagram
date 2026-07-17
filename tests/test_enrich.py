@@ -1,13 +1,11 @@
-import os
 import shutil
-import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
-from pipeview.parsers.make_parser import parse_makefile
 from pipeview.parsers.enrich import enrich_make_report
+from pipeview.parsers.make_parser import parse_makefile
 
 FIXTURES = Path(__file__).parent / "fixtures" / "make"
 
@@ -36,7 +34,6 @@ class TestEnrichWithMake:
     )
     def test_enrichment_adds_diagnostic(self):
         report = parse_makefile(str(FIXTURES / "minimal" / "Makefile"))
-        initial_diag_count = len(report.diagnostics)
         enrich_make_report(report, str(FIXTURES / "minimal" / "Makefile"))
         # Either enrichment works or adds a diagnostic
 

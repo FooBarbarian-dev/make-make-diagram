@@ -1,0 +1,28 @@
+.base:
+  image: alpine
+  script:
+    - echo parent-a
+    - echo parent-b
+  before_script:
+    - echo parent-before
+  variables:
+    X: "1"
+
+replacer:
+  extends: .base
+  script:
+    - echo child-only
+  variables:
+    Y: "2"
+
+pure_heir:
+  extends: .base
+
+multi_child:
+  extends: [.first, .second]
+  script: [echo hi]
+
+.first:
+  image: img-first
+.second:
+  image: img-second

@@ -59,11 +59,30 @@ build_image:
 # --- Test -----------------------------------------------------------------
 
 ## Run unit tests (needs only the wheel, not the image)
+# .base also defines before_script; this job REPLACES nothing there but its
+# own `script:` would replace .base's wholesale if .base had one — extends
+# merges hashes and replaces arrays. smoke_tests below demonstrates the
+# replacement: it inherits .checks but overrides its script entirely.
 unit_tests:
   extends: .base
   stage: test
   script:
     - pytest tests/ -v --junitxml=report.xml
+  needs:
+    - build_wheel
+
+.checks:
+  extends: .base
+  script:
+    - ruff check .
+    - pytest tests/smoke -q
+
+## Quick smoke checks (script REPLACES .checks's — arrays never merge)
+smoke_tests:
+  extends: .checks
+  stage: test
+  script:
+    - pytest tests/smoke -q --no-header
   needs:
     - build_wheel
 

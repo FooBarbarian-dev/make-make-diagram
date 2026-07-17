@@ -1,0 +1,4 @@
+include:
+  - local: loop_b.yml
+a_job:
+  script: [echo a]

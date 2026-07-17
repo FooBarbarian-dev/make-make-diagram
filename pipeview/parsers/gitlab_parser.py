@@ -952,7 +952,10 @@ def _build_jobs(state: _ParserState) -> None:
     if declared_stages is not None:
         for edge_stage in (".pre", ".post"):
             if edge_stage not in known_stages:
-                known_stages.insert(0, edge_stage) if edge_stage == ".pre" else known_stages.append(edge_stage)
+                if edge_stage == ".pre":
+                    known_stages.insert(0, edge_stage)
+                else:
+                    known_stages.append(edge_stage)
 
     for job_id, config in state.job_configs.items():
         rel_path, line_no, doc, namespace = state.job_meta[job_id]
@@ -1026,7 +1029,10 @@ def _build_jobs(state: _ParserState) -> None:
             flags.add("allow_failure")
         if "image" in flat:
             img = flat["image"]
-            annotations["image"] = img.get("name", str(img)) if isinstance(img, dict) else _scalar_str(img)
+            annotations["image"] = (
+                img.get("name", str(img)) if isinstance(img, dict)
+                else _scalar_str(img)
+            )
         if isinstance(flat.get("tags"), list):
             annotations["tags"] = [_scalar_str(t) for t in flat["tags"]]
 

@@ -7,12 +7,11 @@ from datetime import datetime, timezone
 
 import pipeview
 from pipeview.model import Report
-from pipeview.parsers.make_parser import parse_makefile
-from pipeview.parsers.gitlab_parser import parse_gitlab
 from pipeview.parsers.enrich import enrich_make_report
+from pipeview.parsers.gitlab_parser import parse_gitlab
+from pipeview.parsers.make_parser import parse_makefile
+from pipeview.render.exports import export_dot, export_json, export_mermaid, export_svg
 from pipeview.render.html import render_html
-from pipeview.render.exports import export_json, export_dot, export_mermaid, export_svg
-
 
 _MAKEFILE_NAMES = {"Makefile", "makefile", "GNUmakefile"}
 
@@ -20,7 +19,10 @@ _MAKEFILE_NAMES = {"Makefile", "makefile", "GNUmakefile"}
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="pipeview",
-        description="Generate offline interactive HTML reports for GNU Make and GitLab CI pipelines.",
+        description=(
+            "Generate offline interactive HTML reports "
+            "for GNU Make and GitLab CI pipelines."
+        ),
         epilog=(
             "examples:\n"
             "  pipeview Makefile                  Analyze a Makefile\n"
@@ -48,7 +50,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--no-enrich",
         action="store_true",
-        help="Skip the Make enrichment pass (which runs 'make -pqn' and may execute shell snippets)",
+        help=(
+            "Skip the Make enrichment pass "
+            "(which runs 'make -pqn' and may execute shell snippets)"
+        ),
     )
     parser.add_argument(
         "--version",

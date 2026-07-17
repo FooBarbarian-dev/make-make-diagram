@@ -4,7 +4,6 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
-
 # Schema history:
 #   1 — initial model.
 #   2 — parser-audit pass: VariableEvent.annotations (exported/override/private/

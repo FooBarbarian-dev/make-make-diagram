@@ -734,7 +734,10 @@ def _handle_special_target(
         state.export_all = True
         state.diagnostics.append(Diagnostic(
             severity="info",
-            message=".EXPORT_ALL_VARIABLES in effect — every variable is passed into recipe environments",
+            message=(
+                ".EXPORT_ALL_VARIABLES in effect — every variable is passed "
+                "into recipe environments"
+            ),
             source=loc,
         ))
         return
@@ -743,7 +746,10 @@ def _handle_special_target(
         state.oneshell = True
         state.diagnostics.append(Diagnostic(
             severity="info",
-            message=".ONESHELL in effect — each recipe runs in a single shell invocation, not one shell per line",
+            message=(
+                ".ONESHELL in effect — each recipe runs in a single shell "
+                "invocation, not one shell per line"
+            ),
             source=loc,
         ))
         return
@@ -1288,7 +1294,8 @@ def _handle_recursion(
         state.diagnostics.append(Diagnostic(
             severity="warning",
             message=(
-                f"Recursive make cycle: {os.path.relpath(sub_makefile, os.path.dirname(state.root_path))} "
+                "Recursive make cycle: "
+                f"{os.path.relpath(sub_makefile, os.path.dirname(state.root_path))} "
                 "invokes itself through its parents — not followed again"
             ),
             source=SourceLocation(file=rel_path, line=line_no),

@@ -1,0 +1,26 @@
+variables:
+  DEBUG: yes
+  MODE: off
+  MASK: 0777
+  TZ: 12:30
+  VER: 1.10
+  QUOTED: "yes"
+  RICH:
+    value: default-val
+    description: A documented variable
+
+job_one:
+  script: [echo first]
+
+job_one:
+  script: [echo second]
+
+string_script:
+  script: |
+    line one
+    line two
+
+nested_script:
+  script:
+    - echo a
+    - [echo b, echo c]
