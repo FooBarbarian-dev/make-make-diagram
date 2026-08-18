@@ -20,9 +20,16 @@ def render_html(report: Report, output_path: str) -> None:
         with open(dagre_path, "r", encoding="utf-8") as f:
             dagre_js = f.read()
 
+    whatif_path = _TEMPLATE_DIR / "whatif.js"
+    whatif_js = ""
+    if whatif_path.is_file():
+        with open(whatif_path, "r", encoding="utf-8") as f:
+            whatif_js = f.read()
+
     model_json = report.to_json()
 
     html = template.replace("/*DAGRE_PLACEHOLDER*/", dagre_js)
+    html = html.replace("/*WHATIF_PLACEHOLDER*/", whatif_js)
     html = html.replace("/*MODEL_JSON_PLACEHOLDER*/{}", model_json)
     html = html.replace("{{ROOT}}", _escape_html(report.root))
     html = html.replace("{{GENERATED_AT}}", _escape_html(report.generated_at))

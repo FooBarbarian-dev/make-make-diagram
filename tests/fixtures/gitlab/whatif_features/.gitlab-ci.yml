@@ -78,11 +78,16 @@ weird_rules:
   rules:
     - if: 'CI_COMMIT_BRANCH === "oops"'
 
-## Consumes the dotenv report via needs; optional need of a rules-gated job
+## Consumes the dotenv report via needs; optional need of a rules-gated job.
+## Runs in MR pipelines too — where build_meta does NOT — so the what-if
+## simulation can surface the broken-needs pipeline-creation failure.
 integration:
   stage: test
   script:
     - make integration
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
   needs:
     - build_meta
     - job: docker_build
