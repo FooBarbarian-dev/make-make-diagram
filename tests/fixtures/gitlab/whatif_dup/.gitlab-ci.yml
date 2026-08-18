@@ -1,0 +1,31 @@
+# The documented duplicate-pipeline setup: rules jobs mixed with no-rules
+# jobs, no workflow:rules. A push to a branch with an open MR starts BOTH a
+# branch pipeline and a merge request pipeline.
+
+stages:
+  - build
+  - test
+
+## Runs in branch pipelines (implicit only: branches+tags)
+build_all:
+  stage: build
+  script:
+    - make build
+
+## Runs in merge request pipelines only
+test_mr:
+  stage: test
+  script:
+    - make test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+## The documented double-pipeline job: final catch-all when
+lint_everything:
+  stage: test
+  script:
+    - make lint
+  rules:
+    - if: $CUSTOM_VARIABLE == "false"
+      when: never
+    - when: always

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from pipeview.cli import main
+from pipeview.model import SCHEMA_VERSION
 
 MAKE_FIXTURES = Path(__file__).parent / "fixtures" / "make"
 GITLAB_FIXTURES = Path(__file__).parent / "fixtures" / "gitlab"
@@ -89,7 +90,7 @@ class TestCliMake:
         json_path = os.path.join(tmpdir, "Makefile.model.json")
         with open(json_path) as f:
             data = json.load(f)
-        assert data["schema_version"] == 2
+        assert data["schema_version"] == SCHEMA_VERSION
         assert len(data["nodes"]) > 0
         assert data["format"] == "makefile"
 

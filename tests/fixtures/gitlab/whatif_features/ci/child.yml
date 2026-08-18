@@ -1,0 +1,22 @@
+# Child pipeline: CI_PIPELINE_SOURCE is parent_pipeline in here, so the
+# merge_request_event rule can never match (a documented gotcha the what-if
+# simulation surfaces).
+
+child_build:
+  stage: build
+  script:
+    - make child
+
+child_mr_only:
+  stage: build
+  script:
+    - echo "never runs in a child pipeline"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+child_always:
+  stage: build
+  script:
+    - echo "runs whenever the parent triggers"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"

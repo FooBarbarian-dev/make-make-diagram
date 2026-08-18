@@ -17,6 +17,7 @@ from pipeview.model import (
     Variable,
     VariableEvent,
 )
+from pipeview.parsers.gitlab_whatif import compile_whatif
 
 # Top-level configuration keywords — never jobs. `pages` is deliberately NOT
 # here: it is a real job with special deploy behavior.
@@ -143,6 +144,7 @@ def parse_gitlab(path: str) -> Report:
     _resolve_pending_var_refs(state)
     _build_stage_structure(state)
     _label_predefined_variables(state)
+    whatif = compile_whatif(state)
 
     report = Report(
         root=path,
@@ -158,6 +160,7 @@ def parse_gitlab(path: str) -> Report:
         report.annotations["workflow_rules"] = state.workflow_rules
     if state.workflow_name:
         report.annotations["workflow_name"] = state.workflow_name
+    report.annotations["whatif"] = whatif
     return report
 
 
@@ -176,6 +179,7 @@ class _ParserState:
         self.global_defaults: dict[str, Any] = {}
         self.legacy_defaults: dict[str, Any] = {}
         self.workflow_rules: list[str] = []
+        self.workflow_raw: list = []   # raw workflow:rules entries for the what-if compiler
         self.workflow_name: str | None = None
         # raw (pre-extends) job configs, insertion-ordered; name → config
         self.job_configs: dict[str, dict[str, Any]] = {}
@@ -457,6 +461,7 @@ def _process_workflow(workflow: dict, state: _ParserState) -> None:
         state.workflow_name = name
     rules = workflow.get("rules")
     if isinstance(rules, list):
+        state.workflow_raw = rules
         for rule in rules:
             if isinstance(rule, dict):
                 parts = []

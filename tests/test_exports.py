@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from pipeview.model import SCHEMA_VERSION
 from pipeview.parsers.gitlab_parser import parse_gitlab
 from pipeview.parsers.make_parser import parse_makefile
 from pipeview.render.exports import export_dot, export_json, export_mermaid, export_svg
@@ -35,7 +36,7 @@ class TestJsonExport:
         export_json(make_report, path)
         with open(path) as f:
             data = json.load(f)
-        assert data["schema_version"] == 2
+        assert data["schema_version"] == SCHEMA_VERSION
         assert len(data["nodes"]) > 0
 
     def test_json_round_trips(self, make_report, tmpdir):
