@@ -220,6 +220,22 @@ Parser philosophy applies: degrade the one value, never the report.
 5. New example project demonstrating duplicate pipelines + dedup +
    dotenv + child pipeline; README + CHANGELOG.
 
+## As-built notes (implementation deltas)
+
+- The scenario catalog and the predefined-variable matrix live as code in
+  `whatif.js` (`buildCandidates` / `buildEnv`) rather than as data in the
+  report annotation — writing the matrix as a data DSL added complexity
+  without adding testability, since the node vector suite exercises the JS
+  directly. The report annotation carries what genuinely varies per
+  repository: workflow program, per-job programs, globals, stage order,
+  ref world, lint.
+- The changed-files knob gained "assume every pattern matches" /
+  "assume nothing matches" shortcut modes in addition to the exact-paths
+  list and *unknown*.
+- Mini-graph edges draw dependency → dependent (execution flow, stages
+  left-to-right), the reverse of the model's job → dependency direction
+  used by the main Graph tab.
+
 ## Out of scope
 
 - Fetching remote/project/template/component includes (offline guarantee).
