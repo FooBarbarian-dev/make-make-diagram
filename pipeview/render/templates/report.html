@@ -653,6 +653,95 @@ td .btn.copy-btn { min-height: var(--hit); }
 .section-heading:first-child { margin-top: 0; }
 
 /* ============================================================
+   What-If view: scratchpad controls | sectioned pipeline graphs
+   ============================================================ */
+.whatif-layout { display: flex; height: 100%; min-height: 0; }
+.whatif-controls {
+  width: 310px; flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--surface-raised);
+  padding: var(--sp-3) var(--sp-4) var(--sp-6);
+}
+.whatif-results { flex: 1; min-width: 0; overflow: auto; padding: var(--sp-4); }
+
+.wi-group { margin-bottom: var(--sp-4); }
+.wi-group > h3 {
+  font-size: var(--fs-0); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.06em;
+  color: var(--text-muted);
+  margin-bottom: var(--sp-2);
+}
+.wi-choice {
+  display: flex; align-items: center; gap: var(--sp-2);
+  min-height: 26px; cursor: pointer; font-size: var(--fs-2);
+}
+.wi-choice input { accent-color: var(--accent); flex-shrink: 0; }
+.wi-choice .chip { margin-left: auto; }
+.wi-field { margin: var(--sp-1) 0 var(--sp-2); }
+.wi-field > label { display: block; font-size: var(--fs-0); color: var(--text-muted); margin-bottom: 2px; }
+.wi-field .input, .wi-field select.input { width: 100%; min-height: 28px; font-size: var(--fs-1); }
+.wi-field textarea.input { min-height: 64px; padding: var(--sp-1) var(--sp-2); font-family: var(--font-mono); resize: vertical; }
+.wi-inline-btns { display: flex; gap: var(--sp-1); margin-top: var(--sp-1); }
+.wi-inline-btns .btn { min-height: 24px; font-size: var(--fs-0); padding: 0 var(--sp-2); }
+.wi-var-row { display: flex; gap: var(--sp-1); margin-bottom: var(--sp-1); align-items: center; }
+.wi-var-row .input { min-height: 26px; font-size: var(--fs-0); font-family: var(--font-mono); }
+.wi-var-row .wi-var-name { width: 45%; }
+.wi-var-row .wi-var-value { flex: 1; min-width: 0; }
+.wi-var-row .btn { min-height: 26px; min-width: 26px; padding: 0; }
+.wi-unknown-var {
+  display: flex; align-items: center; gap: var(--sp-2);
+  font-family: var(--font-mono); font-size: var(--fs-0);
+  min-height: 24px;
+}
+.wi-unknown-var .btn { margin-left: auto; min-height: 22px; font-size: var(--fs-0); padding: 0 var(--sp-2); }
+
+.wi-banner-strip { margin-bottom: var(--sp-3); }
+.wi-banner-strip .diag-item { max-width: none; }
+
+.wi-pipeline {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  margin-bottom: var(--sp-4);
+  overflow: hidden;
+}
+.wi-pipeline.wi-dead { background: var(--surface-sunken); }
+.wi-pipe-head {
+  display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap;
+  padding: var(--sp-2) var(--sp-3);
+  border-bottom: 1px solid var(--border);
+}
+.wi-pipeline.wi-dead .wi-pipe-head { border-bottom: none; }
+.wi-pipe-title { font-weight: 600; font-size: var(--fs-2); }
+.wi-pipe-reason { color: var(--text-muted); font-size: var(--fs-1); padding: var(--sp-2) var(--sp-3); }
+.wi-pipe-banners { padding: var(--sp-1) var(--sp-2) 0; }
+.wi-pipe-banners .diag-item { max-width: none; margin: var(--sp-1) 0; }
+.wi-graph { overflow-x: auto; padding: var(--sp-2); }
+.wi-graph svg { display: block; }
+.wi-children { padding: 0 var(--sp-3) var(--sp-3) var(--sp-5); }
+.wi-children .wi-pipeline { border-left: 3px solid var(--edge-invokes); margin-bottom: var(--sp-3); }
+
+/* node states in the mini graphs */
+.wi-node { cursor: pointer; }
+.wi-node rect { fill: var(--surface-raised); stroke: var(--border-strong); stroke-width: 1.5; }
+.wi-node text { fill: var(--text); font-family: var(--font-mono); font-size: 11px; pointer-events: none; }
+.wi-node .wi-state-label { fill: var(--text-muted); font-size: 9px; font-family: var(--font-ui); }
+.wi-node.st-runs rect { stroke: var(--ok); }
+.wi-node.st-manual rect { stroke: var(--warn); }
+.wi-node.st-delayed rect { stroke: var(--warn); stroke-dasharray: 7 3; }
+.wi-node.st-conditional rect { stroke: var(--info); stroke-dasharray: 2 3; }
+.wi-node.st-skipped, .wi-node.st-not-added { opacity: 0.4; }
+.wi-node.st-skipped rect, .wi-node.st-not-added rect { stroke-dasharray: 4 3; }
+.wi-node.wi-dup rect { stroke-width: 2.75; }
+.wi-node.wi-dup .wi-dup-badge { fill: var(--warn); }
+.wi-node.wi-hl rect { stroke: var(--accent); stroke-width: 3; }
+.wi-edge { fill: none; stroke: var(--edge-needs); stroke-width: 1.4; }
+.wi-edge.kind-stage_order { stroke: var(--edge-stage-order); stroke-dasharray: 4 4; opacity: 0.6; }
+
+.wi-legend { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
+
+/* ============================================================
    Search
    ============================================================ */
 .search-wrap { position: relative; }
@@ -737,6 +826,7 @@ kbd {
   <button class="tab" role="tab" id="tab-catalog" aria-controls="view-catalog" data-view="catalog">Tasks<span class="tab-count" id="count-catalog"></span></button>
   <button class="tab" role="tab" id="tab-variables" aria-controls="view-variables" data-view="variables">Variables<span class="tab-count" id="count-variables"></span></button>
   <button class="tab" role="tab" id="tab-filemap" aria-controls="view-filemap" data-view="filemap">Files<span class="tab-count" id="count-filemap"></span></button>
+  <button class="tab" role="tab" id="tab-whatif" aria-controls="view-whatif" data-view="whatif" hidden>What-If<span class="tab-count" id="count-whatif"></span></button>
 </nav>
 
 <!-- Report-level gate (e.g. GitLab workflow:rules): shown on every view so
@@ -802,6 +892,27 @@ kbd {
         <button class="btn" id="tree-collapse-all">Collapse all</button>
       </div>
       <div class="view-body" id="filemap-body"></div>
+    </section>
+
+    <section class="view" id="view-whatif" role="tabpanel" aria-labelledby="tab-whatif">
+      <div class="view-toolbar">
+        <span class="toolbar-title">What-If</span>
+        <span class="toolbar-note" id="whatif-note"></span>
+        <span class="toolbar-spacer"></span>
+        <span class="toolbar-note"
+          data-tip="The simulation shows what GitLab would PROBABLY do. Unknowns are shown as 'depends', never guessed. Assumed world: branches main and dev exist and are protected; other branches are unprotected.">
+          probable behavior — hover for assumptions</span>
+        <label class="legend-item" style="min-height:0">
+          <input type="checkbox" id="wi-show-skipped" checked>
+          <span>show skipped jobs</span>
+        </label>
+      </div>
+      <div class="view-body no-pad">
+        <div class="whatif-layout">
+          <aside class="whatif-controls" id="whatif-controls" aria-label="Scenario controls"></aside>
+          <div class="whatif-results" id="whatif-results"></div>
+        </div>
+      </div>
     </section>
 
   </div>
@@ -1022,7 +1133,13 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   /* ==========================================================
      Tabs (real tablist, arrow-key navigable)
      ========================================================== */
-  const tabs = Array.from(document.querySelectorAll('.tab'));
+  // What-If is a GitLab-only view: the tab exists only when the model
+  // carries a compiled what-if program (presence-based, format-neutral).
+  const WHATIF = (REPORT.annotations || {}).whatif || null;
+  const whatifAvailable = !!(WHATIF && typeof PipeviewWhatIf !== 'undefined');
+  if (whatifAvailable) document.getElementById('tab-whatif').hidden = false;
+
+  const tabs = Array.from(document.querySelectorAll('.tab')).filter(t => !t.hidden);
   const views = Array.from(document.querySelectorAll('.view'));
   const viewScroll = {};   // per-view scroll memory
   let activeView = 'graph';
@@ -2049,6 +2166,603 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     filemapBody.querySelectorAll('details').forEach(d => { d.open = true; }));
   document.getElementById('tree-collapse-all').addEventListener('click', () =>
     filemapBody.querySelectorAll('details').forEach(d => { d.open = false; }));
+
+  /* ==========================================================
+     What-If view: a scratch starting state on the left (event, ref,
+     MR knobs, changed files, variables), the resulting candidate
+     pipelines on the right — one bounded graph per pipeline, with
+     duplicates highlighted across sections. Evaluation is done by
+     PipeviewWhatIf (inlined, DOM-free, tested under node).
+     ========================================================== */
+  const wiControls = document.getElementById('whatif-controls');
+  const wiResults = document.getElementById('whatif-results');
+  const wiNoteEl = document.getElementById('whatif-note');
+  const wiShowSkippedEl = document.getElementById('wi-show-skipped');
+
+  const wiState = {
+    scenario: 'push_branch',
+    branchKind: 'feature',            // 'main' | 'dev' | 'feature'
+    featureName: 'feature/widget',
+    tag: 'v1.0.0',
+    tagProtected: false,
+    openMR: true,
+    target: 'main',
+    draft: false,
+    mrFlavor: 'detached',
+    commitMessage: '',
+    changedMode: 'unknown',           // 'unknown' | 'all' | 'none' | 'list'
+    changedList: '',
+    overrides: []                     // [{name, value}]
+  };
+
+  const WI_SCENARIOS = [
+    ['push_branch', 'Push to a branch'],
+    ['push_tag', 'Push a new tag'],
+    ['mr', 'MR created / “Run pipeline” on MR'],
+    ['schedule', 'Scheduled run'],
+    ['web', 'Manual run (web UI)'],
+    ['api', 'API pipeline'],
+    ['trigger', 'Trigger token']
+  ];
+  const WI_STATE_LABEL = {
+    runs: 'runs', manual: 'manual gate', delayed: 'delayed',
+    skipped: 'when: never', 'not-added': 'not added', conditional: 'depends'
+  };
+  const WI_STATE_CHIP = {
+    runs: 'chip-ok', manual: 'chip-warn', delayed: 'chip-warn',
+    skipped: 'chip-error', 'not-added': '', conditional: 'chip-info'
+  };
+  const wiMightRun = s =>
+    s === 'runs' || s === 'manual' || s === 'delayed' || s === 'conditional';
+
+  let wiDupSet = new Set();
+  let wiLastResult = null;
+  let wiRenderTimer = null;
+
+  function wiBranchName() {
+    if (wiState.scenario === 'mr') return wiState.featureName || 'feature/widget';
+    if (wiState.branchKind === 'feature') return wiState.featureName || 'feature/widget';
+    return wiState.branchKind;
+  }
+
+  function wiConfig() {
+    const overrides = {};
+    wiState.overrides.forEach(o => { if (o.name) overrides[o.name] = o.value; });
+    let changedFiles = null;
+    if (wiState.changedMode === 'all') changedFiles = 'all';
+    else if (wiState.changedMode === 'none') changedFiles = [];
+    else if (wiState.changedMode === 'list') {
+      changedFiles = wiState.changedList.split('\n').map(s => s.trim()).filter(Boolean);
+    }
+    return {
+      scenario: wiState.scenario,
+      branch: wiBranchName(),
+      tag: wiState.tag || 'v1.0.0',
+      tagProtected: wiState.tagProtected,
+      openMR: wiState.scenario === 'push_branch' ? wiState.openMR : wiState.scenario === 'mr',
+      target: wiState.target,
+      draft: wiState.draft,
+      mrFlavor: wiState.mrFlavor,
+      commitMessage: wiState.commitMessage,
+      changedFiles: changedFiles,
+      overrides: overrides
+    };
+  }
+
+  /* ---------------- controls ---------------- */
+
+  function wiRadio(name, value, label, checked, chip) {
+    return '<label class="wi-choice"><input type="radio" name="' + name + '" value="'
+      + esc(value) + '"' + (checked ? ' checked' : '') + '><span>' + esc(label) + '</span>'
+      + (chip || '') + '</label>';
+  }
+  function wiCheck(id, label, checked, tip) {
+    return '<label class="wi-choice"' + (tip ? ' data-tip="' + esc(tip) + '"' : '')
+      + '><input type="checkbox" id="' + id + '"' + (checked ? ' checked' : '')
+      + '><span>' + esc(label) + '</span></label>';
+  }
+
+  function renderWiControls() {
+    const s = wiState;
+    const isBranchy = s.scenario === 'push_branch' || s.scenario === 'schedule'
+      || s.scenario === 'web' || s.scenario === 'api' || s.scenario === 'trigger';
+    const mrKnobs = (s.scenario === 'push_branch' && s.openMR) || s.scenario === 'mr';
+
+    let html = '<div class="wi-group"><h3>Event</h3>'
+      + WI_SCENARIOS.map(([v, l]) => wiRadio('wi-scenario', v, l, s.scenario === v)).join('')
+      + '</div>';
+
+    if (isBranchy) {
+      html += '<div class="wi-group"><h3>Branch</h3>'
+        + wiRadio('wi-branch', 'main', 'main', s.branchKind === 'main',
+                  '<span class="chip chip-info" data-tip="default branch, protected">default</span>')
+        + wiRadio('wi-branch', 'dev', 'dev', s.branchKind === 'dev',
+                  '<span class="chip" data-tip="long-lived, protected">protected</span>')
+        + wiRadio('wi-branch', 'feature', 'feature branch…', s.branchKind === 'feature',
+                  '<span class="chip" data-tip="any other branch — unprotected">unprotected</span>')
+        + '<div class="wi-field" id="wi-feature-field"' + (s.branchKind === 'feature' ? '' : ' hidden')
+        + '><label for="wi-feature-name">branch name (rules may regex-match it)</label>'
+        + '<input class="input" id="wi-feature-name" value="' + esc(s.featureName) + '"></div>';
+      if (s.scenario === 'push_branch') {
+        html += wiCheck('wi-openmr', 'an open MR uses this branch as source', s.openMR,
+          'The duplicate-pipeline situation: GitLab evaluates a branch pipeline AND a merge request pipeline for the same push');
+      }
+      html += '</div>';
+    }
+
+    if (s.scenario === 'push_tag') {
+      html += '<div class="wi-group"><h3>Tag</h3>'
+        + '<div class="wi-field"><label for="wi-tag-name">tag name</label>'
+        + '<input class="input" id="wi-tag-name" value="' + esc(s.tag) + '"></div>'
+        + wiCheck('wi-tag-protected', 'protected tag', s.tagProtected)
+        + '</div>';
+    }
+
+    if (s.scenario === 'mr') {
+      html += '<div class="wi-group"><h3>Source branch</h3>'
+        + '<div class="wi-field"><label for="wi-feature-name">MR source branch</label>'
+        + '<input class="input" id="wi-feature-name" value="' + esc(s.featureName) + '"></div>'
+        + '</div>';
+    }
+
+    if (mrKnobs) {
+      html += '<div class="wi-group"><h3>Merge request</h3>'
+        + '<div class="wi-field"><label for="wi-target">target branch</label>'
+        + '<select class="input" id="wi-target">'
+        + '<option value="main"' + (s.target === 'main' ? ' selected' : '') + '>main</option>'
+        + '<option value="dev"' + (s.target === 'dev' ? ' selected' : '') + '>dev</option>'
+        + '</select></div>'
+        + wiCheck('wi-draft', 'draft MR', s.draft,
+                  'Sets CI_MERGE_REQUEST_DRAFT — GitLab does not skip drafts unless your rules say so')
+        + '<div class="wi-field"><label for="wi-flavor">MR pipeline flavor</label>'
+        + '<select class="input" id="wi-flavor">'
+        + '<option value="detached"' + (s.mrFlavor === 'detached' ? ' selected' : '') + '>detached (default)</option>'
+        + '<option value="merged_result"' + (s.mrFlavor === 'merged_result' ? ' selected' : '') + '>merged results</option>'
+        + '<option value="merge_train"' + (s.mrFlavor === 'merge_train' ? ' selected' : '') + '>merge train</option>'
+        + '</select></div>'
+        + '</div>';
+    }
+
+    html += '<div class="wi-group"><h3>Changed files</h3>'
+      + wiRadio('wi-changed', 'unknown', 'unknown — leave “depends”', s.changedMode === 'unknown')
+      + wiRadio('wi-changed', 'all', 'assume every pattern matches', s.changedMode === 'all')
+      + wiRadio('wi-changed', 'none', 'assume nothing matches', s.changedMode === 'none')
+      + wiRadio('wi-changed', 'list', 'exactly these paths…', s.changedMode === 'list')
+      + '<div class="wi-field" id="wi-changed-field"' + (s.changedMode === 'list' ? '' : ' hidden')
+      + '><label for="wi-changed-list">one path per line (what’s in the commit / MR)</label>'
+      + '<textarea class="input" id="wi-changed-list" spellcheck="false">'
+      + esc(s.changedList) + '</textarea></div>'
+      + '</div>';
+
+    if (s.scenario === 'push_branch' || s.scenario === 'push_tag') {
+      html += '<div class="wi-group"><h3>Commit message</h3>'
+        + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
+        + esc(s.commitMessage) + '"></div></div>';
+    }
+
+    html += '<div class="wi-group"><h3>Variables '
+      + '<span style="text-transform:none;letter-spacing:0">(project/group level — beat YAML values)</span></h3>'
+      + '<div id="wi-var-rows">'
+      + s.overrides.map((o, i) =>
+          '<div class="wi-var-row" data-idx="' + i + '">'
+          + '<input class="input wi-var-name" placeholder="NAME" value="' + esc(o.name) + '">'
+          + '<input class="input wi-var-value" placeholder="value" value="' + esc(o.value) + '">'
+          + '<button class="btn btn-quiet wi-var-del" data-tip="Remove">&times;</button></div>'
+        ).join('')
+      + '</div>'
+      + '<div class="wi-inline-btns"><button class="btn" id="wi-var-add">+ variable</button></div>'
+      + '<div id="wi-unknown-list"></div>'
+      + '</div>';
+
+    wiControls.innerHTML = html;
+    wireWiControls();
+  }
+
+  function wireWiControls() {
+    wiControls.querySelectorAll('input[name="wi-scenario"]').forEach(el =>
+      el.addEventListener('change', () => { wiState.scenario = el.value; wiRefresh(true); }));
+    wiControls.querySelectorAll('input[name="wi-branch"]').forEach(el =>
+      el.addEventListener('change', () => { wiState.branchKind = el.value; wiRefresh(true); }));
+    wiControls.querySelectorAll('input[name="wi-changed"]').forEach(el =>
+      el.addEventListener('change', () => { wiState.changedMode = el.value; wiRefresh(true); }));
+
+    const bindText = (id, key) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('input', () => { wiState[key] = el.value; wiRefresh(false); });
+    };
+    bindText('wi-feature-name', 'featureName');
+    bindText('wi-tag-name', 'tag');
+    bindText('wi-changed-list', 'changedList');
+    bindText('wi-commit-msg', 'commitMessage');
+
+    const bindCheck = (id, key) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', () => { wiState[key] = el.checked; wiRefresh(true); });
+    };
+    bindCheck('wi-openmr', 'openMR');
+    bindCheck('wi-draft', 'draft');
+    bindCheck('wi-tag-protected', 'tagProtected');
+
+    const bindSelect = (id, key) => {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener('change', () => { wiState[key] = el.value; wiRefresh(false); });
+    };
+    bindSelect('wi-target', 'target');
+    bindSelect('wi-flavor', 'mrFlavor');
+
+    const addBtn = document.getElementById('wi-var-add');
+    if (addBtn) addBtn.addEventListener('click', () => {
+      wiState.overrides.push({ name: '', value: '' });
+      wiRefresh(true);
+      const rows = wiControls.querySelectorAll('.wi-var-name');
+      if (rows.length) rows[rows.length - 1].focus();
+    });
+    wiControls.querySelectorAll('.wi-var-row').forEach(row => {
+      const idx = parseInt(row.dataset.idx, 10);
+      row.querySelector('.wi-var-name').addEventListener('input', e => {
+        wiState.overrides[idx].name = e.target.value.trim(); wiRefresh(false);
+      });
+      row.querySelector('.wi-var-value').addEventListener('input', e => {
+        wiState.overrides[idx].value = e.target.value; wiRefresh(false);
+      });
+      row.querySelector('.wi-var-del').addEventListener('click', () => {
+        wiState.overrides.splice(idx, 1); wiRefresh(true);
+      });
+    });
+  }
+
+  // rebuildControls: structural knob changed (groups appear/disappear).
+  // Plain text input → results only, debounced, focus preserved.
+  function wiRefresh(rebuildControls) {
+    if (rebuildControls) renderWiControls();
+    clearTimeout(wiRenderTimer);
+    wiRenderTimer = setTimeout(renderWiResults, rebuildControls ? 0 : 160);
+  }
+
+  /* ---------------- unknown variables helper ---------------- */
+
+  const wiExprVars = whatifAvailable
+    ? PipeviewWhatIf.collectExpressionVariables(REPORT) : [];
+
+  function wiUpdateUnknownVars(result) {
+    const box = document.getElementById('wi-unknown-list');
+    if (!box) return;
+    const known = new Set(Object.keys(WHATIF.globals || {}));
+    result.candidates.forEach(c => Object.keys(c.env).forEach(k => known.add(k)));
+    REPORT.nodes.forEach(n => {
+      const w = n.annotations && n.annotations.whatif;
+      if (w) Object.keys(w.variables || {}).forEach(k => known.add(k));
+    });
+    if (WHATIF.workflow) (WHATIF.workflow.rules || []).forEach(r =>
+      Object.keys(r.variables || {}).forEach(k => known.add(k)));
+    wiState.overrides.forEach(o => { if (o.name) known.add(o.name); });
+
+    const unknown = wiExprVars.filter(name => !known.has(name));
+    if (!unknown.length) { box.innerHTML = ''; return; }
+    box.innerHTML = '<div class="legend-note" style="margin-top:var(--sp-2)">'
+      + 'referenced in rules but defined nowhere — currently <b>unset</b>:</div>'
+      + unknown.map(name =>
+          '<div class="wi-unknown-var"><span class="clip" title="' + esc(name) + '">'
+          + esc(name) + '</span><button class="btn wi-set-var" data-var="'
+          + esc(name) + '">set</button></div>').join('');
+    box.querySelectorAll('.wi-set-var').forEach(btn =>
+      btn.addEventListener('click', () => {
+        wiState.overrides.push({ name: btn.dataset.var, value: '' });
+        wiRefresh(true);
+        const rows = wiControls.querySelectorAll('.wi-var-value');
+        if (rows.length) rows[rows.length - 1].focus();
+      }));
+  }
+
+  /* ---------------- results rendering ---------------- */
+
+  function wiOutcomeSummary(out) {
+    if (!out) return '';
+    if (out.state === 'conditional') {
+      return 'depends on: ' + out.condition;
+    }
+    if (out.state === 'runs') return 'runs (when: ' + (out.when || 'on_success') + ')';
+    if (out.state === 'manual') {
+      return 'manual gate' + (out.allow_failure === false ? ' (blocking)' : '');
+    }
+    if (out.state === 'delayed') return 'delayed' + (out.start_in ? ' ' + out.start_in : '');
+    if (out.state === 'skipped') return 'skipped (matched a when: never rule)';
+    return 'not added (' + (out.reason || 'no rule matched') + ')';
+  }
+
+  function wiSafeId(s) { return s.replace(/[^A-Za-z0-9_-]/g, '-'); }
+
+  function wiGraphSvg(cand) {
+    const show = wiShowSkippedEl.checked;
+    const ids = cand.jobOrder.filter(id => show || wiMightRun(cand.jobs[id].state));
+    if (!ids.length) {
+      return '<div class="wi-pipe-reason">No jobs to draw'
+        + (show ? '' : ' — skipped jobs are hidden') + '.</div>';
+    }
+    if (typeof dagre === 'undefined') {
+      return '<div class="wi-pipe-reason">' + ids.map(id => esc(nodeMap[id].name)).join(' · ')
+        + '</div>';
+    }
+    const idSet = new Set(ids);
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({ rankdir: 'LR', nodesep: 18, ranksep: 48, marginx: 14, marginy: 14 });
+    g.setDefaultEdgeLabel(() => ({}));
+    ids.forEach(id => {
+      const label = midTrunc(nodeMap[id].name, 24);
+      g.setNode(id, { label, width: Math.max(92, label.length * 6.8 + 24), height: 40 });
+    });
+    const edges = graphEdges.filter(e =>
+      (e.kind === 'needs' || e.kind === 'stage_order')
+      && idSet.has(e.src) && idSet.has(e.dst));
+    // Model edges point job → dependency; pipelines read better as
+    // execution flow, so draw dependency → dependent (build on the left).
+    edges.forEach(e => g.setEdge(e.dst, e.src, { kind: e.kind }));
+    dagre.layout(g);
+    const gr = g.graph();
+    const w = Math.max(gr.width || 200, 60), h = Math.max(gr.height || 80, 60);
+    const marker = 'wi-arrow-' + wiSafeId(cand.id);
+
+    let svg = '<svg width="' + w + '" height="' + h + '" role="img" aria-label="'
+      + esc(cand.label) + ' jobs">'
+      + '<defs><marker id="' + marker + '" markerWidth="9" markerHeight="7" refX="8" refY="3.5"'
+      + ' orient="auto" markerUnits="userSpaceOnUse">'
+      + '<polygon points="0 0,8 3.5,0 7" fill="var(--edge-needs)"/></marker></defs>';
+
+    g.edges().forEach(e => {
+      const edge = g.edge(e);
+      const pts = edge.points || [];
+      if (pts.length < 2) return;
+      let d = 'M' + pts[0].x + ',' + pts[0].y;
+      for (let i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ',' + pts[i].y;
+      svg += '<path class="wi-edge kind-' + edge.kind + '" d="' + d
+        + '" marker-end="url(#' + marker + ')"/>';
+    });
+
+    g.nodes().forEach(id => {
+      const lo = g.node(id);
+      if (!lo) return;
+      const res = cand.jobs[id];
+      const x = lo.x - lo.width / 2, y = lo.y - lo.height / 2;
+      const dup = wiDupSet.has(id);
+      const stateText = WI_STATE_LABEL[res.state] || res.state;
+      const firstNote = (res.trace && res.trace.length)
+        ? res.trace[res.trace.length - 1].desc : '';
+      svg += '<g class="wi-node st-' + res.state + (dup ? ' wi-dup' : '')
+        + '" data-job="' + esc(id) + '" data-cand="' + esc(cand.id) + '" tabindex="0">'
+        + '<title>' + esc(nodeMap[id].name) + ' — ' + esc(stateText)
+        + (dup ? ' · DUPLICATE: may run in more than one pipeline for this event' : '')
+        + (firstNote ? '\n' + esc(firstNote) : '') + '</title>'
+        + '<rect x="' + x + '" y="' + y + '" width="' + lo.width + '" height="' + lo.height + '" rx="5"/>'
+        + '<text x="' + lo.x + '" y="' + (lo.y - 1) + '" text-anchor="middle">' + esc(lo.label) + '</text>'
+        + '<text class="wi-state-label" x="' + lo.x + '" y="' + (lo.y + 13) + '" text-anchor="middle">'
+        + esc(stateText) + '</text>'
+        + (dup ? '<circle class="wi-dup-badge" cx="' + (x + lo.width - 1) + '" cy="' + (y + 1) + '" r="5"/>' : '')
+        + '</g>';
+    });
+    return '<div class="wi-graph">' + svg + '</svg></div>';
+  }
+
+  function wiCandChips(cand) {
+    let chips = '<span class="chip">' + esc(cand.source) + '</span>'
+      + '<span class="chip" style="font-family:var(--font-mono)">' + esc(cand.ref) + '</span>';
+    if (cand.created === true) chips += '<span class="chip chip-ok">✓ created</span>';
+    else if (cand.created === false) chips += '<span class="chip chip-error">✖ not created</span>';
+    else chips += '<span class="chip chip-info" data-tip="' + esc(cand.reason || '') + '">? depends</span>';
+    const counts = {};
+    cand.jobOrder.forEach(id => {
+      counts[cand.jobs[id].state] = (counts[cand.jobs[id].state] || 0) + 1;
+    });
+    const bits = [];
+    ['runs', 'manual', 'delayed', 'conditional', 'skipped', 'not-added'].forEach(s => {
+      if (counts[s]) bits.push(counts[s] + ' ' + (WI_STATE_LABEL[s] || s));
+    });
+    if (bits.length) chips += '<span class="toolbar-note">' + esc(bits.join(' · ')) + '</span>';
+    return chips;
+  }
+
+  function wiDiag(kind, message) {
+    const sev = kind === 'error' ? 'error' : kind === 'warning' ? 'warning' : 'info';
+    const icon = sev === 'error' ? '✖' : sev === 'warning' ? '⚠' : 'ⓘ';
+    return '<div class="diag-item ' + sev + '"><span class="diag-sev">' + icon
+      + '</span><span class="diag-msg">' + message + '</span></div>';
+  }
+
+  function renderWiPipeline(cand) {
+    const dead = cand.created === false;
+    let html = '<section class="wi-pipeline' + (dead ? ' wi-dead' : '') + '">'
+      + '<div class="wi-pipe-head"><span class="wi-pipe-title">' + esc(cand.label)
+      + '</span>' + wiCandChips(cand) + '</div>';
+    if (dead) {
+      html += '<div class="wi-pipe-reason">' + esc(cand.reason || 'not created') + '</div></section>';
+      return html;
+    }
+    const banners = [];
+    cand.artifacts.errors.forEach(e => banners.push(wiDiag('error', esc(e.message))));
+    // dotenv notes collapse to one line per producer; the rest stay individual
+    const dotenvByProducer = {};
+    const seen = new Set();
+    cand.artifacts.notes.forEach(n => {
+      if (n.kind === 'dotenv' && n.producer) {
+        (dotenvByProducer[n.producer] = dotenvByProducer[n.producer] || []).push(n.job);
+        return;
+      }
+      if (seen.has(n.message) || banners.length >= 9) return;
+      seen.add(n.message);
+      banners.push(wiDiag(n.kind === 'conditional-need' ? 'warning' : 'info', esc(n.message)));
+    });
+    Object.keys(dotenvByProducer).forEach(producer => {
+      const consumers = Array.from(new Set(dotenvByProducer[producer]))
+        .map(id => nodeMap[id] ? nodeMap[id].name : id);
+      banners.push(wiDiag('info', 'Variables from <code>'
+        + esc(nodeMap[producer] ? nodeMap[producer].name : producer)
+        + '</code>’s dotenv report extend the runtime env of: '
+        + consumers.map(c => '<code>' + esc(c) + '</code>').join(', ')
+        + ' — dotenv variables can never affect rules (rules evaluate before any job runs).'));
+    });
+    if (cand.created === null) {
+      banners.unshift(wiDiag('warning',
+        'Whether this pipeline is created at all ' + esc(cand.reason || 'is uncertain')));
+    }
+    if (banners.length) html += '<div class="wi-pipe-banners">' + banners.join('') + '</div>';
+    html += wiGraphSvg(cand);
+    if (cand.children && cand.children.length) {
+      html += '<div class="wi-children">'
+        + '<div class="legend-note" style="margin-bottom:var(--sp-1)">child pipelines '
+        + '(CI_PIPELINE_SOURCE becomes parent_pipeline in here — merge_request_event '
+        + 'rules never match)</div>'
+        + cand.children.map(renderWiPipeline).join('') + '</div>';
+    }
+    html += '</section>';
+    return html;
+  }
+
+  function renderWiResults() {
+    if (!whatifAvailable) return;
+    let result;
+    try {
+      result = PipeviewWhatIf.evaluateEvent(REPORT, wiConfig());
+    } catch (err) {
+      wiResults.innerHTML = '<div class="empty"><div class="empty-title">Simulation failed</div><p>'
+        + esc(String(err)) + '</p></div>';
+      return;
+    }
+    wiLastResult = result;
+    wiDupSet = new Set(result.duplicates.map(d => d.job));
+
+    const strip = [];
+    if (result.duplicates.length) {
+      const names = result.duplicates.map(d =>
+        '<code>' + esc(nodeMap[d.job] ? nodeMap[d.job].name : d.job) + '</code>').join(', ');
+      strip.push(wiDiag('warning', '<b>' + result.duplicates.length
+        + ' duplicate job' + (result.duplicates.length > 1 ? 's' : '')
+        + ':</b> ' + names + ' — may run in more than one pipeline for this single event. '
+        + 'The usual fix is the documented <code>workflow:rules</code> dedup pattern.'));
+    }
+    if (result.crossPipelineArtifacts) {
+      strip.push(wiDiag('info', 'Both pipelines produce artifacts on the same ref — anything '
+        + 'that fetches artifacts <i>by ref</i> (downstream projects, “latest artifacts” '
+        + 'links) may get either pipeline’s output.'));
+    }
+    if (result.lint.length) {
+      strip.push('<details><summary class="toolbar-note" style="cursor:pointer">'
+        + result.lint.length + ' static warning' + (result.lint.length > 1 ? 's' : '')
+        + ' (independent of this scenario)</summary>'
+        + result.lint.map(l => wiDiag('warning', esc(l.message))).join('') + '</details>');
+    }
+
+    const createdCount = result.candidates.filter(c => c.created !== false).length
+      + result.candidates.reduce((n, c) => n
+          + (c.children || []).filter(ch => ch.created !== false).length, 0);
+    document.getElementById('count-whatif').textContent = ' ' + createdCount;
+    wiNoteEl.textContent = result.candidates.length + ' candidate pipeline'
+      + (result.candidates.length > 1 ? 's' : '') + ' · ' + createdCount + ' would run';
+
+    wiResults.innerHTML =
+      (strip.length ? '<div class="wi-banner-strip">' + strip.join('') + '</div>' : '')
+      + result.candidates.map(renderWiPipeline).join('');
+
+    wiResults.querySelectorAll('.wi-node').forEach(el => {
+      const open = () => showWiJobDetail(el.dataset.job, el.dataset.cand);
+      el.addEventListener('click', ev => { ev.stopPropagation(); open(); });
+      el.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
+      });
+      el.addEventListener('mouseenter', () => wiHighlight(el.dataset.job, true));
+      el.addEventListener('mouseleave', () => wiHighlight(el.dataset.job, false));
+    });
+    wiUpdateUnknownVars(result);
+  }
+
+  function wiHighlight(jobId, on) {
+    wiResults.querySelectorAll('.wi-node').forEach(el => {
+      el.classList.toggle('wi-hl', on && el.dataset.job === jobId);
+    });
+  }
+
+  function wiFindCandidate(candId) {
+    if (!wiLastResult) return null;
+    for (const c of wiLastResult.candidates) {
+      if (c.id === candId) return c;
+      for (const ch of (c.children || [])) if (ch.id === candId) return ch;
+    }
+    return null;
+  }
+
+  function wiTraceHtml(res) {
+    if (!res.trace || !res.trace.length) return '';
+    const VERDICT_CHIP = {
+      matched: 'chip-ok', 'no match': '', unknown: 'chip-info', end: ''
+    };
+    return '<ol class="timeline">' + res.trace.map(t => {
+      const label = t.rule === null ? '' : 'rule ' + (t.rule + 1) + ': ';
+      return '<li class="tl-event"><div class="tl-head">'
+        + '<span class="chip ' + (VERDICT_CHIP[t.verdict] || '') + '">' + esc(t.verdict) + '</span>'
+        + (t.when ? '<span class="chip chip-warn">when: ' + esc(t.when) + '</span>' : '')
+        + '</div><div class="tl-value">' + esc(label + t.desc) + '</div>'
+        + (t.notes && t.notes.length
+            ? '<div class="tl-note">' + t.notes.map(esc).join('<br>') + '</div>' : '')
+        + '</li>';
+    }).join('') + '</ol>';
+  }
+
+  function showWiJobDetail(jobId, candId) {
+    const node = nodeMap[jobId];
+    const cand = wiFindCandidate(candId);
+    if (!node || !cand) return;
+    const res = cand.jobs[jobId];
+    openPanel();
+    panelName.textContent = node.name;
+    panelName.title = node.name;
+
+    let html = '<div class="panel-section"><div class="panel-idrow">'
+      + '<span class="chip ' + (WI_STATE_CHIP[res.state] || '') + '">'
+      + esc(WI_STATE_LABEL[res.state] || res.state) + '</span>'
+      + '<span class="chip">' + esc(cand.label) + '</span>'
+      + (wiDupSet.has(jobId)
+          ? '<span class="chip chip-warn" data-tip="This job may run in more than one pipeline spawned by the same event">duplicate</span>'
+          : '')
+      + '</div>'
+      + (node.source ? '<div class="value">' + locHtml(node.source) + '</div>' : '')
+      + '</div>';
+
+    html += '<div class="panel-section"><h3>Verdict</h3><div class="value wrap-any">'
+      + esc(wiOutcomeSummary(res)) + '</div>';
+    if (res.state === 'conditional') {
+      html += '<div class="tl-note" style="margin-top:var(--sp-1)">if it holds → '
+        + esc(wiOutcomeSummary(res.then)) + '<br>otherwise → '
+        + esc(wiOutcomeSummary(res.otherwise)) + '</div>';
+    }
+    html += '</div>';
+
+    html += '<div class="panel-section"><h3>Rule-by-rule trace</h3>' + wiTraceHtml(res) + '</div>';
+
+    const related = [];
+    cand.artifacts.errors.forEach(e => {
+      if (e.job === jobId || e.target === jobId) related.push(wiDiag('error', esc(e.message)));
+    });
+    cand.artifacts.notes.forEach(n => {
+      if (n.job === jobId || n.producer === jobId) related.push(wiDiag(n.kind === 'dotenv' ? 'info' : 'warning', esc(n.message)));
+    });
+    if (related.length) {
+      html += '<div class="panel-section"><h3>Artifacts &amp; environment</h3>'
+        + related.join('') + '</div>';
+    }
+
+    html += '<div class="panel-section"><button class="btn" id="wi-full-detail">'
+      + 'Full job details</button></div>';
+
+    panelBody.innerHTML = html;
+    panelBody.scrollTop = 0;
+    wirePanel();
+    const btn = document.getElementById('wi-full-detail');
+    if (btn) btn.addEventListener('click', () => showNodeDetail(jobId));
+  }
+
+  if (whatifAvailable) {
+    wiShowSkippedEl.addEventListener('change', renderWiResults);
+    renderWiControls();
+    renderWiResults();
+  }
 
   /* ==========================================================
      Search: keyboard-first, grouped results

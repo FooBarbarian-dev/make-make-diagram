@@ -263,6 +263,9 @@ var PipeviewWhatIf = (function () {
         parts.push(true);
         notes.push('rules:changes is always true in pipelines with no push event '
           + '(tag, schedule, manual, api/trigger)');
+      } else if (ctx.changedFiles === 'all') {
+        parts.push(true);
+        notes.push('assuming every changes: pattern matches');
       } else if (ctx.changedFiles === null || ctx.changedFiles === undefined) {
         parts.push(null);
         notes.push('depends on which files changed — fill in the changed-files list');
@@ -391,7 +394,7 @@ var PipeviewWhatIf = (function () {
       })));
     }
     if (spec.changes) {
-      if (ctx.changesAlwaysTrue) parts.push(true);
+      if (ctx.changesAlwaysTrue || ctx.changedFiles === 'all') parts.push(true);
       else if (ctx.changedFiles == null) {
         parts.push(null);
         notes.push('only/except:changes depends on the changed-files list');
