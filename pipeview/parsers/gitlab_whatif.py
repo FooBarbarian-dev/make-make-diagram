@@ -774,6 +774,32 @@ def compile_whatif(state) -> dict:
                          for k, v in source_vars.items()
                          if not isinstance(v, _Reference)}
 
+        # parallel:matrix — GitLab expands instances BEFORE rules evaluate,
+        # each instance seeing its own axis variables; needs can address one
+        # instance by its expanded name ("job: [v1, v2]")
+        matrix_cfg = None
+        par = flat.get("parallel")
+        if isinstance(par, int) and par > 1:
+            matrix_cfg = {"kind": "count", "count": par}
+        elif isinstance(par, dict) and isinstance(par.get("matrix"), list):
+            combos: list[dict[str, str]] = []
+            for entry in par["matrix"]:
+                if not isinstance(entry, dict):
+                    continue
+                acc: list[dict[str, str]] = [{}]
+                for axis, vals in entry.items():
+                    vlist = vals if isinstance(vals, list) else [vals]
+                    acc = [dict(c, **{str(axis): _plain_value(v)})
+                           for c in acc for v in vlist]
+                combos.extend(acc)
+            combos = combos[:200]   # GitLab's own instance ceiling
+            matrix_cfg = {
+                "kind": "matrix",
+                "combos": [{"vars": c,
+                            "name": f"{plain_name}: [{', '.join(c.values())}]"}
+                           for c in combos],
+            }
+
         inherit_cfg = flat.get("inherit") if isinstance(flat.get("inherit"), dict) else {}
         inherit_vars: Any = inherit_cfg.get("variables", True)
         if isinstance(inherit_vars, list):
@@ -827,6 +853,8 @@ def compile_whatif(state) -> dict:
             node.annotations["whatif"]["inherit_variables"] = inherit_vars
         if include_gate is not None:
             node.annotations["whatif"]["include_gate"] = include_gate
+        if matrix_cfg is not None:
+            node.annotations["whatif"]["parallel"] = matrix_cfg
 
     _config_fatal_checks(state, ctx)
 

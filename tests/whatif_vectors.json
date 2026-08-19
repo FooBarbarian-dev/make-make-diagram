@@ -459,6 +459,37 @@
       }
     },
     {
+      "name": "matrix: instance needs resolve, invalid combos fail, axis vars gate rules",
+      "fixture": "whatif_matrix",
+      "config": {"scenario": "push_branch", "branch": "feature/widget"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "jobs": {"build": "runs", "test_x86": "runs", "test_bad": "runs"},
+            "matrixStates": {
+              "deploy": {"deploy: [staging]": "runs", "deploy: [prod]": "skipped"}
+            },
+            "artifactErrorsAtLeast": 1,
+            "errorsContain": ["not a valid matrix instance"]
+          }
+        }
+      }
+    },
+    {
+      "name": "matrix: on main every deploy instance runs",
+      "fixture": "whatif_matrix",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "matrixStates": {
+              "deploy": {"deploy: [staging]": "runs", "deploy: [prod]": "runs"}
+            }
+          }
+        }
+      }
+    },
+    {
       "name": "invalid: GitLab-rejected configs are fatal, not green",
       "fixture": "whatif_invalid",
       "config": {"scenario": "push_branch", "branch": "main"},

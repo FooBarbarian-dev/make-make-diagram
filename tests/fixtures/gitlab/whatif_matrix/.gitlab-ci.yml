@@ -1,0 +1,46 @@
+# parallel:matrix — instances expand BEFORE rules evaluate, needs can
+# address one instance by its expanded name, and invalid instance names
+# are real creation failures.
+
+stages:
+  - build
+  - test
+  - deploy
+
+build:
+  stage: build
+  script:
+    - make build
+  parallel:
+    matrix:
+      - ARCH: [x86, arm64]
+        OS: [linux]
+
+## the documented way to need ONE matrix instance
+test_x86:
+  stage: test
+  script:
+    - make test
+  needs:
+    - "build: [x86, linux]"
+
+## an instance that does not exist — GitLab fails pipeline creation
+test_bad:
+  stage: test
+  script:
+    - make test
+  needs:
+    - "build: [mips, linux]"
+
+## axis variables are visible to the instance's own rules
+deploy:
+  stage: deploy
+  script:
+    - ./deploy.sh
+  parallel:
+    matrix:
+      - TARGET: [staging, prod]
+  rules:
+    - if: '$TARGET == "prod" && $CI_COMMIT_BRANCH != "main"'
+      when: never
+    - if: $CI_COMMIT_BRANCH

@@ -132,6 +132,15 @@ def _check_candidate(name: str, cand: dict, expect: dict, failures: list[str]) -
                     f"{name}/{cand['id']}/{job_id}: {key} expected {want_val!r}, "
                     f"got {job.get(key)!r}"
                 )
+    for job_id, inst_map in expect.get("matrixStates", {}).items():
+        job = cand["jobs"].get(job_id)
+        got_map = {m["name"]: m["state"] for m in (job or {}).get("matrix", [])}
+        for iname, istate in inst_map.items():
+            if got_map.get(iname) != istate:
+                failures.append(
+                    f"{name}/{cand['id']}/{job_id}: instance {iname!r} expected "
+                    f"{istate!r}, got {got_map.get(iname)!r} (all: {got_map})"
+                )
     for job_id, want_state in expect.get("jobs", {}).items():
         job = cand["jobs"].get(job_id)
         if job is None:

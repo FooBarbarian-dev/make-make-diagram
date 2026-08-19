@@ -312,6 +312,19 @@ class TestCompiledPrograms:
         assert whatif_of(r, "inherit_off")["inherit_variables"] is False
         assert "inherit_variables" not in whatif_of(r, "inherit_on")
 
+    def test_matrix_combos_expand_in_axis_order(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_matrix" / ".gitlab-ci.yml"))
+        par = whatif_of(r, "build")["parallel"]
+        assert par["kind"] == "matrix"
+        assert [c["name"] for c in par["combos"]] == \
+            ["build: [x86, linux]", "build: [arm64, linux]"]
+        assert par["combos"][0]["vars"] == {"ARCH": "x86", "OS": "linux"}
+        # instance-name needs resolve to the parent definition, no ghost
+        assert not any("test_x86" in d.message and "not defined" in d.message
+                       for d in r.diagnostics)
+        edges = [(e.src, e.dst) for e in r.edges if e.kind == "needs"]
+        assert ("test_x86", "build") in edges
+
     def test_include_gate_compiled(self):
         r = parse_gitlab(str(FIXTURES / "whatif_incgate" / ".gitlab-ci.yml"))
         gate = whatif_of(r, "manual_cleanup")["include_gate"]

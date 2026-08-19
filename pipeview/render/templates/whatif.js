@@ -628,6 +628,49 @@ var PipeviewWhatIf = (function () {
     return outcome;
   }
 
+  // parallel:matrix — GitLab expands instances BEFORE rules evaluate, each
+  // instance seeing its own axis variables (at job-variable precedence, so
+  // forwarded/override values are re-applied on top)
+  function evaluateJobMatrix(jobWhatif, candidate, ctx) {
+    var par = jobWhatif.parallel;
+    if (!par) return evaluateJobProgram(jobWhatif, candidate, ctx);
+    if (par.kind === 'count') {
+      var single = evaluateJobProgram(jobWhatif, candidate, ctx);
+      single.matrixCount = par.count;
+      return single;
+    }
+    var reapply = ctx.reapply || {};
+    var per = par.combos.map(function (c) {
+      var subCtx = {
+        env: Object.assign({}, ctx.env, c.vars, reapply),
+        controlled: ctx.controlled,
+        changedFiles: ctx.changedFiles,
+        changesAlwaysTrue: ctx.changesAlwaysTrue,
+        reapply: reapply
+      };
+      return { name: c.name, outcome: evaluateJobProgram(jobWhatif, candidate, subCtx) };
+    });
+    if (!per.length) return evaluateJobProgram(jobWhatif, candidate, ctx);
+    var ORDER = ['runs', 'delayed', 'manual', 'conditional', 'skipped', 'not-added'];
+    var pick = per[0];
+    per.forEach(function (p) {
+      if (ORDER.indexOf(p.outcome.state) < ORDER.indexOf(pick.outcome.state)) pick = p;
+    });
+    var base = Object.assign({}, pick.outcome);
+    base.matrix = per.map(function (p) {
+      return { name: p.name, state: p.outcome.state, when: p.outcome.when || null };
+    });
+    base.matrixCount = per.length;
+    base.matrixPartial = per.some(function (p) {
+      return p.outcome.state !== per[0].outcome.state;
+    });
+    base.included = per.some(function (p) { return mightRun(p.outcome); });
+    if (per.some(function (p) { return p.outcome.needsUncertain; })) {
+      base.needsUncertain = true;
+    }
+    return base;
+  }
+
   // include:rules — the file's jobs exist only when the include gate lets
   // the file in (no matching rule → the include is NOT processed)
   function walkIncludeGate(rules, ctx) {
@@ -645,7 +688,7 @@ var PipeviewWhatIf = (function () {
 
   function evaluateJob(jobWhatif, candidate, ctx) {
     var gateRules = jobWhatif.include_gate;
-    if (!gateRules) return evaluateJobProgram(jobWhatif, candidate, ctx);
+    if (!gateRules) return evaluateJobMatrix(jobWhatif, candidate, ctx);
     var gv = walkIncludeGate(gateRules, ctx);
     var gdesc = gateRules.map(function (r) { return describeCondition(r, ctx); })
       .join(' | ');
@@ -656,7 +699,7 @@ var PipeviewWhatIf = (function () {
           desc: 'from a conditional include gated on: ' + gdesc
             + ' — the include is not processed, the job does not exist here' }] };
     }
-    var inner = evaluateJobProgram(jobWhatif, candidate, ctx);
+    var inner = evaluateJobMatrix(jobWhatif, candidate, ctx);
     if (gv === true) {
       inner.trace.unshift({ rule: null, verdict: 'matched',
         desc: 'from a conditional include (gate matched): ' + gdesc });
@@ -846,7 +889,12 @@ var PipeviewWhatIf = (function () {
       var dotenvIn = [];   // producers whose dotenv reaches this job
 
       function checkTarget(name, optional, wantArtifacts, kindLabel) {
-        var targetId = (w.child_of ? w.child_of + '::' : '') + name;
+        // "job: [v1, v2]" addresses one matrix instance by its expanded name
+        var lookupName = name;
+        var instanceVals = null;
+        var mInst = /^(.+?):\s*\[(.+)\]$/.exec(name);
+        if (mInst) { lookupName = mInst[1]; instanceVals = mInst[2]; }
+        var targetId = (w.child_of ? w.child_of + '::' : '') + lookupName;
         var target = byId[targetId];
         if (!target) {
           var node = nodeIds[targetId] || nodeIds[name];
@@ -869,6 +917,24 @@ var PipeviewWhatIf = (function () {
           return;
         }
         var st = results[target.id];
+        if (instanceVals !== null) {
+          var tpar = target.whatif.parallel;
+          var fullName = lookupName + ': [' + instanceVals + ']';
+          var inst = (st.matrix || []).filter(function (mm) {
+            return mm.name === fullName;
+          })[0];
+          if (!tpar || tpar.kind !== 'matrix' || ((st.matrix || []).length && !inst)) {
+            errors.push({ job: job.id, target: target.id, kind: kindLabel,
+              message: '"' + w.name + '" ' + kindLabel + ' "' + name + '", which '
+                + 'is not a valid matrix instance of "' + lookupName + '" — '
+                + 'GitLab fails to create the pipeline' });
+            return;
+          }
+          if (inst) {
+            st = { state: inst.state,
+                   included: inst.state === 'conditional' ? true : undefined };
+          }
+        }
         if (!mightRun(st)) {
           if (!optional) {
             errors.push({ job: job.id, target: target.id, kind: kindLabel,
@@ -1009,7 +1075,10 @@ var PipeviewWhatIf = (function () {
                                  job.whatif.variables || {}, pipelineView, overrides);
       var ctx = { env: jobEnv, controlled: controlled,
                   changedFiles: config.changedFiles,
-                  changesAlwaysTrue: changesAlwaysTrue };
+                  changesAlwaysTrue: changesAlwaysTrue,
+                  // matrix axis vars slot in at job-variable precedence;
+                  // these layers re-apply on top of them
+                  reapply: Object.assign({}, pipelineView, overrides) };
       results[job.id] = evaluateJob(job.whatif, candidate, ctx);
     });
 
@@ -1155,7 +1224,12 @@ var PipeviewWhatIf = (function () {
         });
       });
       Object.keys(seen).forEach(function (id) {
-        if (seen[id].length > 1) duplicates.push({ job: id, candidates: seen[id] });
+        if (seen[id].length > 1) {
+          var entry = { job: id, candidates: seen[id] };
+          var c0 = candidates.filter(function (c) { return c.jobs[id]; })[0];
+          if (c0 && c0.jobs[id].matrixCount) entry.instances = c0.jobs[id].matrixCount;
+          duplicates.push(entry);
+        }
       });
     }
 

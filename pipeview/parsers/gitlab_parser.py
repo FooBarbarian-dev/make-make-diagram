@@ -1346,6 +1346,14 @@ def _build_jobs(state: _ParserState) -> None:
             else:
                 continue
             need_id = f"{namespace}{need_name}"
+            # "job: [x86, linux]" addresses one parallel:matrix instance —
+            # the edge goes to the parent definition, never a ghost
+            if need_id not in state.nodes and need_id not in state.job_configs \
+                    and ": [" in need_name:
+                base_id = f"{namespace}{need_name.split(': [', 1)[0]}"
+                if base_id in state.nodes or base_id in state.job_configs:
+                    need_id = base_id
+                    details.append(f"{need_name} (matrix instance)")
             if need_id not in state.nodes:
                 optional = isinstance(need, dict) and need.get("optional")
                 state.nodes[need_id] = Node(

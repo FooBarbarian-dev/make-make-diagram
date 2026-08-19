@@ -2620,8 +2620,16 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       const w = nodeMap[id].annotations.whatif;
       const res = cand.jobs[id];
       const label = midTrunc(nodeMap[id].name, 24);
-      const sub = w.stage + ' · ' + (res.when === 'on_failure'
-        ? 'on failure only' : (WI_STATE_LABEL[res.state] || res.state));
+      let stateText = res.when === 'on_failure'
+        ? 'on failure only' : (WI_STATE_LABEL[res.state] || res.state);
+      if (res.matrixPartial && res.matrix) {
+        const r = res.matrix.filter(m =>
+          ['runs', 'manual', 'delayed', 'conditional'].indexOf(m.state) >= 0).length;
+        stateText = r + '/' + res.matrix.length + ' instances run';
+      } else if (res.matrixCount) {
+        stateText += ' ×' + res.matrixCount;
+      }
+      const sub = w.stage + ' · ' + stateText;
       g.setNode(id, {
         label, sub,
         width: Math.max(92, Math.max(label.length * 6.8, sub.length * 5.4) + 24),
@@ -2828,7 +2836,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }
     if (result.duplicates.length) {
       const names = result.duplicates.map(d =>
-        '<code>' + esc(nodeMap[d.job] ? nodeMap[d.job].name : d.job) + '</code>').join(', ');
+        '<code>' + esc(nodeMap[d.job] ? nodeMap[d.job].name : d.job)
+        + (d.instances ? ' ×' + d.instances : '') + '</code>').join(', ');
       strip.push(wiDiag('warning', '<b>' + result.duplicates.length
         + ' duplicate job' + (result.duplicates.length > 1 ? 's' : '')
         + ':</b> ' + names + ' — may run in more than one pipeline for this single event. '
@@ -2962,7 +2971,21 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }
     html += '</div>';
 
-    html += '<div class="panel-section"><h3>Rule-by-rule trace</h3>' + wiTraceHtml(res) + '</div>';
+    if (res.matrix && res.matrix.length) {
+      html += '<div class="panel-section"><h3>Matrix instances (' + res.matrix.length
+        + ')</h3><ul class="edge-list">'
+        + res.matrix.map(m =>
+            '<li><span class="edge-target clip" title="' + esc(m.name) + '">'
+            + esc(m.name) + '</span><span class="chip ' + (WI_STATE_CHIP[m.state] || '')
+            + '">' + esc(WI_STATE_LABEL[m.state] || m.state) + '</span></li>').join('')
+        + '</ul></div>';
+    }
+
+    html += '<div class="panel-section"><h3>Rule-by-rule trace</h3>'
+      + (res.matrix && res.matrix.length
+          ? '<div class="tl-note" style="margin-bottom:var(--sp-1)">trace shown for the representative instance</div>'
+          : '')
+      + wiTraceHtml(res) + '</div>';
 
     const related = [];
     cand.artifacts.errors.forEach(e => {
