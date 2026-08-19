@@ -1,9 +1,8 @@
 # GitLab CI predefined-variable documentation — design
 
 Date: 2026-08-19
-Status: proposed — awaiting user review. (Planned in an autonomous session:
-the decisions below are recommendations with alternatives recorded, not
-choices already approved in dialogue.)
+Status: approved (user reviewed the proposal and said "implement");
+implemented — see the as-built notes at the end.
 
 ## Problem
 
@@ -183,6 +182,27 @@ is untouched.
 
 Each step lands green on its own; step 1 is pure Python and conflict-light
 while other work is in flight on this branch.
+
+## As-built notes (implementation deltas)
+
+- The catalog landed at ~100 entries.
+- The offline test forbids the URL schemes `http://` / `https://` rather
+  than the bare substring `http` — `CI_SERVER_PROTOCOL`'s example value is
+  legitimately `https`.
+- The reference section distinguishes two kinds of "referenced by this
+  configuration": names in `REPORT.variables` (collected from `$VAR` in
+  scripts — clickable "used here", jumping to the variable's row) and
+  names appearing only in rules/workflow expressions (an "in rules" chip),
+  the latter via the evaluator's existing `collectExpressionVariables`.
+  The spec's "used here" covered only the first kind, which misses
+  rules-only references — and rules are where predefined variables matter
+  most.
+- The reference section renders in every Variables-tab state, including
+  the no-variables and no-filter-match empty states.
+- No JS test-runner work was needed, as predicted; validation beyond
+  pytest was a scripted-browser smoke pass over both GitLab examples
+  (section rendering, filter focus, used-here jump, enriched detail,
+  tooltip counts, zero console errors).
 
 ## Out of scope
 
