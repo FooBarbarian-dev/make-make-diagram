@@ -1,0 +1,14 @@
+# Child pipeline for the docs. Note: in here CI_PIPELINE_SOURCE is
+# parent_pipeline — a rule matching merge_request_event can never fire.
+
+build_docs:
+  stage: build
+  script:
+    - make docs
+
+publish_docs:
+  stage: deploy
+  script:
+    - make publish-docs
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"

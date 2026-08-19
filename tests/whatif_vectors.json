@@ -1,0 +1,561 @@
+{
+  "_comment": "Hand-written expectations taken from the GitLab docs (job_rules, workflow, predefined_variables). The Python side compiles `src` to an AST; the shipped whatif.js evaluates it. 'unknown' is the tri-state third value.",
+  "expr": [
+    {"name": "eq matches", "src": "$CI_COMMIT_BRANCH == \"main\"",
+     "env": {"CI_COMMIT_BRANCH": "main"}, "expect": true},
+    {"name": "eq against unset var is false", "src": "$CI_COMMIT_BRANCH == \"main\"",
+     "env": {}, "expect": false},
+    {"name": "unset == null is true", "src": "$V == null", "env": {}, "expect": true},
+    {"name": "empty string == null is false", "src": "$V == null",
+     "env": {"V": ""}, "expect": false},
+    {"name": "empty == empty-literal", "src": "$V == \"\"", "env": {"V": ""}, "expect": true},
+    {"name": "unset == empty-literal is false", "src": "$V == \"\"", "env": {}, "expect": false},
+    {"name": "bare unset var is falsy", "src": "$V", "env": {}, "expect": false},
+    {"name": "bare empty var is falsy", "src": "$V", "env": {"V": ""}, "expect": false},
+    {"name": "the string false is truthy", "src": "$V", "env": {"V": "false"}, "expect": true},
+    {"name": "the string 0 is truthy", "src": "$V", "env": {"V": "0"}, "expect": true},
+    {"name": "not of the string false is false", "src": "!$V",
+     "env": {"V": "false"}, "expect": false},
+    {"name": "not of unset is true", "src": "!$V", "env": {}, "expect": true},
+    {"name": "and binds before or (left)", "src": "$A && $B || $C",
+     "env": {"A": "x", "C": "y"}, "expect": true},
+    {"name": "and binds before or (right)", "src": "$A || $B && $C",
+     "env": {"B": "x"}, "expect": false},
+    {"name": "parens override precedence", "src": "($A || $B) && $C",
+     "env": {"B": "x"}, "expect": false},
+    {"name": "regex match", "src": "$REF =~ /^feature-.*/",
+     "env": {"REF": "feature-login"}, "expect": true},
+    {"name": "regex is case-sensitive by default", "src": "$REF =~ /^feature-.*/",
+     "env": {"REF": "FEATURE-LOGIN"}, "expect": false},
+    {"name": "i flag makes it case-insensitive", "src": "$REF =~ /^feature-.*/i",
+     "env": {"REF": "FEATURE-LOGIN"}, "expect": true},
+    {"name": "regex against unset var is false", "src": "$REF =~ /x/",
+     "env": {}, "expect": false},
+    {"name": "negative match on unset var is true", "src": "$REF !~ /x/",
+     "env": {}, "expect": true},
+    {"name": "regex stored in a variable", "src": "$T =~ $P",
+     "env": {"T": "abcde", "P": "/^ab.*/"}, "expect": true},
+    {"name": "unset left matches an empty-string-matching regex", "src": "$U =~ /.*/",
+     "env": {}, "expect": true},
+    {"name": "negative of the empty-string match", "src": "$U !~ /.*/",
+     "env": {}, "expect": false},
+    {"name": "unset pattern variable is a definite no-match", "src": "\"x\" =~ $PAT",
+     "env": {}, "expect": false},
+    {"name": "unset pattern variable with !~ is true", "src": "\"x\" !~ $PAT",
+     "env": {}, "expect": true},
+    {"name": "chained comparison: boolean never equals a string",
+     "src": "$A == \"a\" == \"b\"", "env": {"A": "a"}, "expect": false},
+    {"name": "chained comparison with != flips it",
+     "src": "$A == \"a\" != \"b\"", "env": {"A": "a"}, "expect": true},
+    {"name": "invalid unquoted boolean evaluates unknown", "src": "$X == true",
+     "env": {"X": "true"}, "expect": "unknown"},
+    {"name": "unsimulated predefined is runtime-unknown when controlled info is present",
+     "src": "$CI_KUBERNETES_ACTIVE", "env": {},
+     "controlled": {"names": [], "prefixes": []}, "expect": "unknown"},
+    {"name": "deliberately-unset predefined stays definite false",
+     "src": "$CI_COMMIT_TAG", "env": {},
+     "controlled": {"names": ["CI_COMMIT_TAG"], "prefixes": []}, "expect": false},
+    {"name": "documented substring fallback: 23 in 1234", "src": "$A =~ $B",
+     "env": {"A": "23", "B": "1234"}, "expect": true},
+    {"name": "var to var equality", "src": "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH",
+     "env": {"CI_COMMIT_BRANCH": "main", "CI_DEFAULT_BRANCH": "main"}, "expect": true},
+    {"name": "unparseable expression is unknown", "src": "CI_COMMIT_BRANCH === \"oops\"",
+     "env": {}, "expect": "unknown"},
+    {"name": "unknown and false is false (hand-written AST)",
+     "ast": {"op": "and", "args": [{"op": "opaque", "src": "?"},
+                                   {"op": "truthy", "term": {"t": "var", "name": "B"}}]},
+     "env": {}, "expect": false},
+    {"name": "unknown and true is unknown (hand-written AST)",
+     "ast": {"op": "and", "args": [{"op": "opaque", "src": "?"},
+                                   {"op": "truthy", "term": {"t": "var", "name": "B"}}]},
+     "env": {"B": "x"}, "expect": "unknown"},
+    {"name": "unknown or true is true (hand-written AST)",
+     "ast": {"op": "or", "args": [{"op": "opaque", "src": "?"},
+                                  {"op": "truthy", "term": {"t": "var", "name": "B"}}]},
+     "env": {"B": "x"}, "expect": true},
+    {"name": "not unknown is unknown (hand-written AST)",
+     "ast": {"op": "not", "arg": {"op": "opaque", "src": "?"}},
+     "env": {}, "expect": "unknown"}
+  ],
+  "scenarios": [
+    {
+      "name": "dup: push to main, no MR — branch pipeline only",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"created": true,
+                     "jobs": {"build_all": "runs", "test_mr": "not-added",
+                              "lint_everything": "runs"}}
+        },
+        "duplicates": []
+      }
+    },
+    {
+      "name": "dup: push to feature with open MR — the documented duplicate",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "push_branch", "branch": "feature/widget",
+                 "openMR": true, "target": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"created": true,
+                     "jobs": {"build_all": "runs", "test_mr": "not-added",
+                              "lint_everything": "runs"}},
+          "mr": {"created": true,
+                 "jobs": {"build_all": "not-added", "test_mr": "runs",
+                          "lint_everything": "runs"}}
+        },
+        "duplicates": ["lint_everything"]
+      }
+    },
+    {
+      "name": "dup: CUSTOM_VARIABLE=false kills the catch-all job",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "push_branch", "branch": "feature/widget",
+                 "openMR": true, "target": "main",
+                 "overrides": {"CUSTOM_VARIABLE": "false"}},
+      "expect": {
+        "candidates": {
+          "branch": {"created": true, "jobs": {"lint_everything": "skipped"}},
+          "mr": {"created": true, "jobs": {"lint_everything": "skipped"}}
+        },
+        "duplicates": []
+      }
+    },
+    {
+      "name": "dup: tag pipeline — implicit only:tags applies, MR job absent",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "push_tag", "tag": "v2.0.0"},
+      "expect": {
+        "candidates": {
+          "tag": {"created": true,
+                  "jobs": {"build_all": "runs", "test_mr": "not-added",
+                           "lint_everything": "runs"}}
+        },
+        "duplicates": []
+      }
+    },
+    {
+      "name": "dedup: canonical workflow pattern suppresses the branch pipeline",
+      "fixture": "whatif_dedup",
+      "config": {"scenario": "push_branch", "branch": "feature/widget",
+                 "openMR": true, "target": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"created": false},
+          "mr": {"created": true,
+                 "jobs": {"test_mr": "runs", "lint_everything": "runs",
+                          "build_all": "not-added"}}
+        },
+        "duplicates": []
+      }
+    },
+    {
+      "name": "dedup: no MR open — branch pipeline allowed by rule 3",
+      "fixture": "whatif_dedup",
+      "config": {"scenario": "push_branch", "branch": "feature/widget"},
+      "expect": {
+        "candidates": {
+          "branch": {"created": true,
+                     "jobs": {"build_all": "runs", "lint_everything": "runs"}}
+        },
+        "duplicates": []
+      }
+    },
+    {
+      "name": "dedup: tag pipeline matches no workflow rule — not created",
+      "fixture": "whatif_dedup",
+      "config": {"scenario": "push_tag", "tag": "v1.0.0"},
+      "expect": {
+        "candidates": {"tag": {"created": false}},
+        "duplicates": []
+      }
+    },
+    {
+      "name": "features: push to main with docs change",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["docs/guide.md"]},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "created": true,
+            "jobs": {"build_meta": "runs", "docker_build": "runs",
+                     "docs_check": "runs", "legacy_deploy": "not-added",
+                     "weird_rules": "conditional", "integration": "runs",
+                     "package": "runs", "trigger_child": "runs"},
+            "notesContain": ["dotenv report"],
+            "workflowVariablesContain": {"FROM_WORKFLOW": "yes"},
+            "children": {
+              "ci/child.yml": {
+                "jobs": {"ci/child.yml::child_build": "runs",
+                         "ci/child.yml::child_mr_only": "not-added",
+                         "ci/child.yml::child_always": "runs",
+                         "ci/child.yml::child_only_pipelines": "not-added"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "features: no docs changed — docs_check falls to the delayed rule",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": []},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"docs_check": "delayed"}}}
+      }
+    },
+    {
+      "name": "features: unknown changed files — docs_check is conditional",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": null},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"docs_check": "conditional"}}}
+      }
+    },
+    {
+      "name": "features: DEPLOY_ENV=production unlocks the legacy job",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": [],
+                 "overrides": {"DEPLOY_ENV": "production"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"legacy_deploy": "runs"}}}
+      }
+    },
+    {
+      "name": "features: tag pipeline blocked by workflow when:never",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_tag", "tag": "v1.0.0"},
+      "expect": {
+        "candidates": {"tag": {"created": false}}
+      }
+    },
+    {
+      "name": "features: schedule — changes always true, schedules ref keyword",
+      "fixture": "whatif_features",
+      "config": {"scenario": "schedule", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "schedule": {"created": true,
+                       "jobs": {"docs_check": "runs", "legacy_deploy": "not-added"}}
+        }
+      }
+    },
+    {
+      "name": "features: MR pipeline — broken needs on a branch-only producer",
+      "fixture": "whatif_features",
+      "config": {"scenario": "mr", "branch": "feature/widget", "target": "main",
+                 "changedFiles": []},
+      "expect": {
+        "candidates": {
+          "mr": {"created": true,
+                 "jobs": {"build_meta": "not-added", "docker_build": "runs",
+                          "integration": "runs"},
+                 "artifactErrorsAtLeast": 1,
+                 "errorsContain": ["fail to create"]}
+        }
+      }
+    },
+    {
+      "name": "features: except ORs its clause kinds — schedules ref alone excludes",
+      "fixture": "whatif_features",
+      "config": {"scenario": "schedule", "branch": "main"},
+      "expect": {
+        "candidates": {"schedule": {"jobs": {"legacy_except_multi": "not-added",
+                                             "legacy_singular": "runs"}}}
+      }
+    },
+    {
+      "name": "features: singular legacy source keywords do not match branch names",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "schedule", "changedFiles": []},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"legacy_singular": "not-added"}}}
+      }
+    },
+    {
+      "name": "features: except variables clause excludes on a branch push",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": [],
+                 "overrides": {"SKIP_ALL": "yes"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"legacy_except_multi": "not-added"}}}
+      }
+    },
+    {
+      "name": "features: except with no matching clause keeps the job",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": []},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"legacy_except_multi": "runs"}}}
+      }
+    },
+    {
+      "name": "nested: flattened rules evaluate in order (catch-all reached)",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": null},
+      "expect": {
+        "candidates": {
+          "branch": {"created": true,
+                     "jobs": {"job_a": "runs", "flag_job": "conditional",
+                              "brace_job": "conditional", "never_job": "skipped",
+                              "legacy_manual": "manual",
+                              "manual_block_legacy": "manual",
+                              "manual_rules_joblevel": "manual"},
+                     "jobsDetail": {"legacy_manual": {"allow_failure": true},
+                                    "manual_block_legacy": {"allow_failure": false},
+                                    "manual_rules_joblevel": {"allow_failure": false},
+                                    "needs_override_job": {"needsOverride": []}}}
+        }
+      }
+    },
+    {
+      "name": "wfcollapse: unknown workflow rule that cannot change the outcome collapses to created",
+      "fixture": "whatif_wfcollapse",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {"branch": {"created": true, "jobs": {"job_x": "runs"}}}
+      }
+    },
+    {
+      "name": "wfnever: unknown rule into when:never with no fallback collapses to not created",
+      "fixture": "whatif_wfnever",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {"branch": {"created": false}}
+      }
+    },
+    {
+      "name": "selftrig: a self-triggering child is cut at the first repetition",
+      "fixture": "whatif_selftrig",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "created": true,
+            "children": {"ci/self.yml": {"created": true, "childrenCount": 0}}
+          }
+        }
+      }
+    },
+    {
+      "name": "nested: the nested when:never rule fires first",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "overrides": {"MAIN_BUMPED": "1", "OTHER_FLAG": "yes"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"job_a": "skipped"}}}
+      }
+    },
+    {
+      "name": "nested: second flattened rule matches when the first does not",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "overrides": {"OTHER_FLAG": "yes"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"job_a": "runs"}}}
+      }
+    },
+    {
+      "name": "nested: brace glob keeps its wildcards",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["docs/guide.md"]},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"brace_job": "runs"}}}
+      }
+    },
+    {
+      "name": "nested: brace glob non-match",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["src/app.py"]},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"brace_job": "not-added"}}}
+      }
+    },
+    {
+      "name": "nested: pinning the runtime variable resolves the conditional",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "overrides": {"CI_KUBERNETES_ACTIVE": "true"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"flag_job": "runs"}}}
+      }
+    },
+    {
+      "name": "dedup: the documented pattern also suppresses SCHEDULED branch pipelines",
+      "fixture": "whatif_dedup",
+      "config": {"scenario": "schedule", "branch": "feature/widget", "openMR": true},
+      "expect": {
+        "candidates": {"schedule": {"created": false}}
+      }
+    },
+    {
+      "name": "dedup: schedule without an open MR passes the workflow",
+      "fixture": "whatif_dedup",
+      "config": {"scenario": "schedule", "branch": "feature/widget"},
+      "expect": {
+        "candidates": {"schedule": {"created": true}}
+      }
+    },
+    {
+      "name": "dup: manual web run on a TAG",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "web", "refKind": "tag", "tag": "v9.9.9"},
+      "expect": {
+        "candidates": {
+          "web": {"created": true,
+                  "jobs": {"build_all": "runs", "test_mr": "not-added",
+                           "lint_everything": "runs"}}
+        }
+      }
+    },
+    {
+      "name": "prepost: a .pre-only pipeline is not created",
+      "fixture": "whatif_prepost",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {"branch": {"created": false, "reasonContains": ".pre"}}
+      }
+    },
+    {
+      "name": "nested: inherit variables false hides globals from rules",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"jobs": {"inherit_off": "not-added", "inherit_on": "runs"}}
+        }
+      }
+    },
+    {
+      "name": "forward: default forwards the parent yaml; yaml_variables:false does not",
+      "fixture": "whatif_forward",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "created": true,
+            "children": {
+              "ci/fwd_default.yml": {
+                "jobs": {"ci/fwd_default.yml::sees_parent": "runs",
+                         "ci/fwd_default.yml::sees_child": "not-added"}
+              },
+              "ci/fwd_off.yml": {
+                "jobs": {"ci/fwd_off.yml::c_child": "runs",
+                         "ci/fwd_off.yml::c_parent": "not-added"}
+              },
+              "ci/fwd_jobvars.yml": {
+                "jobs": {"ci/fwd_jobvars.yml::gets_jobvar": "runs"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "incgate: a web-gated include's jobs do not exist in push pipelines",
+      "fixture": "whatif_incgate",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"jobs": {"always_job": "runs", "manual_cleanup": "not-added"}}
+        }
+      }
+    },
+    {
+      "name": "incgate: the same jobs exist in web pipelines",
+      "fixture": "whatif_incgate",
+      "config": {"scenario": "web", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "web": {"jobs": {"always_job": "runs", "manual_cleanup": "runs"}}
+        }
+      }
+    },
+    {
+      "name": "matrix: instance needs resolve, invalid combos fail, axis vars gate rules",
+      "fixture": "whatif_matrix",
+      "config": {"scenario": "push_branch", "branch": "feature/widget"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "jobs": {"build": "runs", "test_x86": "runs", "test_bad": "runs"},
+            "matrixStates": {
+              "deploy": {"deploy: [staging]": "runs", "deploy: [prod]": "skipped"}
+            },
+            "artifactErrorsAtLeast": 1,
+            "errorsContain": ["not a valid matrix instance"]
+          }
+        }
+      }
+    },
+    {
+      "name": "matrix: on main every deploy instance runs",
+      "fixture": "whatif_matrix",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "matrixStates": {
+              "deploy": {"deploy: [staging]": "runs", "deploy: [prod]": "runs"}
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid: GitLab-rejected configs are fatal, not green",
+      "fixture": "whatif_invalid",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "fatalAtLeast": 4,
+        "fatalContain": ["should be part of needs", "circular needs",
+                         "invalid expression syntax", "on_stop job"]
+      }
+    },
+    {
+      "name": "envstop: started environment whose stop job is excluded gets a warning",
+      "fixture": "whatif_envstop",
+      "config": {"scenario": "push_branch", "branch": "feature/widget"},
+      "expect": {
+        "candidates": {
+          "branch": {"created": true,
+                     "jobs": {"deploy_review": "runs", "stop_review": "not-added"},
+                     "notesContain": ["auto-stopped",
+                                      "uploads them only when it FAILS",
+                                      "skipped in green pipelines"]}
+        }
+      }
+    },
+    {
+      "name": "envstop: on main both jobs run, no warning needed",
+      "fixture": "whatif_envstop",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"jobs": {"deploy_review": "runs", "stop_review": "runs"}}
+        }
+      }
+    },
+    {
+      "name": "childwf: the child's own workflow blocks it, the trigger job fails",
+      "fixture": "whatif_childwf",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "created": true,
+            "jobs": {"build": "runs", "trigger_child": "runs"},
+            "artifactErrorsAtLeast": 1,
+            "errorsContain": ["would have been empty"],
+            "notesContain": ["not available offline"],
+            "children": {"ci/mronly.yml": {"created": false}}
+          }
+        }
+      }
+    }
+  ]
+}

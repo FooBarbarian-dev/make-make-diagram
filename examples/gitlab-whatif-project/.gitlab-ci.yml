@@ -1,0 +1,101 @@
+# What-If demo pipeline for pipeview
+#
+# Run:  pipeview examples/gitlab-whatif-project -o /tmp/pipeview-demo-whatif
+# then open the What-If tab.
+#
+# This pipeline deliberately contains the classic duplicate-pipeline
+# problem: jobs with no rules (branch pipelines by default) mixed with
+# rules jobs that match merge request pipelines. Pick "Push to a branch"
+# with "an open MR uses this branch as source" in the What-If tab and
+# watch the same jobs light up in BOTH pipelines.
+#
+# Uncomment the workflow block below (the documented dedup pattern) and
+# regenerate to watch the duplicates disappear.
+
+# workflow:
+#   rules:
+#     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+#     - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+#       when: never
+#     - if: $CI_COMMIT_BRANCH
+
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  APP_NAME: demo
+
+## Builds the app and publishes VERSION via a dotenv report. Runs in both
+## branch and MR pipelines so MR-pipeline jobs can need it — try removing
+## the first rule in the What-If tab's world: the MR pipeline breaks.
+build:
+  stage: build
+  script:
+    - make build
+    - echo "VERSION=$(cat VERSION)" > build.env
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  artifacts:
+    paths:
+      - dist/
+    reports:
+      dotenv: build.env
+
+## No rules at all — implicit only: branches+tags. Duplicate suspect #1.
+unit_tests:
+  stage: test
+  script:
+    - make test
+  needs:
+    - build
+
+## Final catch-all `when: on_success` — duplicate suspect #2 (GitLab
+## shows a "may allow multiple pipelines" warning for this shape).
+lint:
+  stage: test
+  script:
+    - make lint
+  rules:
+    - if: $SKIP_LINT == "true"
+      when: never
+    - when: on_success
+
+## Runs in MR pipelines AND branch pipelines — explicitly. Needs the
+## dotenv producer, so its runtime env carries VERSION.
+integration_tests:
+  stage: test
+  script:
+    - make integration
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  needs:
+    - build
+
+## Only on the default branch, only when app code changed
+deploy_production:
+  stage: deploy
+  script:
+    - ./deploy.sh production
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - src/**/*
+        - Dockerfile
+      when: manual
+      allow_failure: false
+    - when: never
+  needs:
+    - unit_tests
+    - integration_tests
+
+## Spawns a child pipeline — CI_PIPELINE_SOURCE=parent_pipeline in there
+docs_pipeline:
+  stage: deploy
+  trigger:
+    include: ci/docs.yml
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"

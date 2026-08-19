@@ -1,0 +1,49 @@
+# A VALID on_stop pair whose rules are out of sync: on feature branches
+# the review env starts but its stop job is not in the pipeline — the
+# environment can never be auto-stopped there.
+
+deploy_review:
+  script:
+    - echo deploy
+  rules:
+    - if: $CI_COMMIT_BRANCH
+  environment:
+    name: review
+    action: start
+    on_stop: stop_review
+
+stop_review:
+  script:
+    - echo stop
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+  environment:
+    name: review
+    action: stop
+
+## artifacts uploaded only on failure — consumers get nothing on success
+crashlogs:
+  script:
+    - echo run
+  artifacts:
+    when: on_failure
+    paths:
+      - logs/
+
+uses_crash:
+  script:
+    - echo inspect
+  needs:
+    - crashlogs
+
+## a when:on_failure job — its dependents only run in failing pipelines
+failjob:
+  script:
+    - echo cleanup
+  when: on_failure
+
+after_fail:
+  script:
+    - echo notify
+  needs:
+    - failjob

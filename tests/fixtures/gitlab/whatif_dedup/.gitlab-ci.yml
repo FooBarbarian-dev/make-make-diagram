@@ -1,0 +1,35 @@
+# Same job mix as whatif_dup, plus the canonical documented workflow:rules
+# dedup pattern: MR pipelines win; branch pipelines are suppressed while an
+# MR is open.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
+      when: never
+    - if: $CI_COMMIT_BRANCH
+
+stages:
+  - build
+  - test
+
+build_all:
+  stage: build
+  script:
+    - make build
+
+test_mr:
+  stage: test
+  script:
+    - make test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+lint_everything:
+  stage: test
+  script:
+    - make lint
+  rules:
+    - if: $CUSTOM_VARIABLE == "false"
+      when: never
+    - when: always

@@ -1,0 +1,26 @@
+# Child pipelines evaluate their OWN workflow:rules. The child here only
+# allows merge_request_event pipelines, but children always run with
+# CI_PIPELINE_SOURCE=parent_pipeline — so the child can never be created
+# and the trigger job fails ("resulting pipeline would have been empty").
+
+stages:
+  - build
+  - deploy
+
+build:
+  stage: build
+  script:
+    - make build
+
+trigger_child:
+  stage: deploy
+  trigger:
+    include: ci/mronly.yml
+
+## Dynamic/remote child configs are unavailable offline — must be noted
+trigger_remote:
+  stage: deploy
+  trigger:
+    include:
+      - project: other/proj
+        file: ci.yml

@@ -47,6 +47,15 @@ class TestHtmlGeneration:
         assert '"schema_version"' in content
         assert '"nodes"' in content
 
+    def test_whatif_evaluator_inlined(self, gitlab_report, tmpdir):
+        path = os.path.join(tmpdir, "report.html")
+        render_html(gitlab_report, path)
+        with open(path) as f:
+            content = f.read()
+        assert "PipeviewWhatIf" in content
+        assert "/*WHATIF_PLACEHOLDER*/" not in content
+        assert '"whatif"' in content   # gitlab reports carry the program
+
     def test_json_round_trips_from_html(self, make_report, tmpdir):
         path = os.path.join(tmpdir, "report.html")
         render_html(make_report, path)

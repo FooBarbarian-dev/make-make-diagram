@@ -1,0 +1,37 @@
+# Child pipeline: CI_PIPELINE_SOURCE is parent_pipeline in here, so the
+# merge_request_event rule can never match (a documented gotcha the what-if
+# simulation surfaces). The child evaluates its own workflow:rules.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+
+variables:
+  CHILD_ONLY: "yes"
+
+child_build:
+  stage: build
+  script:
+    - make child
+
+child_mr_only:
+  stage: build
+  script:
+    - echo "never runs in a child pipeline"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+
+child_always:
+  stage: build
+  script:
+    - echo "runs whenever the parent triggers"
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+
+## only:pipelines matches multi-project downstreams, NOT parent_pipeline
+child_only_pipelines:
+  stage: build
+  script:
+    - echo "never in a child pipeline"
+  only:
+    - pipelines

@@ -1,0 +1,12 @@
+# The first workflow rule's condition is unknowable (runtime variable),
+# but the pipeline is created whichever way it goes — the verdict must
+# collapse to a definite "created", not "depends".
+
+workflow:
+  rules:
+    - if: $CI_KUBERNETES_ACTIVE
+    - when: always
+
+job_x:
+  script:
+    - echo x

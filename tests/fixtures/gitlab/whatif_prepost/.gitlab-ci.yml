@@ -1,0 +1,7 @@
+# A pipeline whose only job lives in .pre — GitLab does not consider
+# .pre/.post alone a complete pipeline and does not create it.
+
+pre_cleanup:
+  stage: .pre
+  script:
+    - echo cleanup

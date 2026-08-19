@@ -1,0 +1,14 @@
+variables:
+  MODE: child
+
+sees_parent:
+  script:
+    - echo forwarded
+  rules:
+    - if: '$MODE == "parent"'
+
+sees_child:
+  script:
+    - echo own
+  rules:
+    - if: '$MODE == "child"'

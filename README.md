@@ -87,7 +87,8 @@ fonts, no fetches of any kind.
 
 ## HTML report views
 
-The generated report is a single self-contained HTML file with four views:
+The generated report is a single self-contained HTML file with four views
+(five for GitLab CI):
 
 1. **Dependency Graph** — Interactive DAG with pan/zoom, click-to-inspect,
    focus mode (highlights the reachable subgraph), edge-kind filters, and a
@@ -103,6 +104,23 @@ The generated report is a single self-contained HTML file with four views:
 
 4. **File Map** — Tree of source files with include/recursion structure,
    per-file status, and all diagnostics.
+
+5. **What-If** *(GitLab CI reports only)* — A pipeline simulator. Pick an
+   event (push, push with an open MR, tag, MR update, schedule, manual,
+   API/trigger), set the starting state (branch, MR target/draft, changed
+   files, project-level variables), and see every candidate pipeline GitLab
+   would spawn — side by side, one graph per pipeline, with per-job
+   verdicts (runs / manual / delayed / not added / depends) and a
+   rule-by-rule trace for each. Duplicate jobs that would run in more than
+   one pipeline for the same push are badged and summarized; dotenv
+   artifact propagation and `needs:` on jobs missing from the pipeline
+   (a real pipeline-creation failure) are called out. `rules:if`
+   expressions are compiled at generation time; `rules:exists` is checked
+   against the actual repo; anything unknowable (`rules:changes` without a
+   changed-files list, variables defined nowhere) is shown as
+   *depends* — never guessed. The simulated world assumes protected
+   `main` and `dev` branches; every other branch is a generic unprotected
+   feature branch.
 
 ## The `##` docstring convention
 

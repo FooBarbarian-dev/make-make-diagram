@@ -1,0 +1,130 @@
+# Exercises every construct the what-if compiler must handle.
+
+workflow:
+  name: 'feature pipeline'
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: never
+    - if: $CI_COMMIT_BRANCH || $CI_PIPELINE_SOURCE == "merge_request_event"
+      variables:
+        FROM_WORKFLOW: "yes"
+
+stages:
+  - build
+  - test
+  - deploy
+
+variables:
+  DEPLOY_ENV: staging
+
+## Produces a dotenv report consumed downstream
+build_meta:
+  stage: build
+  script:
+    - echo "VERSION=1.2.3" > build.env
+  artifacts:
+    paths:
+      - dist/
+    reports:
+      dotenv: build.env
+
+## exists: the Dockerfile is in this fixture, docker-compose.yml is not
+docker_build:
+  stage: build
+  script:
+    - docker build .
+  rules:
+    - exists:
+        - Dockerfile
+    - exists:
+        - docker-compose.yml
+
+## changes with rules:variables, delayed when, allow_failure
+docs_check:
+  stage: test
+  script:
+    - make docs
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      changes:
+        - docs/**/*
+      variables:
+        DOCS_MODE: strict
+      allow_failure: true
+    - if: $CI_COMMIT_BRANCH
+      when: delayed
+      start_in: 10 minutes
+
+## Legacy only/except with refs, variables and a regex ref
+legacy_deploy:
+  stage: deploy
+  script:
+    - ./deploy.sh
+  only:
+    refs:
+      - main
+      - /^release-.*/
+      - schedules
+    variables:
+      - $DEPLOY_ENV == "production"
+  except:
+    - tags
+
+## GitLab accepts singular source names in legacy refs too
+legacy_singular:
+  stage: test
+  script:
+    - true
+  only:
+    - schedule
+
+## except combines its clause kinds with OR: matching refs alone excludes
+legacy_except_multi:
+  stage: test
+  script:
+    - true
+  only:
+    - branches
+  except:
+    refs:
+      - schedules
+    variables:
+      - '$SKIP_ALL == "yes"'
+
+## Unparseable expression: degrades to unknown, never crashes
+weird_rules:
+  stage: test
+  script:
+    - true
+  rules:
+    - if: 'CI_COMMIT_BRANCH === "oops"'
+
+## Consumes the dotenv report via needs; optional need of a rules-gated job.
+## Runs in MR pipelines too — where build_meta does NOT — so the what-if
+## simulation can surface the broken-needs pipeline-creation failure.
+integration:
+  stage: test
+  script:
+    - make integration
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  needs:
+    - build_meta
+    - job: docker_build
+      optional: true
+      artifacts: false
+
+## dependencies-style artifact consumption
+package:
+  stage: deploy
+  script:
+    - make package
+  dependencies:
+    - build_meta
+
+## Spawns a child pipeline
+trigger_child:
+  stage: deploy
+  trigger:
+    include: ci/child.yml

@@ -1,0 +1,22 @@
+# trigger:forward semantics: by default the trigger job's yaml variables
+# (over the parent's globals) reach the child at pipeline precedence;
+# forward: yaml_variables: false sends nothing, so the child sees its own.
+
+variables:
+  MODE: parent
+
+trig_default:
+  trigger:
+    include: ci/fwd_default.yml
+
+trig_nofwd:
+  trigger:
+    include: ci/fwd_off.yml
+    forward:
+      yaml_variables: false
+
+trig_jobvars:
+  variables:
+    CHILD_MODE: full
+  trigger:
+    include: ci/fwd_jobvars.yml

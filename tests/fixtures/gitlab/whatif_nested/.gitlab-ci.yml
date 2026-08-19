@@ -1,0 +1,88 @@
+# Nested rules arrays (GitLab flattens them at unbounded depth), unknown
+# predefined variables, brace globs, and a rule chain that excludes the job
+# whichever way its unknown condition goes.
+
+variables:
+  NESTED_FLAG: "on"
+
+## inherit:variables:false — global defaults invisible to this job's rules
+inherit_off:
+  script:
+    - echo isolated
+  inherit:
+    variables: false
+  rules:
+    - if: $NESTED_FLAG == "on"
+
+## control: same rule, inheritance intact
+inherit_on:
+  script:
+    - echo sees-globals
+  rules:
+    - if: $NESTED_FLAG == "on"
+
+## rules:needs replaces the job's needs when its rule matches
+needs_override_job:
+  script:
+    - echo override
+  needs:
+    - inherit_on
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      needs: []
+    - if: $CI_COMMIT_BRANCH
+
+## Nested list entries: three rules after flattening, order preserved
+job_a:
+  script:
+    - echo a
+  rules:
+  - - if: "$MAIN_BUMPED"
+      when: never
+    - if: "$OTHER_FLAG"
+  - if: "$CI_COMMIT_BRANCH"
+
+## CI_KUBERNETES_ACTIVE is set by the pipeline at runtime — never guessed
+flag_job:
+  script:
+    - echo k8s
+  rules:
+    - if: $CI_KUBERNETES_ACTIVE
+
+## Brace glob with wildcards inside the alternatives
+brace_job:
+  script:
+    - echo docs
+  rules:
+    - if: $CI_COMMIT_BRANCH
+      changes:
+        - "{docs/**,spec/**}"
+
+## Unknown condition, but when:never either way — a definite exclusion
+never_job:
+  script:
+    - echo never
+  rules:
+    - if: 'garbage('
+      when: never
+
+## Job-level when:manual (legacy style) is NON-blocking by default
+legacy_manual:
+  script:
+    - echo manual
+  when: manual
+
+## Explicit allow_failure: false makes a legacy manual job BLOCKING
+manual_block_legacy:
+  script:
+    - echo manual
+  when: manual
+  allow_failure: false
+
+## Job-level when:manual on a job WITH rules defaults to blocking
+manual_rules_joblevel:
+  script:
+    - echo manual
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH

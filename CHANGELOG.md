@@ -2,6 +2,60 @@
 
 ## Unreleased
 
+GitLab CI **What-If simulation** (see
+`docs/superpowers/specs/2026-08-18-gitlab-what-if-design.md`). Model schema
+bumped to v3 (`Node.annotations["whatif"]`, `Report.annotations["whatif"]`);
+v2 JSON still loads.
+
+- New What-If report tab: pick an event (branch push, push with an open
+  MR, tag, MR update, schedule, manual, API/trigger) and a starting state
+  (branch, MR knobs, changed files, project-level variable overrides) and
+  see every candidate pipeline GitLab would spawn, one graph per pipeline,
+  with per-job verdicts and rule-by-rule traces. Duplicate jobs across
+  simultaneously-spawned pipelines are badged and summarized — the
+  debugging story for "why did my push start two pipelines?".
+- `pipeview/parsers/gitlab_whatif.py` compiles `rules:if` /
+  `workflow:rules` / `only:variables` expressions to a JSON AST
+  (unparseable → *unknown* + diagnostic), normalizes legacy `only/except`
+  including the implicit `only: [branches, tags]` default, evaluates
+  `rules:exists` against the repo at generation time, and extracts
+  artifact produce/consume info (dotenv reports, needs, dependencies,
+  trigger children).
+- `templates/whatif.js`: a DOM-free tri-state interpreter (true / false /
+  *unknown*) with GitLab's documented semantics — unset vs empty
+  variables, truthy `"false"`/`"0"`, first-match-wins rules, workflow
+  gating, `rules:changes` always-true in no-push-event pipelines, the
+  predefined-variable matrix per pipeline type, child pipelines running as
+  `parent_pipeline`, and pipeline-creation failure detection for `needs:`
+  on excluded jobs. Tested under node against a hand-written vector suite
+  drawn from the GitLab docs (`tests/whatif_vectors.json`), including the
+  documented duplicate configs and the canonical `workflow:rules` dedup
+  pattern.
+- New example `examples/gitlab-whatif-project` demonstrating the duplicate
+  problem, the dedup fix, dotenv flow, and a child pipeline.
+- Static lint: GitLab's "job may allow multiple pipelines to run for a
+  single action" warning is now emitted at generation time for final
+  unconditional `when:` rules.
+- Expert-review hardening (two adversarial review passes, every fix
+  pinned by a doc/source-verified test): unsimulated `CI_*` variables
+  evaluate as honest *unknown* (pin-able) instead of confidently unset;
+  nested `rules:` arrays flatten; legacy `except:` ORs its clause kinds
+  and singular source keywords work; `CI_OPEN_MERGE_REQUESTS` is set in
+  scheduled/API/web/trigger branch pipelines; schedules/manual runs can
+  target tags; child pipelines evaluate their own `workflow:rules` and
+  globals (with `trigger:forward` semantics honored, including
+  `yaml_variables: false`); `inherit:variables` filters rules
+  evaluation; conditional `include:rules` gate their files' jobs;
+  `parallel:matrix` expands before rules with per-instance axis
+  variables and instance-name `needs`; configs GitLab rejects outright
+  (dependencies⊄needs, circular needs, invalid expressions, broken
+  `environment:on_stop`) surface as a red invalid-configuration state,
+  and per-candidate creation failures get a distinct "✖ creation fails"
+  chip excluded from run counts; manual-gate blocking defaults follow
+  GitLab's `manual_action? && !has_rules?`; out-of-sync `on_stop`
+  rules, failure-only artifact chains, and duplicated jobs sharing a
+  `resource_group` are called out.
+
 Parser conformance pass (see `docs/parser-audit.md` for the full
 construct-by-construct matrix, verdicts, and accepted limitations). Model
 schema bumped to v2 (`VariableEvent.annotations`, `Variable.exported`,

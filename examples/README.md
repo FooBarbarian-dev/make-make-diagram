@@ -56,6 +56,37 @@ What to look for in the report:
 - **File Map**: the local include resolves; the `project:` include shows
   as unresolved with a diagnostic.
 
+## gitlab-whatif-project
+
+A GitLab CI pipeline that deliberately contains the classic
+duplicate-pipeline problem: a no-rules job (branch pipelines by default),
+a job whose final rule is a bare `when: on_success` catch-all, and a job
+with explicit rules for both branch and MR pipelines — plus a dotenv
+artifact chain and a child pipeline.
+
+```bash
+pipeview examples/gitlab-whatif-project -o examples/out/whatif
+open examples/out/whatif/gitlab-ci.report.html
+```
+
+What to look for — open the **What-If** tab:
+
+- Pick **Push to a branch** with **an open MR uses this branch as
+  source**: two pipeline sections render side by side, with `lint`,
+  `integration_tests` (and friends) badged as duplicates. That single
+  push starts both pipelines on real GitLab too.
+- Uncomment the `workflow:` block at the top of the example's
+  `.gitlab-ci.yml` (the documented dedup pattern), regenerate, and the
+  branch pipeline collapses to "not created" while the MR is open.
+- Switch to **Push to a branch → main** and set exact changed files:
+  `deploy_production` flips between *runs*, *not added*, and *depends*
+  based on whether `src/**/*` matched.
+- `build` publishes a dotenv report — the banner shows which jobs'
+  runtime environments it extends, and why that can never affect rules.
+- `docs_pipeline` spawns a child pipeline where
+  `CI_PIPELINE_SOURCE=parent_pipeline` — the `publish_docs` rule matches,
+  and a `merge_request_event` rule never would.
+
 ## torture-project
 
 A deliberately hostile Makefile that stress-tests the report UI's overflow

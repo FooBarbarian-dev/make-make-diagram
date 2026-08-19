@@ -9,7 +9,10 @@ from typing import Any, Literal
 #   2 — parser-audit pass: VariableEvent.annotations (exported/override/private/
 #       condition/inherited_from/…), Variable.exported, Variable.origin,
 #       Report.annotations (workflow_rules banner et al).
-SCHEMA_VERSION = 2
+#   3 — what-if pass: Node.annotations["whatif"] (compiled rules program,
+#       artifacts, needs) and Report.annotations["whatif"] (scenario world,
+#       workflow program, globals) for GitLab reports.
+SCHEMA_VERSION = 3
 
 
 @dataclass

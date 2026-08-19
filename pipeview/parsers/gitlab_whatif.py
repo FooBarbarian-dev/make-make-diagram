@@ -1,0 +1,1021 @@
+"""What-if compiler: turns GitLab rules/only/except/artifacts into a
+structured, evaluatable program embedded in the report model.
+
+Everything semantic happens here, in Python, where pytest can pin it:
+- `rules:if` strings are parsed into a JSON expression AST,
+- legacy `only`/`except` (including the implicit `only: [branches, tags]`
+  default on rule-less jobs) is normalized into the same program shape,
+- `rules:exists` is evaluated NOW against the repo files and baked in,
+- artifact produce/consume information is extracted per job.
+
+The report's embedded JS (templates/whatif.js) is a dumb tri-state
+interpreter over this data. It never parses GitLab syntax.
+
+Failure philosophy matches the parser: an unparseable expression degrades to
+an `opaque` node (evaluates to *unknown*) plus one diagnostic — one bad rule
+degrades one rule, never the report.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+from typing import Any
+
+from pipeview.model import Diagnostic, SourceLocation
+
+# The simulator's simplified ref world (see the design spec): two protected
+# long-lived branches and one generic feature branch. The names are surfaced
+# in the report so the UI and the user share the same assumptions.
+DEFAULT_BRANCH = "main"
+PROTECTED_REFS = ["main", "dev"]
+
+WHATIF_VERSION = 1
+
+_MAX_EXISTS_FILES = 20000
+
+# RE2 (GitLab's engine) rejects lookaround and backreferences; JS accepts
+# them. Flag patterns that would fail on the real server.
+_NON_RE2 = re.compile(r"\(\?<?[=!]|\\[1-9]")
+
+_VAR_IN_PATH = re.compile(r"\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?")
+
+_LEGACY_REF_KEYWORDS = frozenset({
+    "api", "branches", "chat", "external", "external_pull_requests",
+    "merge_requests", "pipelines", "pushes", "schedules", "tags",
+    "triggers", "web",
+})
+
+
+# ---------------------------------------------------------------------------
+# Expression parser: GitLab CI/CD variable expressions → JSON AST
+# ---------------------------------------------------------------------------
+#
+# Grammar (docs.gitlab.com/ci/jobs/job_rules/#cicd-variable-expressions):
+#   or    := and ('||' and)*
+#   and   := unary ('&&' unary)*
+#   unary := '!' unary | primary
+#   primary := '(' or ')' | comparison
+#   comparison := term (('==' | '!=' | '=~' | '!~') term)?
+#   term  := $VAR | 'string' | "string" | /regex/flags | null
+#
+# A standalone term is a truthiness test (defined and non-empty). The
+# strings "false" and "0" are truthy — only unset/empty are falsy.
+
+class _ExprError(Exception):
+    pass
+
+
+def _tokenize(src: str, notes: list[str]) -> list[tuple]:
+    tokens: list[tuple] = []
+    i, n = 0, len(src)
+    while i < n:
+        c = src[i]
+        if c.isspace():
+            i += 1
+            continue
+        if c == "$":
+            m = re.match(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}|\$([A-Za-z_][A-Za-z0-9_]*)",
+                         src[i:])
+            if not m:
+                raise _ExprError(f"bad variable reference at offset {i}")
+            if m.group(1):
+                notes.append(
+                    "GitLab rejects the ${VAR} form inside rules expressions "
+                    "(invalid expression syntax) — use $VAR"
+                )
+            tokens.append(("var", m.group(1) or m.group(2)))
+            i += m.end()
+            continue
+        if c in "\"'":
+            j = src.find(c, i + 1)
+            if j < 0:
+                raise _ExprError("unterminated string literal")
+            tokens.append(("str", src[i + 1:j]))
+            i = j + 1
+            continue
+        if c == "/":
+            j = i + 1
+            while j < n:
+                if src[j] == "\\":
+                    j += 2
+                    continue
+                if src[j] == "/":
+                    break
+                j += 1
+            if j >= n:
+                raise _ExprError("unterminated regex literal")
+            k = j + 1
+            while k < n and src[k].isalpha():
+                k += 1
+            tokens.append(("re", src[i + 1:j], src[j + 1:k]))
+            i = k
+            continue
+        two = src[i:i + 2]
+        if two in ("==", "!=", "=~", "!~", "&&", "||"):
+            tokens.append(("op", two))
+            i += 2
+            continue
+        if c in "()!":
+            tokens.append(("op", c))
+            i += 1
+            continue
+        m = re.match(r"null\b", src[i:])
+        if m:
+            tokens.append(("null",))
+            i += m.end()
+            continue
+        raise _ExprError(f"unexpected character {c!r} at offset {i}")
+    return tokens
+
+
+class _Parser:
+    def __init__(self, tokens: list[tuple]):
+        self.tokens = tokens
+        self.pos = 0
+        self.notes: list[str] = []
+
+    def peek(self) -> tuple | None:
+        return self.tokens[self.pos] if self.pos < len(self.tokens) else None
+
+    def take(self) -> tuple:
+        tok = self.peek()
+        if tok is None:
+            raise _ExprError("unexpected end of expression")
+        self.pos += 1
+        return tok
+
+    def parse(self) -> dict:
+        node = self.parse_or()
+        if self.peek() is not None:
+            raise _ExprError(f"trailing tokens starting at {self.peek()!r}")
+        return node
+
+    def parse_or(self) -> dict:
+        args = [self.parse_and()]
+        while self.peek() == ("op", "||"):
+            self.take()
+            args.append(self.parse_and())
+        return args[0] if len(args) == 1 else {"op": "or", "args": args}
+
+    def parse_and(self) -> dict:
+        args = [self.parse_unary()]
+        while self.peek() == ("op", "&&"):
+            self.take()
+            args.append(self.parse_unary())
+        return args[0] if len(args) == 1 else {"op": "and", "args": args}
+
+    def parse_unary(self) -> dict:
+        if self.peek() == ("op", "!"):
+            self.take()
+            return {"op": "not", "arg": self.parse_unary()}
+        return self.parse_primary()
+
+    def parse_primary(self) -> dict:
+        if self.peek() == ("op", "("):
+            self.take()
+            node = self.parse_or()
+            if self.peek() != ("op", ")"):
+                raise _ExprError("missing closing parenthesis")
+            self.take()
+            return node
+        return self.parse_comparison()
+
+    def parse_comparison(self) -> dict:
+        # GitLab's shunting-yard parser accepts CHAINED comparisons,
+        # left-associative: $A == "a" == "b" is ($A == "a") == "b" — a
+        # boolean compared to a string, which is always false. Model it.
+        left: dict = self.parse_term()
+        while True:
+            tok = self.peek()
+            if not (tok and tok[0] == "op" and tok[1] in ("==", "!=", "=~", "!~")):
+                break
+            self.take()
+            right = self.parse_term()
+            if tok[1] in ("=~", "!~") and right.get("t") == "re":
+                if _NON_RE2.search(right["source"]):
+                    right["non_re2"] = True
+                    self.notes.append(
+                        f"/{right['source']}/ uses lookaround or backreferences — "
+                        "GitLab's RE2 engine rejects these patterns and the "
+                        "pipeline would fail to be created"
+                    )
+            left = {"op": "cmp", "cmp": tok[1], "left": left, "right": right}
+        if left.get("op") == "cmp":
+            return left
+        return {"op": "truthy", "term": left}
+
+    def parse_term(self) -> dict:
+        tok = self.take()
+        if tok[0] == "var":
+            return {"t": "var", "name": tok[1]}
+        if tok[0] == "str":
+            return {"t": "str", "value": tok[1]}
+        if tok[0] == "re":
+            return {"t": "re", "source": tok[1], "flags": tok[2]}
+        if tok[0] == "null":
+            return {"t": "null"}
+        raise _ExprError(f"expected a value, got {tok!r}")
+
+
+def parse_expression(src: Any) -> tuple[dict, list[str], str | None]:
+    """Parse one variable expression. Returns (ast, notes, error).
+
+    Failure classes differ in meaning:
+    - token-level junk (bare words, `== true` unquoted, empty) is rejected
+      by GitLab itself ("invalid expression syntax" → the whole config is
+      invalid) → {"op": "invalid"} so the caller can flag a fatal;
+    - structure this grammar can't parse (but might be GitLab-legal) →
+      {"op": "opaque"} which evaluates to *unknown* — never a guess."""
+    text = str(src)
+    lex_notes: list[str] = []
+    try:
+        tokens = _tokenize(text, lex_notes)
+    except _ExprError as e:
+        return {"op": "invalid", "src": text}, lex_notes, str(e)
+    if not tokens:
+        return {"op": "invalid", "src": text}, lex_notes, "empty expression"
+    try:
+        parser = _Parser(tokens)
+        ast = parser.parse()
+        return ast, lex_notes + parser.notes, None
+    except _ExprError as e:
+        return {"op": "opaque", "src": text}, lex_notes, str(e)
+
+
+def flatten_rules(rules: list) -> list:
+    """GitLab flattens nested arrays inside `rules:` (from literal YAML,
+    anchors, or !reference composition) at unbounded depth — mirror that.
+    Applies to job rules and workflow:rules; only/except never nest."""
+    out: list = []
+    for entry in rules:
+        if isinstance(entry, list):
+            out.extend(flatten_rules(entry))
+        else:
+            out.append(entry)
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Glob translation (Ruby File.fnmatch with PATHNAME|DOTMATCH|EXTGLOB — the
+# flags GitLab documents for rules:changes / rules:exists)
+# ---------------------------------------------------------------------------
+
+def _glob_translate(pattern: str) -> str:
+    out = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "\\" and i + 1 < n:
+            # fnmatch: backslash escapes the next character to a literal
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
+        elif c == "*":
+            if pattern[i:i + 3] == "**/":
+                out.append(r"(?:[^/]+/)*")
+                i += 3
+            elif pattern[i:i + 2] == "**":
+                out.append(r".*")
+                i += 2
+            else:
+                out.append(r"[^/]*")
+                i += 1
+        elif c == "?":
+            out.append(r"[^/]")
+            i += 1
+        elif c == "[":
+            j = pattern.find("]", i + 1)
+            if j < 0:
+                out.append(re.escape(c))
+                i += 1
+            else:
+                inner = pattern[i + 1:j]
+                if inner.startswith("!"):
+                    inner = "^" + inner[1:]
+                out.append("[" + inner + "]")
+                i = j + 1
+        elif c == "{":
+            j = pattern.find("}", i + 1)
+            if j < 0:
+                out.append(re.escape(c))
+                i += 1
+            else:
+                # EXTGLOB: each alternative is itself a glob, so recurse —
+                # "{docs/**,spec/**}" must keep its wildcards
+                alts = pattern[i + 1:j].split(",")
+                out.append("(?:" + "|".join(_glob_translate(a) for a in alts) + ")")
+                i = j + 1
+        else:
+            out.append(re.escape(c))
+            i += 1
+    return "".join(out)
+
+
+def glob_to_regex(pattern: str) -> re.Pattern | None:
+    """Translate one GitLab path glob to an anchored regex, or None when the
+    pattern can't be translated."""
+    try:
+        return re.compile("^" + _glob_translate(pattern) + "$")
+    except re.error:
+        return None
+
+
+def _expand_path_vars(pattern: str, globals_map: dict[str, str]) -> str:
+    """GitLab substitutes known CI/CD variables in changes/exists paths and
+    leaves unknown `$` intact as a literal path character."""
+    def sub(m: re.Match) -> str:
+        return globals_map.get(m.group(1), m.group(0))
+    return _VAR_IN_PATH.sub(sub, pattern)
+
+
+# ---------------------------------------------------------------------------
+# exists: evaluated at generation time against the actual repo files
+# ---------------------------------------------------------------------------
+
+def _repo_file_list(repo_root: str) -> tuple[list[str], bool]:
+    """Returns (files, truncated). A truncated listing must never bake a
+    definite `exists: false` — the file could be past the cap."""
+    files: list[str] = []
+    for dirpath, dirnames, filenames in os.walk(repo_root):
+        dirnames[:] = [d for d in dirnames if d != ".git"]
+        rel_dir = os.path.relpath(dirpath, repo_root)
+        for fn in filenames:
+            rel = fn if rel_dir == "." else f"{rel_dir}/{fn}"
+            files.append(rel.replace(os.sep, "/"))
+            if len(files) >= _MAX_EXISTS_FILES:
+                return files, True
+    return files, False
+
+
+def _eval_exists(
+    paths: list[str], repo_files: list[str], globals_map: dict[str, str],
+    truncated: bool,
+) -> bool | None:
+    unknown = False
+    for raw in paths:
+        pattern = _expand_path_vars(str(raw), globals_map)
+        if pattern.endswith("/"):
+            pattern += "**"
+        rx = glob_to_regex(pattern)
+        if rx is None:
+            unknown = True   # one bad pattern never hides another's match
+            continue
+        if any(rx.match(f) for f in repo_files):
+            return True
+    return None if (unknown or truncated) else False
+
+
+# ---------------------------------------------------------------------------
+# Rule compilation
+# ---------------------------------------------------------------------------
+
+def _as_list(value: Any) -> list:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    return [value]
+
+
+def _compile_rule(
+    rule: Any, ctx: "_CompileCtx", where: str, line: int | None
+) -> dict | None:
+    """One rules: entry → RULE json. Returns None for entries that are not
+    mappings (GitLab rejects those; the parser already warns elsewhere)."""
+    if not isinstance(rule, dict):
+        return None
+    out: dict[str, Any] = {
+        "if": None, "raw_if": None, "changes": None, "exists": None,
+        "when": None, "allow_failure": None, "start_in": None,
+        "variables": None,
+    }
+    if "if" in rule:
+        ast, notes, err = parse_expression(rule["if"])
+        out["if"] = ast
+        out["raw_if"] = str(rule["if"])
+        for note in notes:
+            if "RE2" in note:
+                ctx.fatal_add(where, note)
+            else:
+                ctx.diag("warning" if "reject" in note else "info",
+                         f"{where}: {note}", line)
+        if ast.get("op") == "invalid":
+            ctx.fatal_add(
+                where,
+                f"invalid expression syntax in {str(rule['if'])!r} ({err}) — "
+                "GitLab rejects the configuration",
+            )
+        elif err:
+            ctx.diag(
+                "warning",
+                f"{where}: cannot parse rules:if expression "
+                f"{str(rule['if'])!r} ({err}) — the what-if simulation "
+                "treats it as unknown",
+                line,
+            )
+    if "changes" in rule:
+        ch = rule["changes"]
+        # GitLab substitutes known CI/CD variables in changes: paths
+        expand = lambda paths: [_expand_path_vars(str(p), ctx.globals_map)  # noqa: E731
+                                for p in paths]
+        if isinstance(ch, dict):
+            out["changes"] = {
+                "paths": expand(_as_list(ch.get("paths"))),
+                "compare_to": str(ch["compare_to"]) if "compare_to" in ch else None,
+            }
+            if "regexp" in ch:
+                out["changes"]["regexp"] = str(ch["regexp"])
+        else:
+            out["changes"] = {"paths": expand(_as_list(ch)), "compare_to": None}
+    if "exists" in rule:
+        ex = rule["exists"]
+        if isinstance(ex, dict):
+            paths = [str(p) for p in _as_list(ex.get("paths"))]
+            if "project" in ex or "regexp" in ex:
+                # another project's tree (or a Ruby regex) — unknowable here
+                out["exists"] = {"paths": paths, "result": None,
+                                 "reason": "exists:project/regexp is not "
+                                           "resolvable offline"}
+            else:
+                out["exists"] = {
+                    "paths": paths,
+                    "result": _eval_exists(paths, ctx.repo_files,
+                                           ctx.globals_map, ctx.repo_truncated),
+                    "reason": None,
+                }
+        else:
+            paths = [str(p) for p in _as_list(ex)]
+            out["exists"] = {
+                "paths": paths,
+                "result": _eval_exists(paths, ctx.repo_files, ctx.globals_map,
+                                       ctx.repo_truncated),
+                "reason": None,
+            }
+    if "needs" in rule:
+        # rules:needs replaces the job's needs when this rule matches —
+        # the evaluator uses it for consumption analysis
+        out["needs"] = _compile_needs(rule["needs"]
+                                      if isinstance(rule["needs"], list)
+                                      else _as_list(rule["needs"]))
+    if "when" in rule:
+        out["when"] = str(rule["when"])
+    if "allow_failure" in rule:
+        out["allow_failure"] = bool(rule["allow_failure"])
+    if "start_in" in rule:
+        out["start_in"] = str(rule["start_in"])
+    if isinstance(rule.get("variables"), dict):
+        out["variables"] = {str(k): _plain_value(v) for k, v in rule["variables"].items()}
+    return out
+
+
+def _plain_value(v: Any) -> str:
+    if v is None:
+        return ""
+    if v is True:
+        return "true"
+    if v is False:
+        return "false"
+    if isinstance(v, dict):  # hash form: value/description/options
+        return _plain_value(v.get("value", ""))
+    return str(v)
+
+
+def _compile_only_except(spec: Any, ctx: "_CompileCtx", where: str,
+                         line: int | None) -> dict:
+    """only:/except: value → {refs, variables, changes, unsupported}."""
+    out: dict[str, Any] = {"refs": None, "variables": None, "changes": None,
+                           "unsupported": []}
+    if spec is None:
+        return out   # `only:`/`except:` with an empty value — GitLab ignores it
+    if isinstance(spec, (str, list)):
+        out["refs"] = [str(r) for r in _as_list(spec)]
+        return out
+    if not isinstance(spec, dict):
+        out["unsupported"].append(str(type(spec).__name__))
+        return out
+    if "refs" in spec:
+        out["refs"] = [str(r) for r in _as_list(spec["refs"])]
+    if "variables" in spec:
+        asts = []
+        for expr in _as_list(spec["variables"]):
+            ast, notes, err = parse_expression(expr)
+            asts.append(ast)
+            for note in notes:
+                if "RE2" in note:
+                    ctx.fatal_add(where, note)
+                else:
+                    ctx.diag("warning" if "reject" in note else "info",
+                             f"{where}: {note}", line)
+            if ast.get("op") == "invalid":
+                ctx.fatal_add(
+                    where,
+                    f"invalid expression syntax in {str(expr)!r} ({err}) — "
+                    "GitLab rejects the configuration",
+                )
+            elif err:
+                ctx.diag(
+                    "warning",
+                    f"{where}: cannot parse variable expression "
+                    f"{str(expr)!r} ({err}) — treated as unknown",
+                    line,
+                )
+        out["variables"] = asts
+    if "changes" in spec:
+        out["changes"] = [str(p) for p in _as_list(spec["changes"])]
+    for key in spec:
+        if key not in ("refs", "variables", "changes"):
+            out["unsupported"].append(str(key))
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Per-job extraction
+# ---------------------------------------------------------------------------
+
+def _compile_needs(needs: Any) -> list[dict] | None:
+    """Structured needs list for the evaluator. `None` means the job has no
+    needs: key at all (stage-default artifact download applies); `[]` means
+    an explicit needs: []."""
+    if needs is None or not isinstance(needs, list):
+        return None if needs is None else []
+    out: list[dict] = []
+    for need in needs:
+        if isinstance(need, str):
+            out.append({"job": need, "optional": False, "artifacts": True})
+        elif isinstance(need, dict):
+            if "pipeline" in need:
+                out.append({"kind": "cross_pipeline",
+                            "ref": _plain_value(need["pipeline"])})
+                continue
+            if "project" in need:
+                out.append({"kind": "cross_project",
+                            "ref": _plain_value(need["project"]),
+                            "job": _plain_value(need.get("job", ""))})
+                continue
+            out.append({
+                "job": _plain_value(need.get("job", "")),
+                "optional": bool(need.get("optional", False)),
+                "artifacts": need.get("artifacts", True) is not False,
+            })
+    return out
+
+
+def _compile_artifacts(artifacts: Any) -> dict:
+    paths: list[str] = []
+    dotenv: list[str] = []
+    when = "on_success"
+    if isinstance(artifacts, dict):
+        paths = [str(p) for p in _as_list(artifacts.get("paths"))]
+        reports = artifacts.get("reports")
+        if isinstance(reports, dict) and "dotenv" in reports:
+            dotenv = [str(p) for p in _as_list(reports["dotenv"])]
+        if artifacts.get("when") in ("on_success", "on_failure", "always"):
+            when = str(artifacts["when"])
+    return {"paths": paths, "dotenv": dotenv, "when": when}
+
+
+def _compile_trigger(trigger: Any) -> dict | None:
+    if trigger is None:
+        return None
+    if isinstance(trigger, str):
+        return {"project": trigger}
+    if not isinstance(trigger, dict):
+        return None
+    # trigger:forward defaults: the trigger job's yaml variables (and the
+    # global defaults) ARE forwarded; pipeline variables are NOT
+    forward = {"yaml_variables": True, "pipeline_variables": False}
+    fwd = trigger.get("forward")
+    if isinstance(fwd, dict):
+        if "yaml_variables" in fwd:
+            forward["yaml_variables"] = fwd["yaml_variables"] is not False
+        if "pipeline_variables" in fwd:
+            forward["pipeline_variables"] = fwd["pipeline_variables"] is True
+    includes = trigger.get("include")
+    if includes is not None:
+        children = []
+        unresolved = []
+        for inc in _as_list(includes):
+            if isinstance(inc, str):
+                children.append(inc.lstrip("/"))
+            elif isinstance(inc, dict) and "local" in inc:
+                children.append(str(inc["local"]).lstrip("/"))
+            elif isinstance(inc, dict):
+                # dynamic (artifact:+job:), template:, remote:, project: —
+                # child config not available offline; must not vanish silently
+                kind = next((k for k in ("artifact", "template", "remote",
+                                         "project") if k in inc), "unknown")
+                unresolved.append(f"{kind}: {inc.get(kind, '?')}")
+        return {"children": children, "unresolved": unresolved, "forward": forward}
+    if "project" in trigger:
+        return {"project": str(trigger["project"]), "forward": forward}
+    return None
+
+
+# ---------------------------------------------------------------------------
+# The compile pass
+# ---------------------------------------------------------------------------
+
+class _CompileCtx:
+    def __init__(self, state) -> None:
+        self.state = state
+        self.repo_files, self.repo_truncated = _repo_file_list(state.repo_root)
+        self.globals_map, self.child_globals = _collect_globals(state)
+        self.lint: list[dict] = []
+        # config-invalid findings: GitLab refuses to create ANY pipeline
+        self.fatal: list[dict] = []
+
+    def fatal_add(self, where: str, message: str) -> None:
+        self.fatal.append({"where": where, "message": message})
+        self.diag("error", f"{where}: {message}", None)
+
+    def diag(self, severity: str, message: str, line: int | None,
+             file: str | None = None, node: str | None = None) -> None:
+        src = None
+        if file is not None:
+            src = SourceLocation(file=file, line=line or 1)
+        self.state.diagnostics.append(
+            Diagnostic(severity=severity, message=message, source=src,
+                       related_node=node)
+        )
+
+
+def _collect_globals(state) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Global `variables:` split by pipeline: the main pipeline's map (the
+    root file's value beats included files', per GitLab's include merge) and
+    one map per child-pipeline namespace — child files' globals must not
+    leak into the parent's rule evaluation."""
+    root_rel = os.path.relpath(state.root_path, state.repo_root).replace(os.sep, "/")
+    main: dict[str, str] = {}
+    root_owned: set[str] = set()
+    children: dict[str, dict[str, str]] = {}
+    child_owned: dict[str, set[str]] = {}
+    for var in state.variables.values():
+        for evt in var.events:
+            if evt.scope != "global":
+                continue
+            ns = evt.annotations.get("namespace")
+            if ns:
+                # same precedence inside a child: its entry file's value
+                # beats values from files the child includes
+                child = children.setdefault(ns, {})
+                entry_owned = child_owned.setdefault(ns, set())
+                from_entry = evt.source.file.replace(os.sep, "/") == ns
+                if var.name in entry_owned and not from_entry:
+                    continue
+                child[var.name] = evt.raw_value
+                if from_entry:
+                    entry_owned.add(var.name)
+                continue
+            from_root = evt.source.file.replace(os.sep, "/") == root_rel
+            if var.name in root_owned and not from_root:
+                continue
+            main[var.name] = evt.raw_value
+            if from_root:
+                root_owned.add(var.name)
+    return main, children
+
+
+def _stage_order(state) -> list[str]:
+    declared = state.stages
+    order = list(declared) if declared is not None else \
+        [".pre", "build", "test", "deploy", ".post"]
+    if ".pre" not in order:
+        order.insert(0, ".pre")
+    if ".post" not in order:
+        order.append(".post")
+    return order
+
+
+def compile_whatif(state) -> dict:
+    """Attach a what-if program to every job node and return the report-level
+    what-if annotation. Called at the end of parse_gitlab, after nodes are
+    built (so flat configs and !reference resolution are available)."""
+    from pipeview.parsers.gitlab_parser import (  # local import: avoid cycle
+        _flatten_job,
+        _Reference,
+        _resolve_nested_refs,
+    )
+
+    ctx = _CompileCtx(state)
+    if ctx.repo_truncated:
+        ctx.diag(
+            "info",
+            f"Repository has more than {_MAX_EXISTS_FILES} files — "
+            "rules:exists patterns that match nothing are treated as unknown "
+            "instead of false",
+            None,
+        )
+
+    def resolve_and_flatten(rules_value):
+        resolved, why = _resolve_nested_refs(rules_value, state, ())
+        if why is None and isinstance(resolved, list):
+            return flatten_rules(resolved), None
+        return flatten_rules(rules_value) if isinstance(rules_value, list) \
+            else rules_value, why
+
+    for job_id in state.job_configs:
+        node = state.nodes.get(job_id)
+        if node is None or node.kind != "job":
+            continue
+        rel_path, line_no, _, namespace = state.job_meta[job_id]
+        plain_name = job_id.rsplit("::", 1)[-1]
+        if plain_name.startswith("."):
+            continue  # templates never run
+
+        flat = _flatten_job(job_id, state)
+        flat = {k: v for k, v in flat.items() if not k.startswith("__")}
+        where = f"job '{job_id}'"
+
+        program: dict[str, Any]
+        rules = flat.get("rules")
+        if rules is not None:
+            rules, reason = resolve_and_flatten(rules)
+            if reason is not None:
+                program = {"kind": "unknown", "reason": reason}
+                ctx.diag(
+                    "info",
+                    f"{where}: rules use {reason} — the what-if simulation "
+                    "treats this job as conditional",
+                    line_no, rel_path, job_id,
+                )
+            elif isinstance(rules, list):
+                compiled = [r for r in
+                            (_compile_rule(r, ctx, where, line_no) for r in rules)
+                            if r is not None]
+                program = {"kind": "rules", "rules": compiled}
+                _lint_final_bare_when(compiled, job_id, ctx, rel_path, line_no)
+            else:
+                program = {"kind": "unknown", "reason": "rules is not a list"}
+        elif "only" in flat or "except" in flat:
+            program = {
+                "kind": "legacy",
+                "only": _compile_only_except(flat["only"], ctx, where, line_no)
+                if "only" in flat else None,
+                "except": _compile_only_except(flat["except"], ctx, where, line_no)
+                if "except" in flat else None,
+                "implicit_default": False,
+            }
+        else:
+            # The documented default for jobs with no rules/only/except —
+            # and the #1 duplicate-pipeline cause when mixed with rules jobs.
+            program = {
+                "kind": "legacy",
+                "only": {"refs": ["branches", "tags"], "variables": None,
+                         "changes": None, "unsupported": []},
+                "except": None,
+                "implicit_default": True,
+            }
+
+        variables = {}
+        if isinstance(flat.get("variables"), dict):
+            resolved_vars, vreason = _resolve_nested_refs(
+                flat["variables"], state, ())
+            source_vars = resolved_vars if vreason is None \
+                and isinstance(resolved_vars, dict) else flat["variables"]
+            # an unresolvable !reference value must not bake its repr string
+            variables = {str(k): _plain_value(v)
+                         for k, v in source_vars.items()
+                         if not isinstance(v, _Reference)}
+
+        # parallel:matrix — GitLab expands instances BEFORE rules evaluate,
+        # each instance seeing its own axis variables; needs can address one
+        # instance by its expanded name ("job: [v1, v2]")
+        matrix_cfg = None
+        par = flat.get("parallel")
+        if isinstance(par, int) and par > 1:
+            matrix_cfg = {"kind": "count", "count": par}
+        elif isinstance(par, dict) and isinstance(par.get("matrix"), list):
+            combos: list[dict[str, str]] = []
+            for entry in par["matrix"]:
+                if not isinstance(entry, dict):
+                    continue
+                acc: list[dict[str, str]] = [{}]
+                for axis, vals in entry.items():
+                    vlist = vals if isinstance(vals, list) else [vals]
+                    acc = [dict(c, **{str(axis): _plain_value(v)})
+                           for c in acc for v in vlist]
+                combos.extend(acc)
+            combos = combos[:200]   # GitLab's own instance ceiling
+            matrix_cfg = {
+                "kind": "matrix",
+                "combos": [{"vars": c,
+                            "name": f"{plain_name}: [{', '.join(c.values())}]"}
+                           for c in combos],
+            }
+
+        inherit_cfg = flat.get("inherit") if isinstance(flat.get("inherit"), dict) else {}
+        inherit_vars: Any = inherit_cfg.get("variables", True)
+        if isinstance(inherit_vars, list):
+            inherit_vars = [_plain_value(v) for v in inherit_vars]
+        elif inherit_vars is not False:
+            inherit_vars = True
+
+        include_gate = None
+        gate_rules = getattr(state, "include_gates", {}).get(
+            rel_path.replace(os.sep, "/"))
+        if gate_rules:
+            resolved_gate, _gr = resolve_and_flatten(gate_rules)
+            if isinstance(resolved_gate, list):
+                include_gate = [r for r in
+                                (_compile_rule(r, ctx, f"include ({rel_path})", line_no)
+                                 for r in resolved_gate)
+                                if r is not None]
+
+        # default: artifacts apply when the job defines none (and inherit
+        # allows) — keep the what-if program consistent with the Graph tab
+        artifacts_raw = flat.get("artifacts")
+        if artifacts_raw is None:
+            inherit_default = inherit_cfg.get("default", True)
+            if inherit_default is True or (
+                    isinstance(inherit_default, list) and "artifacts" in inherit_default):
+                artifacts_raw = state.global_defaults.get(
+                    "artifacts", state.legacy_defaults.get("artifacts"))
+
+        env_cfg = None
+        env_raw = flat.get("environment")
+        if isinstance(env_raw, str):
+            env_cfg = {"name": env_raw, "action": "start", "on_stop": None}
+        elif isinstance(env_raw, dict):
+            env_cfg = {
+                "name": _plain_value(env_raw["name"]) if "name" in env_raw else None,
+                "action": _plain_value(env_raw.get("action", "start")),
+                "on_stop": _plain_value(env_raw["on_stop"])
+                if "on_stop" in env_raw else None,
+            }
+
+        deps = flat.get("dependencies")
+        node.annotations["whatif"] = {
+            "program": program,
+            "when": _plain_value(flat.get("when", "on_success")),
+            "allow_failure": bool(flat["allow_failure"])
+            if "allow_failure" in flat else None,
+            "start_in": _plain_value(flat["start_in"])
+            if "start_in" in flat else None,
+            "stage": _plain_value(flat.get("stage", "test")),
+            "variables": variables,
+            "needs": _compile_needs(flat.get("needs")),
+            "dependencies": [_plain_value(d) for d in deps]
+            if isinstance(deps, list) else None,
+            "artifacts": _compile_artifacts(artifacts_raw),
+            "trigger": _compile_trigger(flat.get("trigger")),
+            "environment": env_cfg,
+            "child_of": namespace.rstrip(":") if namespace else None,
+            "name": plain_name,
+        }
+        if inherit_vars is not True:
+            node.annotations["whatif"]["inherit_variables"] = inherit_vars
+        if include_gate is not None:
+            node.annotations["whatif"]["include_gate"] = include_gate
+        if matrix_cfg is not None:
+            node.annotations["whatif"]["parallel"] = matrix_cfg
+        if "resource_group" in flat:
+            node.annotations["whatif"]["resource_group"] = \
+                _plain_value(flat["resource_group"])
+
+    _config_fatal_checks(state, ctx)
+
+    workflow = None
+    raw_workflow = getattr(state, "workflow_raw", None)
+    if raw_workflow:
+        root_file = os.path.relpath(state.root_path, state.repo_root)
+        entries, _ = resolve_and_flatten(raw_workflow)
+        compiled = [r for r in
+                    (_compile_rule(r, ctx, "workflow", None) for r in entries)
+                    if r is not None]
+        for rule in compiled:
+            if rule["when"] not in (None, "always", "never"):
+                ctx.diag(
+                    "warning",
+                    f"workflow:rules has when: {rule['when']} — GitLab only "
+                    "allows always or never here",
+                    1, root_file,
+                )
+        workflow = {"name": state.workflow_name, "rules": compiled}
+
+    # child pipelines evaluate their own workflow:rules (verified GitLab
+    # behavior — a child of an MR pipeline needs them to run at all)
+    child_workflows: dict[str, Any] = {}
+    for child_rel, child_rules in getattr(state, "child_workflows", {}).items():
+        entries, _ = resolve_and_flatten(child_rules)
+        if not isinstance(entries, list):
+            continue
+        compiled = [r for r in
+                    (_compile_rule(r, ctx, f"workflow ({child_rel})", None)
+                     for r in entries)
+                    if r is not None]
+        child_workflows[child_rel] = {"name": None, "rules": compiled}
+
+    return {
+        "version": WHATIF_VERSION,
+        "default_branch": DEFAULT_BRANCH,
+        "protected_refs": list(PROTECTED_REFS),
+        "workflow": workflow,
+        "child_workflows": child_workflows,
+        "globals": ctx.globals_map,
+        "child_globals": ctx.child_globals,
+        "stages": _stage_order(state),
+        "lint": ctx.lint,
+        "fatal": ctx.fatal,
+        "unresolved_includes": list(state.unresolved_includes),
+    }
+
+
+def _config_fatal_checks(state, ctx: _CompileCtx) -> None:
+    """Config-invalid conditions GitLab rejects outright — no pipeline of
+    any kind is created. Scenario-independent, so checked at compile time."""
+    progs: dict[str, dict] = {}
+    for nid, node in state.nodes.items():
+        if node.kind == "job" and "whatif" in node.annotations:
+            progs[nid] = node.annotations["whatif"]
+
+    def plain_needs(w: dict) -> list[str]:
+        prefix = (w["child_of"] + "::") if w["child_of"] else ""
+        return [prefix + n["job"] for n in (w.get("needs") or [])
+                if isinstance(n, dict) and "job" in n and not n.get("kind")]
+
+    # dependencies must be a subset of needs when both are present
+    for nid, w in progs.items():
+        needs = w.get("needs")
+        deps = w.get("dependencies")
+        if needs is None or not deps:
+            continue
+        need_names = {n["job"] for n in needs
+                      if isinstance(n, dict) and "job" in n and not n.get("kind")}
+        for dep in deps:
+            if dep not in need_names:
+                ctx.fatal_add(
+                    f"job '{nid}'",
+                    f"'{w['name']}' uses needs together with dependencies, but "
+                    f"'{dep}' is not in needs — GitLab: 'the {dep} should be "
+                    "part of needs' and rejects the configuration",
+                )
+
+    # circular needs
+    mark: dict[str, int] = {}
+
+    def dfs(node_id: str, path: list[str]) -> None:
+        mark[node_id] = 1
+        for nxt in plain_needs(progs[node_id]):
+            if nxt not in progs:
+                continue
+            if mark.get(nxt) == 1:
+                cyc = path[path.index(nxt):] + [nxt] if nxt in path else [node_id, nxt]
+                ctx.fatal_add(
+                    f"job '{nxt}'",
+                    "circular needs dependency: " + " → ".join(cyc)
+                    + " — GitLab rejects the configuration",
+                )
+                continue
+            if mark.get(nxt) is None:
+                dfs(nxt, path + [nxt])
+        mark[node_id] = 2
+
+    for nid in progs:
+        if mark.get(nid) is None:
+            dfs(nid, [nid])
+
+    # environment on_stop must point at a stop job for the same environment
+    for nid, w in progs.items():
+        env = w.get("environment")
+        if not env or not env.get("on_stop"):
+            continue
+        prefix = (w["child_of"] + "::") if w["child_of"] else ""
+        target = progs.get(prefix + env["on_stop"])
+        where = f"job '{nid}'"
+        if target is None:
+            ctx.fatal_add(where, f"environment '{env.get('name')}': on_stop job "
+                                 f"'{env['on_stop']}' is not defined — GitLab "
+                                 "rejects the configuration")
+        elif not target.get("environment"):
+            ctx.fatal_add(where, f"on_stop job '{env['on_stop']}' defines no "
+                                 "environment — GitLab rejects the configuration")
+        elif target["environment"].get("name") != env.get("name"):
+            ctx.fatal_add(where, f"on_stop job '{env['on_stop']}' uses environment "
+                                 f"'{target['environment'].get('name')}', not "
+                                 f"'{env.get('name')}' — GitLab rejects the "
+                                 "configuration")
+        elif target["environment"].get("action") != "stop":
+            ctx.fatal_add(where, f"on_stop job '{env['on_stop']}' must have "
+                                 "environment action: stop — GitLab rejects the "
+                                 "configuration")
+
+
+def _lint_final_bare_when(rules: list[dict], job_id: str, ctx: _CompileCtx,
+                          rel_path: str, line_no: int) -> None:
+    """GitLab's own pipeline warning, statically: a final catch-all rule
+    (`when` with no condition, not `never`) lets one push start both a branch
+    pipeline and a merge request pipeline."""
+    if not rules:
+        return
+    last = rules[-1]
+    has_condition = last["if"] is not None or last["changes"] is not None \
+        or last["exists"] is not None
+    if not has_condition and last["when"] != "never":
+        message = (
+            f"Job '{job_id}': the final rule is an unconditional "
+            f"'when: {last['when'] or 'on_success'}' — one push to a branch "
+            "with an open merge request may start duplicate pipelines "
+            "(GitLab shows the same warning)"
+        )
+        ctx.lint.append({"job": job_id, "message": message})
+        ctx.diag("warning", message, line_no, rel_path, job_id)
