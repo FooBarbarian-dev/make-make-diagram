@@ -1,0 +1,11 @@
+# The unknown rule leads to when:never and no later rule can match —
+# the pipeline is NOT created whichever way the unknown goes.
+
+workflow:
+  rules:
+    - if: $CI_KUBERNETES_ACTIVE
+      when: never
+
+job_y:
+  script:
+    - echo y

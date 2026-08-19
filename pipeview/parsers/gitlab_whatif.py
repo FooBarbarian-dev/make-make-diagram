@@ -594,13 +594,23 @@ def _collect_globals(state) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
     main: dict[str, str] = {}
     root_owned: set[str] = set()
     children: dict[str, dict[str, str]] = {}
+    child_owned: dict[str, set[str]] = {}
     for var in state.variables.values():
         for evt in var.events:
             if evt.scope != "global":
                 continue
             ns = evt.annotations.get("namespace")
             if ns:
-                children.setdefault(ns, {})[var.name] = evt.raw_value
+                # same precedence inside a child: its entry file's value
+                # beats values from files the child includes
+                child = children.setdefault(ns, {})
+                entry_owned = child_owned.setdefault(ns, set())
+                from_entry = evt.source.file.replace(os.sep, "/") == ns
+                if var.name in entry_owned and not from_entry:
+                    continue
+                child[var.name] = evt.raw_value
+                if from_entry:
+                    entry_owned.add(var.name)
                 continue
             from_root = evt.source.file.replace(os.sep, "/") == root_rel
             if var.name in root_owned and not from_root:

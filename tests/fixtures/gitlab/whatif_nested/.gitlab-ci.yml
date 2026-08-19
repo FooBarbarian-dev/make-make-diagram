@@ -41,3 +41,18 @@ legacy_manual:
   script:
     - echo manual
   when: manual
+
+## Explicit allow_failure: false makes a legacy manual job BLOCKING
+manual_block_legacy:
+  script:
+    - echo manual
+  when: manual
+  allow_failure: false
+
+## Job-level when:manual on a job WITH rules defaults to blocking
+manual_rules_joblevel:
+  script:
+    - echo manual
+  when: manual
+  rules:
+    - if: $CI_COMMIT_BRANCH

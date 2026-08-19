@@ -107,6 +107,20 @@ def _check_candidate(name: str, cand: dict, expect: dict, failures: list[str]) -
                 f"{name}/{cand['id']}: reason {cand.get('reason')!r} does not "
                 f"contain {expect['reasonContains']!r}"
             )
+    for k, want_val in expect.get("workflowVariablesContain", {}).items():
+        got_val = cand.get("workflowVariables", {}).get(k)
+        if got_val != want_val:
+            failures.append(
+                f"{name}/{cand['id']}: workflowVariables[{k}] expected "
+                f"{want_val!r}, got {got_val!r}"
+            )
+    if "childrenCount" in expect:
+        n = len(cand.get("children", []))
+        if n != expect["childrenCount"]:
+            failures.append(
+                f"{name}/{cand['id']}: expected {expect['childrenCount']} "
+                f"children, got {n}"
+            )
     for job_id, details in expect.get("jobsDetail", {}).items():
         job = cand["jobs"].get(job_id)
         if job is None:

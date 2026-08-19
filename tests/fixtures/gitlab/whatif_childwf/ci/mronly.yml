@@ -1,6 +1,11 @@
-workflow:
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+# The child's workflow comes from a file the CHILD includes — GitLab
+# merges includes into the child config before evaluating workflow:rules.
+
+include:
+  - local: ci/wfrules.yml
+
+variables:
+  SHARED: from-entry
 
 child_job:
   script:

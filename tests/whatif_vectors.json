@@ -165,6 +165,7 @@
                      "weird_rules": "conditional", "integration": "runs",
                      "package": "runs", "trigger_child": "runs"},
             "notesContain": ["dotenv report"],
+            "workflowVariablesContain": {"FROM_WORKFLOW": "yes"},
             "children": {
               "ci/child.yml": {
                 "jobs": {"ci/child.yml::child_build": "runs",
@@ -269,8 +270,41 @@
           "branch": {"created": true,
                      "jobs": {"job_a": "runs", "flag_job": "conditional",
                               "brace_job": "conditional", "never_job": "skipped",
-                              "legacy_manual": "manual"},
-                     "jobsDetail": {"legacy_manual": {"allow_failure": true}}}
+                              "legacy_manual": "manual",
+                              "manual_block_legacy": "manual",
+                              "manual_rules_joblevel": "manual"},
+                     "jobsDetail": {"legacy_manual": {"allow_failure": true},
+                                    "manual_block_legacy": {"allow_failure": false},
+                                    "manual_rules_joblevel": {"allow_failure": false}}}
+        }
+      }
+    },
+    {
+      "name": "wfcollapse: unknown workflow rule that cannot change the outcome collapses to created",
+      "fixture": "whatif_wfcollapse",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {"branch": {"created": true, "jobs": {"job_x": "runs"}}}
+      }
+    },
+    {
+      "name": "wfnever: unknown rule into when:never with no fallback collapses to not created",
+      "fixture": "whatif_wfnever",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {"branch": {"created": false}}
+      }
+    },
+    {
+      "name": "selftrig: a self-triggering child is cut at the first repetition",
+      "fixture": "whatif_selftrig",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "created": true,
+            "children": {"ci/self.yml": {"created": true, "childrenCount": 0}}
+          }
         }
       }
     },

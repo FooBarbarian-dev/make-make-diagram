@@ -181,9 +181,12 @@ class _ParserState:
         self.workflow_rules: list[str] = []
         self.workflow_raw: list = []   # raw workflow:rules entries for the what-if compiler
         self.workflow_name: str | None = None
-        # child-pipeline entry file → its raw workflow:rules (children
+        # child-pipeline namespace → its raw workflow:rules (children
         # evaluate their own workflow, independent of the parent's)
         self.child_workflows: dict[str, list] = {}
+        self.child_workflow_entry: set[str] = set()   # namespaces whose ENTRY file set it
+        self.workflow_root = False            # the root file defined workflow:
+        self.workflow_root_has_rules = False  # ... with a rules: list
         # raw (pre-extends) job configs, insertion-ordered; name → config
         self.job_configs: dict[str, dict[str, Any]] = {}
         # name → (rel_path, line, doc, namespace)
@@ -420,17 +423,35 @@ def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> Non
             )
 
     if "workflow" in data and isinstance(data["workflow"], dict):
+        wf = data["workflow"]
+        wf_rules = wf.get("rules")
         if is_root:
-            _process_workflow(data["workflow"], state)
-        elif namespace and rel_path.replace(os.sep, "/") + "::" == namespace:
-            # entry file of a child pipeline: its workflow gates the child
-            child_rules = data["workflow"].get("rules")
-            if isinstance(child_rules, list):
-                state.child_workflows[namespace.rstrip(":")] = child_rules
-        elif not namespace and not state.workflow_rules and not state.workflow_name:
-            # workflow supplied by an included file — the main file would
-            # override it, but defined none, so the include's applies
-            _process_workflow(data["workflow"], state)
+            _process_workflow(wf, state)
+            state.workflow_root = True
+            state.workflow_root_has_rules = isinstance(wf_rules, list) and bool(wf_rules)
+        elif namespace:
+            # child pipeline: its own workflow gates it — from the entry
+            # file (wins) or any file the child includes (last include wins,
+            # mirroring GitLab's include merge)
+            ns_key = namespace.rstrip(":")
+            is_entry = rel_path.replace(os.sep, "/") + "::" == namespace
+            if isinstance(wf_rules, list) and wf_rules:
+                if is_entry:
+                    state.child_workflows[ns_key] = wf_rules
+                    state.child_workflow_entry.add(ns_key)
+                elif ns_key not in state.child_workflow_entry:
+                    state.child_workflows[ns_key] = wf_rules
+        elif not state.workflow_root_has_rules:
+            # include-supplied workflow: GitLab deep-merges includes (last
+            # include wins) and the main file overrides per key — so include
+            # rules apply unless the root defined rules; a root name-only
+            # workflow keeps its name
+            keep_name = state.workflow_name if state.workflow_root else None
+            state.workflow_rules = []
+            state.workflow_raw = []
+            _process_workflow(wf, state)
+            if keep_name is not None:
+                state.workflow_name = keep_name
 
     if "include" in data:
         _process_includes(

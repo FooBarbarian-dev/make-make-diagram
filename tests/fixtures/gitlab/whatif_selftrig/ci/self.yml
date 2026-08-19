@@ -1,0 +1,7 @@
+self_job:
+  script:
+    - echo self
+
+self_trig:
+  trigger:
+    include: ci/self.yml

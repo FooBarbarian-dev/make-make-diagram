@@ -1,0 +1,14 @@
+# The root defines a workflow NAME only; the rules come from includes.
+# GitLab deep-merges includes (last include wins per key) and the main
+# file overrides per key — so the name survives and wf2's rules apply.
+
+workflow:
+  name: 'named pipeline'
+
+include:
+  - local: wf1.yml
+  - local: wf2.yml
+
+job:
+  script:
+    - echo hi

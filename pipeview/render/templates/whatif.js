@@ -391,7 +391,7 @@ var PipeviewWhatIf = (function () {
     return { v: parts.length ? triAnd(parts) : true, notes: notes, vars: vars };
   }
 
-  function ruleOutcome(rule, defaults, whenFromRule) {
+  function ruleOutcome(rule, defaults, hasRules) {
     var when = rule.when || defaults.when || 'on_success';
     var out;
     if (when === 'never') {
@@ -399,12 +399,16 @@ var PipeviewWhatIf = (function () {
     } else {
       var allowFailure = rule.allow_failure;
       if (allowFailure === null || allowFailure === undefined) {
-        // rules:when:manual defaults to a BLOCKING manual job; a job-level
-        // when:manual (legacy path) defaults to allow_failure: true
-        if (when === 'manual') {
-          allowFailure = (whenFromRule && rule.when === 'manual') ? false : true;
+        if (defaults.allow_failure !== null && defaults.allow_failure !== undefined) {
+          // an explicit job-level allow_failure always applies
+          allowFailure = defaults.allow_failure;
+        } else if (when === 'manual') {
+          // GitLab: a manual job defaults to BLOCKING whenever the job uses
+          // rules (manual_action? && !has_rules?); only legacy rule-less
+          // manual jobs default to optional (allow_failure: true)
+          allowFailure = hasRules ? false : true;
         } else {
-          allowFailure = defaults.allow_failure || false;
+          allowFailure = false;
         }
       }
       out = {
@@ -454,7 +458,8 @@ var PipeviewWhatIf = (function () {
         state: thenOut.state === 'skipped' || elseOut.state === 'skipped'
           ? 'skipped' : 'not-added',
         when: thenOut.when,
-        reason: 'excluded whichever way the unknown condition goes'
+        collapsed: true,
+        reason: 'excluded whichever way the unknown conditions go'
       };
     }
     var conditional = {
@@ -573,6 +578,7 @@ var PipeviewWhatIf = (function () {
     };
   }
 
+
   function evaluateJob(jobWhatif, candidate, ctx) {
     var defaults = {
       when: jobWhatif.when || 'on_success',
@@ -590,7 +596,7 @@ var PipeviewWhatIf = (function () {
       trace.push({ rule: null, desc: program.reason || 'rules unknown', verdict: 'unknown' });
       outcome = {
         state: 'conditional', condition: program.reason || 'rules not analyzable',
-        then: ruleOutcome({ when: null }, defaults, false),
+        then: ruleOutcome({ when: null }, defaults, true),
         otherwise: { included: false, state: 'not-added' },
         included: true
       };
@@ -644,17 +650,33 @@ var PipeviewWhatIf = (function () {
       trace.push({ rule: idx, desc: desc, verdict: 'unknown', notes: cond.notes,
                    vars: cond.vars });
       var rest = walk(idx + 1);
+      var uncertainVars = (rule.variables && Object.keys(rule.variables).length)
+        ? Object.keys(rule.variables) : [];
+      if (rest.variablesUncertain) {
+        uncertainVars = uncertainVars.concat(rest.variablesUncertain);
+      }
+      var thenCreated = rule.when !== 'never';
+      if (rest.created === thenCreated) {
+        // the unknown rule cannot change whether the pipeline is created
+        var collapsed = {
+          created: rest.created,
+          reason: rest.created
+            ? 'the pipeline is created whichever way the unknown rule goes'
+            : 'the pipeline is not created whichever way the unknown rule goes',
+          variables: rest.variables || {}
+        };
+        if (uncertainVars.length) collapsed.variablesUncertain = uncertainVars;
+        return collapsed;
+      }
       var result = {
         created: null,
         reason: 'depends on: ' + desc,
-        conditional: { then: rule.when !== 'never', otherwise: rest.created },
+        conditional: { then: thenCreated, otherwise: rest.created },
         // an unknown rule's variables are NOT applied as fact — jobs are
         // evaluated with the definite path's variables plus a caveat
         variables: rest.variables || {}
       };
-      if (rule.variables && Object.keys(rule.variables).length) {
-        result.variablesUncertain = Object.keys(rule.variables);
-      }
+      if (uncertainVars.length) result.variablesUncertain = uncertainVars;
       return result;
     }
     var result = walk(0);
@@ -930,7 +952,7 @@ var PipeviewWhatIf = (function () {
       var trig = job.whatif.trigger;
       if (!trig || !mightRun(results[job.id]) || created === false) return;
       (trig.children || []).forEach(function (childRel) {
-        if (lineage.indexOf(childRel) >= 0) {
+        if (childRel === (candidate.childOf || null) || lineage.indexOf(childRel) >= 0) {
           artifacts.notes.push({ job: job.id, kind: 'downstream',
             message: '"' + job.whatif.name + '" re-triggers ' + childRel
               + ' which is already in this chain — cycle not expanded' });
@@ -983,6 +1005,7 @@ var PipeviewWhatIf = (function () {
       parentJob: candidate.parentJob || null,
       parentConditional: candidate.parentConditional || false,
       created: created, reason: reason, workflowTrace: gate.trace || [],
+      workflowVariables: gate.variables || {},
       env: env, controlled: controlled,
       jobs: results, jobOrder: jobs.map(function (j) { return j.id; }),
       artifacts: artifacts, children: children

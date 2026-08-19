@@ -1500,6 +1500,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     if (a.rule) notes += '<div class="tl-note">only when rule matches: <code>' + esc(a.rule) + '</code></div>';
     if (a.yaml_coercion) notes += '<div class="tl-note">' + esc(a.yaml_coercion) + ' — GitLab passes the quoted string shown here</div>';
     if (a.via_reference) notes += '<div class="tl-note">value spliced from <code>' + esc(a.via_reference) + '</code></div>';
+    if (a.namespace) notes += '<div class="tl-note">defined in child pipeline <code>' + esc(a.namespace) + '</code> — its value applies to that child, not the main pipeline</div>';
     if (a.external_reference) notes += '<div class="tl-note">value defined externally via <code>' + esc(a.external_reference) + '</code></div>';
     if (a.description) notes += '<div class="tl-note">description: ' + esc(a.description) + '</div>';
     return { chips: chips, notes: notes };
@@ -2560,10 +2561,20 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   // recomputed for THIS candidate's included set (the full-config edges
   // would point at jobs that aren't in this pipeline)
   function wiEdgesFor(cand, ids, idSet) {
+    // rules:needs replaces a job's needs when the rule matched — the drawn
+    // edges must follow the evaluation, not the static config
+    const effectiveNeeds = id => {
+      const w = nodeMap[id].annotations.whatif;
+      const out = cand.jobs[id];
+      if (out && !out.needsUncertain && out.needsOverride !== undefined) {
+        return out.needsOverride;
+      }
+      return w.needs;
+    };
     const edges = [];
     ids.forEach(id => {
       const w = nodeMap[id].annotations.whatif;
-      (w.needs || []).forEach(need => {
+      (effectiveNeeds(id) || []).forEach(need => {
         if (need.kind) return;
         const tid = (w.child_of ? w.child_of + '::' : '') + need.job;
         if (idSet.has(tid)) edges.push({ src: id, dst: tid, kind: 'needs' });
@@ -2577,7 +2588,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     });
     ids.forEach(id => {
       const w = nodeMap[id].annotations.whatif;
-      if (w.needs !== null && w.needs !== undefined) return;  // [] = starts immediately
+      const needs = effectiveNeeds(id);
+      if (needs !== null && needs !== undefined) return;  // [] = starts immediately
       for (let i = stages.indexOf(w.stage) - 1; i >= 0; i--) {
         const prev = byStage[stages[i]];
         if (prev && prev.length) {
@@ -2695,9 +2707,11 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       : (WHATIF.globals || {});
     const overrideMap = {};
     wiState.overrides.forEach(o => { if (o.name) overrideMap[o.name] = o.value; });
-    const merged = Object.assign({}, cand.env, globalsFor, overrideMap);
+    const wfVars = cand.workflowVariables || {};
+    const merged = Object.assign({}, cand.env, globalsFor, wfVars, overrideMap);
     const rows = Object.keys(merged).sort().map(name => {
       const origin = Object.prototype.hasOwnProperty.call(overrideMap, name) ? 'override'
+        : Object.prototype.hasOwnProperty.call(wfVars, name) ? 'workflow'
         : Object.prototype.hasOwnProperty.call(globalsFor, name) ? 'YAML' : 'predefined';
       return '<tr><td><code>' + esc(name) + '</code></td>'
         + '<td class="wrap-any"><code>' + esc(merged[name]) + '</code></td>'

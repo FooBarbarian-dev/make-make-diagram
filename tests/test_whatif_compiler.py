@@ -257,6 +257,23 @@ class TestCompiledPrograms:
         assert "CHILD_ONLY" not in w["globals"]
         assert w["child_globals"]["ci/child.yml"]["CHILD_ONLY"] == "yes"
 
+    def test_child_workflow_from_child_include(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_childwf" / ".gitlab-ci.yml"))
+        w = r.annotations["whatif"]
+        cw = w["child_workflows"]
+        assert "ci/mronly.yml" in cw
+        rule = cw["ci/mronly.yml"]["rules"][0]
+        assert rule["if"]["right"]["value"] == "merge_request_event"
+        # entry-file globals beat the child's include's globals
+        assert w["child_globals"]["ci/mronly.yml"]["SHARED"] == "from-entry"
+
+    def test_workflow_from_includes_merges_like_gitlab(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_wfinclude" / ".gitlab-ci.yml"))
+        wf = r.annotations["whatif"]["workflow"]
+        assert wf["name"] == "named pipeline"          # root name survives
+        # last include wins for rules
+        assert wf["rules"][0]["if"]["term"]["name"] == "CI_COMMIT_TAG"
+
     def test_unresolved_trigger_children_recorded(self):
         r = parse_gitlab(str(FIXTURES / "whatif_childwf" / ".gitlab-ci.yml"))
         trig = whatif_of(r, "trigger_remote")["trigger"]

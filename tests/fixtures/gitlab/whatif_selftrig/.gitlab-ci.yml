@@ -1,0 +1,6 @@
+# A child pipeline that triggers itself: the cycle must be cut at the
+# first repetition, not expanded a redundant extra level.
+
+root_trig:
+  trigger:
+    include: ci/self.yml
