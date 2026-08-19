@@ -6,7 +6,11 @@ from pathlib import Path
 import pytest
 
 from pipeview.parsers.gitlab_parser import parse_gitlab
-from pipeview.parsers.gitlab_whatif import glob_to_regex, parse_expression
+from pipeview.parsers.gitlab_whatif import (
+    _eval_exists,
+    glob_to_regex,
+    parse_expression,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "gitlab"
 
@@ -112,11 +116,30 @@ class TestGlobTranslation:
         ("?.txt", "a.txt", True),
         ("?.txt", "ab.txt", False),
         (".hidden", ".hidden", True),               # DOTMATCH
+        ("{docs/**,spec/**}", "docs/a/b.md", True),  # wildcards inside braces
+        ("{docs/**,spec/**}", "src/a.py", False),
+        (r"a\*b", "a*b", True),                     # backslash escapes literal
+        (r"a\*b", "aXb", False),
     ])
     def test_patterns(self, pattern, path, matches):
         rx = glob_to_regex(pattern)
         assert rx is not None
         assert bool(rx.match(path)) is matches
+
+
+class TestExistsEvaluation:
+    def test_match_short_circuits_past_bad_patterns(self):
+        assert _eval_exists(["Dockerfile", "[z-a]["], ["Dockerfile"], {}, False) is True
+
+    def test_bad_pattern_without_match_is_unknown(self):
+        assert _eval_exists(["[z-a]["], ["Dockerfile"], {}, False) is None
+
+    def test_truncated_listing_never_bakes_false(self):
+        assert _eval_exists(["missing.txt"], ["a.txt"], {}, True) is None
+        assert _eval_exists(["a.txt"], ["a.txt"], {}, True) is True
+
+    def test_definite_false_on_complete_listing(self):
+        assert _eval_exists(["missing.txt"], ["a.txt"], {}, False) is False
 
 
 @pytest.fixture(scope="module")
@@ -207,7 +230,7 @@ class TestCompiledPrograms:
 
     def test_trigger_child(self, features):
         assert whatif_of(features, "trigger_child")["trigger"] == \
-            {"children": ["ci/child.yml"]}
+            {"children": ["ci/child.yml"], "unresolved": []}
 
     def test_child_jobs_marked(self, features):
         w = whatif_of(features, "ci/child.yml::child_mr_only")
@@ -222,6 +245,49 @@ class TestCompiledPrograms:
         for node in r.nodes:
             if node.kind == "job" and "template" in node.flags:
                 assert "whatif" not in node.annotations
+
+    def test_child_workflow_captured(self, features):
+        cw = features.annotations["whatif"]["child_workflows"]
+        assert "ci/child.yml" in cw
+        rule = cw["ci/child.yml"]["rules"][0]
+        assert rule["if"]["right"]["value"] == "parent_pipeline"
+
+    def test_child_globals_do_not_leak_into_parent(self, features):
+        w = features.annotations["whatif"]
+        assert "CHILD_ONLY" not in w["globals"]
+        assert w["child_globals"]["ci/child.yml"]["CHILD_ONLY"] == "yes"
+
+    def test_unresolved_trigger_children_recorded(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_childwf" / ".gitlab-ci.yml"))
+        trig = whatif_of(r, "trigger_remote")["trigger"]
+        assert trig["children"] == []
+        assert trig["unresolved"] and "other/proj" in trig["unresolved"][0]
+
+    def test_nested_rules_flatten_in_order(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_nested" / ".gitlab-ci.yml"))
+        rules = whatif_of(r, "job_a")["program"]["rules"]
+        assert [x["raw_if"] for x in rules] == \
+            ["$MAIN_BUMPED", "$OTHER_FLAG", "$CI_COMMIT_BRANCH"]
+        assert rules[0]["when"] == "never"
+        # the display summary flattens too — no raw python repr strings
+        display = r.node_by_id("job_a").annotations["rules"]
+        assert len(display) == 3
+        assert not any("[{" in s for s in display)
+
+    def test_rules_needs_override_captured(self):
+        _, _, err = parse_expression("$X")
+        assert err is None  # sanity
+
+        from pipeview.parsers.gitlab_whatif import _compile_needs
+        assert _compile_needs(["a", {"job": "b", "optional": True}]) == [
+            {"job": "a", "optional": False, "artifacts": True},
+            {"job": "b", "optional": True, "artifacts": True},
+        ]
+
+    def test_braced_var_form_warns(self):
+        _, notes, err = parse_expression('${FOO} == "x"')
+        assert err is None
+        assert any("${VAR}" in n for n in notes)
 
     def test_make_reports_have_no_whatif(self):
         from pipeview.parsers.make_parser import parse_makefile

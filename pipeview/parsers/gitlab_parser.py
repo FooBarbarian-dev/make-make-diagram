@@ -17,7 +17,7 @@ from pipeview.model import (
     Variable,
     VariableEvent,
 )
-from pipeview.parsers.gitlab_whatif import compile_whatif
+from pipeview.parsers.gitlab_whatif import compile_whatif, flatten_rules
 
 # Top-level configuration keywords — never jobs. `pages` is deliberately NOT
 # here: it is a real job with special deploy behavior.
@@ -181,6 +181,9 @@ class _ParserState:
         self.workflow_rules: list[str] = []
         self.workflow_raw: list = []   # raw workflow:rules entries for the what-if compiler
         self.workflow_name: str | None = None
+        # child-pipeline entry file → its raw workflow:rules (children
+        # evaluate their own workflow, independent of the parent's)
+        self.child_workflows: dict[str, list] = {}
         # raw (pre-extends) job configs, insertion-ordered; name → config
         self.job_configs: dict[str, dict[str, Any]] = {}
         # name → (rel_path, line, doc, namespace)
@@ -392,6 +395,9 @@ def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> Non
         _process_variables(
             data["variables"], "global", rel_path,
             nested_lines, raw_scalar_map, "", top_lines.get("variables", 1), state,
+            # child-pipeline globals must not leak into the parent's rules
+            extra_annotations={"namespace": namespace.rstrip(":")}
+            if namespace else None,
         )
 
     if "default" in data and isinstance(data["default"], dict) and not state.global_defaults:
@@ -413,8 +419,18 @@ def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> Non
                 )
             )
 
-    if "workflow" in data and isinstance(data["workflow"], dict) and is_root:
-        _process_workflow(data["workflow"], state)
+    if "workflow" in data and isinstance(data["workflow"], dict):
+        if is_root:
+            _process_workflow(data["workflow"], state)
+        elif namespace and rel_path.replace(os.sep, "/") + "::" == namespace:
+            # entry file of a child pipeline: its workflow gates the child
+            child_rules = data["workflow"].get("rules")
+            if isinstance(child_rules, list):
+                state.child_workflows[namespace.rstrip(":")] = child_rules
+        elif not namespace and not state.workflow_rules and not state.workflow_name:
+            # workflow supplied by an included file — the main file would
+            # override it, but defined none, so the include's applies
+            _process_workflow(data["workflow"], state)
 
     if "include" in data:
         _process_includes(
@@ -461,6 +477,7 @@ def _process_workflow(workflow: dict, state: _ParserState) -> None:
         state.workflow_name = name
     rules = workflow.get("rules")
     if isinstance(rules, list):
+        rules = flatten_rules(rules)   # GitLab flattens nested rules arrays
         state.workflow_raw = rules
         for rule in rules:
             if isinstance(rule, dict):
@@ -885,6 +902,13 @@ def _summarize_rules(config: dict, flags: set[str], annotations: dict,
     rules = config.get("rules")
     if not isinstance(rules, list):
         return
+    # Display what GitLab evaluates: !reference entries spliced in, nested
+    # arrays flattened (both are legal composition forms).
+    resolved, _reason = _resolve_nested_refs(rules, state, ())
+    if _reason is None and isinstance(resolved, list):
+        rules = flatten_rules(resolved)
+    else:
+        rules = flatten_rules(rules)
     rules_summary = []
     for rule in rules:
         if not isinstance(rule, dict):

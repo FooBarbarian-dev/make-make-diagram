@@ -66,7 +66,7 @@ class _ExprError(Exception):
     pass
 
 
-def _tokenize(src: str) -> list[tuple]:
+def _tokenize(src: str, notes: list[str]) -> list[tuple]:
     tokens: list[tuple] = []
     i, n = 0, len(src)
     while i < n:
@@ -79,6 +79,11 @@ def _tokenize(src: str) -> list[tuple]:
                          src[i:])
             if not m:
                 raise _ExprError(f"bad variable reference at offset {i}")
+            if m.group(1):
+                notes.append(
+                    "GitLab rejects the ${VAR} form inside rules expressions "
+                    "(invalid expression syntax) — use $VAR"
+                )
             tokens.append(("var", m.group(1) or m.group(2)))
             i += m.end()
             continue
@@ -184,9 +189,11 @@ class _Parser:
             right = self.parse_term()
             if tok[1] in ("=~", "!~") and right.get("t") == "re":
                 if _NON_RE2.search(right["source"]):
+                    right["non_re2"] = True
                     self.notes.append(
                         f"/{right['source']}/ uses lookaround or backreferences — "
-                        "GitLab's RE2 engine rejects these patterns"
+                        "GitLab's RE2 engine rejects these patterns and the "
+                        "pipeline would fail to be created"
                     )
             return {"op": "cmp", "cmp": tok[1], "left": left, "right": right}
         return {"op": "truthy", "term": left}
@@ -209,12 +216,26 @@ def parse_expression(src: Any) -> tuple[dict, list[str], str | None]:
     On failure the AST is {"op": "opaque", "src": …} which the evaluator
     treats as *unknown* — never a crash, never a guess."""
     text = str(src)
+    lex_notes: list[str] = []
     try:
-        parser = _Parser(_tokenize(text))
+        parser = _Parser(_tokenize(text, lex_notes))
         ast = parser.parse()
-        return ast, parser.notes, None
+        return ast, lex_notes + parser.notes, None
     except _ExprError as e:
-        return {"op": "opaque", "src": text}, [], str(e)
+        return {"op": "opaque", "src": text}, lex_notes, str(e)
+
+
+def flatten_rules(rules: list) -> list:
+    """GitLab flattens nested arrays inside `rules:` (from literal YAML,
+    anchors, or !reference composition) at unbounded depth — mirror that.
+    Applies to job rules and workflow:rules; only/except never nest."""
+    out: list = []
+    for entry in rules:
+        if isinstance(entry, list):
+            out.extend(flatten_rules(entry))
+        else:
+            out.append(entry)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -222,51 +243,61 @@ def parse_expression(src: Any) -> tuple[dict, list[str], str | None]:
 # flags GitLab documents for rules:changes / rules:exists)
 # ---------------------------------------------------------------------------
 
+def _glob_translate(pattern: str) -> str:
+    out = []
+    i, n = 0, len(pattern)
+    while i < n:
+        c = pattern[i]
+        if c == "\\" and i + 1 < n:
+            # fnmatch: backslash escapes the next character to a literal
+            out.append(re.escape(pattern[i + 1]))
+            i += 2
+        elif c == "*":
+            if pattern[i:i + 3] == "**/":
+                out.append(r"(?:[^/]+/)*")
+                i += 3
+            elif pattern[i:i + 2] == "**":
+                out.append(r".*")
+                i += 2
+            else:
+                out.append(r"[^/]*")
+                i += 1
+        elif c == "?":
+            out.append(r"[^/]")
+            i += 1
+        elif c == "[":
+            j = pattern.find("]", i + 1)
+            if j < 0:
+                out.append(re.escape(c))
+                i += 1
+            else:
+                inner = pattern[i + 1:j]
+                if inner.startswith("!"):
+                    inner = "^" + inner[1:]
+                out.append("[" + inner + "]")
+                i = j + 1
+        elif c == "{":
+            j = pattern.find("}", i + 1)
+            if j < 0:
+                out.append(re.escape(c))
+                i += 1
+            else:
+                # EXTGLOB: each alternative is itself a glob, so recurse —
+                # "{docs/**,spec/**}" must keep its wildcards
+                alts = pattern[i + 1:j].split(",")
+                out.append("(?:" + "|".join(_glob_translate(a) for a in alts) + ")")
+                i = j + 1
+        else:
+            out.append(re.escape(c))
+            i += 1
+    return "".join(out)
+
+
 def glob_to_regex(pattern: str) -> re.Pattern | None:
     """Translate one GitLab path glob to an anchored regex, or None when the
     pattern can't be translated."""
-    out = []
-    i, n = 0, len(pattern)
     try:
-        while i < n:
-            c = pattern[i]
-            if c == "*":
-                if pattern[i:i + 3] == "**/":
-                    out.append(r"(?:[^/]+/)*")
-                    i += 3
-                elif pattern[i:i + 2] == "**":
-                    out.append(r".*")
-                    i += 2
-                else:
-                    out.append(r"[^/]*")
-                    i += 1
-            elif c == "?":
-                out.append(r"[^/]")
-                i += 1
-            elif c == "[":
-                j = pattern.find("]", i + 1)
-                if j < 0:
-                    out.append(re.escape(c))
-                    i += 1
-                else:
-                    inner = pattern[i + 1:j]
-                    if inner.startswith("!"):
-                        inner = "^" + inner[1:]
-                    out.append("[" + inner + "]")
-                    i = j + 1
-            elif c == "{":
-                j = pattern.find("}", i + 1)
-                if j < 0:
-                    out.append(re.escape(c))
-                    i += 1
-                else:
-                    alts = pattern[i + 1:j].split(",")
-                    out.append("(?:" + "|".join(re.escape(a) for a in alts) + ")")
-                    i = j + 1
-            else:
-                out.append(re.escape(c))
-                i += 1
-        return re.compile("^" + "".join(out) + "$")
+        return re.compile("^" + _glob_translate(pattern) + "$")
     except re.error:
         return None
 
@@ -283,7 +314,9 @@ def _expand_path_vars(pattern: str, globals_map: dict[str, str]) -> str:
 # exists: evaluated at generation time against the actual repo files
 # ---------------------------------------------------------------------------
 
-def _repo_file_list(repo_root: str) -> list[str]:
+def _repo_file_list(repo_root: str) -> tuple[list[str], bool]:
+    """Returns (files, truncated). A truncated listing must never bake a
+    definite `exists: false` — the file could be past the cap."""
     files: list[str] = []
     for dirpath, dirnames, filenames in os.walk(repo_root):
         dirnames[:] = [d for d in dirnames if d != ".git"]
@@ -292,24 +325,26 @@ def _repo_file_list(repo_root: str) -> list[str]:
             rel = fn if rel_dir == "." else f"{rel_dir}/{fn}"
             files.append(rel.replace(os.sep, "/"))
             if len(files) >= _MAX_EXISTS_FILES:
-                return files
-    return files
+                return files, True
+    return files, False
 
 
 def _eval_exists(
-    paths: list[str], repo_files: list[str], globals_map: dict[str, str]
+    paths: list[str], repo_files: list[str], globals_map: dict[str, str],
+    truncated: bool,
 ) -> bool | None:
-    result = False
+    unknown = False
     for raw in paths:
         pattern = _expand_path_vars(str(raw), globals_map)
         if pattern.endswith("/"):
             pattern += "**"
         rx = glob_to_regex(pattern)
         if rx is None:
-            return None
+            unknown = True   # one bad pattern never hides another's match
+            continue
         if any(rx.match(f) for f in repo_files):
-            result = True
-    return result
+            return True
+    return None if (unknown or truncated) else False
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +376,8 @@ def _compile_rule(
         out["if"] = ast
         out["raw_if"] = str(rule["if"])
         for note in notes:
-            ctx.diag("info", f"{where}: {note}", line)
+            ctx.diag("warning" if "reject" in note else "info",
+                     f"{where}: {note}", line)
         if err:
             ctx.diag(
                 "warning",
@@ -352,16 +388,18 @@ def _compile_rule(
             )
     if "changes" in rule:
         ch = rule["changes"]
+        # GitLab substitutes known CI/CD variables in changes: paths
+        expand = lambda paths: [_expand_path_vars(str(p), ctx.globals_map)  # noqa: E731
+                                for p in paths]
         if isinstance(ch, dict):
             out["changes"] = {
-                "paths": [str(p) for p in _as_list(ch.get("paths"))],
+                "paths": expand(_as_list(ch.get("paths"))),
                 "compare_to": str(ch["compare_to"]) if "compare_to" in ch else None,
             }
             if "regexp" in ch:
                 out["changes"]["regexp"] = str(ch["regexp"])
         else:
-            out["changes"] = {"paths": [str(p) for p in _as_list(ch)],
-                              "compare_to": None}
+            out["changes"] = {"paths": expand(_as_list(ch)), "compare_to": None}
     if "exists" in rule:
         ex = rule["exists"]
         if isinstance(ex, dict):
@@ -374,16 +412,24 @@ def _compile_rule(
             else:
                 out["exists"] = {
                     "paths": paths,
-                    "result": _eval_exists(paths, ctx.repo_files, ctx.globals_map),
+                    "result": _eval_exists(paths, ctx.repo_files,
+                                           ctx.globals_map, ctx.repo_truncated),
                     "reason": None,
                 }
         else:
             paths = [str(p) for p in _as_list(ex)]
             out["exists"] = {
                 "paths": paths,
-                "result": _eval_exists(paths, ctx.repo_files, ctx.globals_map),
+                "result": _eval_exists(paths, ctx.repo_files, ctx.globals_map,
+                                       ctx.repo_truncated),
                 "reason": None,
             }
+    if "needs" in rule:
+        # rules:needs replaces the job's needs when this rule matches —
+        # the evaluator uses it for consumption analysis
+        out["needs"] = _compile_needs(rule["needs"]
+                                      if isinstance(rule["needs"], list)
+                                      else _as_list(rule["needs"]))
     if "when" in rule:
         out["when"] = str(rule["when"])
     if "allow_failure" in rule:
@@ -412,6 +458,8 @@ def _compile_only_except(spec: Any, ctx: "_CompileCtx", where: str,
     """only:/except: value → {refs, variables, changes, unsupported}."""
     out: dict[str, Any] = {"refs": None, "variables": None, "changes": None,
                            "unsupported": []}
+    if spec is None:
+        return out   # `only:`/`except:` with an empty value — GitLab ignores it
     if isinstance(spec, (str, list)):
         out["refs"] = [str(r) for r in _as_list(spec)]
         return out
@@ -426,7 +474,8 @@ def _compile_only_except(spec: Any, ctx: "_CompileCtx", where: str,
             ast, notes, err = parse_expression(expr)
             asts.append(ast)
             for note in notes:
-                ctx.diag("info", f"{where}: {note}", line)
+                ctx.diag("warning" if "reject" in note else "info",
+                         f"{where}: {note}", line)
             if err:
                 ctx.diag(
                     "warning",
@@ -496,12 +545,19 @@ def _compile_trigger(trigger: Any) -> dict | None:
     includes = trigger.get("include")
     if includes is not None:
         children = []
+        unresolved = []
         for inc in _as_list(includes):
             if isinstance(inc, str):
                 children.append(inc.lstrip("/"))
             elif isinstance(inc, dict) and "local" in inc:
                 children.append(str(inc["local"]).lstrip("/"))
-        return {"children": children}
+            elif isinstance(inc, dict):
+                # dynamic (artifact:+job:), template:, remote:, project: —
+                # child config not available offline; must not vanish silently
+                kind = next((k for k in ("artifact", "template", "remote",
+                                         "project") if k in inc), "unknown")
+                unresolved.append(f"{kind}: {inc.get(kind, '?')}")
+        return {"children": children, "unresolved": unresolved}
     if "project" in trigger:
         return {"project": str(trigger["project"])}
     return None
@@ -514,8 +570,8 @@ def _compile_trigger(trigger: Any) -> dict | None:
 class _CompileCtx:
     def __init__(self, state) -> None:
         self.state = state
-        self.repo_files = _repo_file_list(state.repo_root)
-        self.globals_map = _globals_map(state)
+        self.repo_files, self.repo_truncated = _repo_file_list(state.repo_root)
+        self.globals_map, self.child_globals = _collect_globals(state)
         self.lint: list[dict] = []
 
     def diag(self, severity: str, message: str, line: int | None,
@@ -529,13 +585,30 @@ class _CompileCtx:
         )
 
 
-def _globals_map(state) -> dict[str, str]:
-    out: dict[str, str] = {}
+def _collect_globals(state) -> tuple[dict[str, str], dict[str, dict[str, str]]]:
+    """Global `variables:` split by pipeline: the main pipeline's map (the
+    root file's value beats included files', per GitLab's include merge) and
+    one map per child-pipeline namespace — child files' globals must not
+    leak into the parent's rule evaluation."""
+    root_rel = os.path.relpath(state.root_path, state.repo_root).replace(os.sep, "/")
+    main: dict[str, str] = {}
+    root_owned: set[str] = set()
+    children: dict[str, dict[str, str]] = {}
     for var in state.variables.values():
         for evt in var.events:
-            if evt.scope == "global":
-                out[var.name] = evt.raw_value
-    return out
+            if evt.scope != "global":
+                continue
+            ns = evt.annotations.get("namespace")
+            if ns:
+                children.setdefault(ns, {})[var.name] = evt.raw_value
+                continue
+            from_root = evt.source.file.replace(os.sep, "/") == root_rel
+            if var.name in root_owned and not from_root:
+                continue
+            main[var.name] = evt.raw_value
+            if from_root:
+                root_owned.add(var.name)
+    return main, children
 
 
 def _stage_order(state) -> list[str]:
@@ -555,10 +628,26 @@ def compile_whatif(state) -> dict:
     built (so flat configs and !reference resolution are available)."""
     from pipeview.parsers.gitlab_parser import (  # local import: avoid cycle
         _flatten_job,
+        _Reference,
         _resolve_nested_refs,
     )
 
     ctx = _CompileCtx(state)
+    if ctx.repo_truncated:
+        ctx.diag(
+            "info",
+            f"Repository has more than {_MAX_EXISTS_FILES} files — "
+            "rules:exists patterns that match nothing are treated as unknown "
+            "instead of false",
+            None,
+        )
+
+    def resolve_and_flatten(rules_value):
+        resolved, why = _resolve_nested_refs(rules_value, state, ())
+        if why is None and isinstance(resolved, list):
+            return flatten_rules(resolved), None
+        return flatten_rules(rules_value) if isinstance(rules_value, list) \
+            else rules_value, why
 
     for job_id in state.job_configs:
         node = state.nodes.get(job_id)
@@ -576,7 +665,7 @@ def compile_whatif(state) -> dict:
         program: dict[str, Any]
         rules = flat.get("rules")
         if rules is not None:
-            rules, reason = _resolve_nested_refs(rules, state, ())
+            rules, reason = resolve_and_flatten(rules)
             if reason is not None:
                 program = {"kind": "unknown", "reason": reason}
                 ctx.diag(
@@ -615,8 +704,14 @@ def compile_whatif(state) -> dict:
 
         variables = {}
         if isinstance(flat.get("variables"), dict):
+            resolved_vars, vreason = _resolve_nested_refs(
+                flat["variables"], state, ())
+            source_vars = resolved_vars if vreason is None \
+                and isinstance(resolved_vars, dict) else flat["variables"]
+            # an unresolvable !reference value must not bake its repr string
             variables = {str(k): _plain_value(v)
-                         for k, v in flat["variables"].items()}
+                         for k, v in source_vars.items()
+                         if not isinstance(v, _Reference)}
 
         deps = flat.get("dependencies")
         node.annotations["whatif"] = {
@@ -641,8 +736,9 @@ def compile_whatif(state) -> dict:
     raw_workflow = getattr(state, "workflow_raw", None)
     if raw_workflow:
         root_file = os.path.relpath(state.root_path, state.repo_root)
+        entries, _ = resolve_and_flatten(raw_workflow)
         compiled = [r for r in
-                    (_compile_rule(r, ctx, "workflow", None) for r in raw_workflow)
+                    (_compile_rule(r, ctx, "workflow", None) for r in entries)
                     if r is not None]
         for rule in compiled:
             if rule["when"] not in (None, "always", "never"):
@@ -654,14 +750,30 @@ def compile_whatif(state) -> dict:
                 )
         workflow = {"name": state.workflow_name, "rules": compiled}
 
+    # child pipelines evaluate their own workflow:rules (verified GitLab
+    # behavior — a child of an MR pipeline needs them to run at all)
+    child_workflows: dict[str, Any] = {}
+    for child_rel, child_rules in getattr(state, "child_workflows", {}).items():
+        entries, _ = resolve_and_flatten(child_rules)
+        if not isinstance(entries, list):
+            continue
+        compiled = [r for r in
+                    (_compile_rule(r, ctx, f"workflow ({child_rel})", None)
+                     for r in entries)
+                    if r is not None]
+        child_workflows[child_rel] = {"name": None, "rules": compiled}
+
     return {
         "version": WHATIF_VERSION,
         "default_branch": DEFAULT_BRANCH,
         "protected_refs": list(PROTECTED_REFS),
         "workflow": workflow,
+        "child_workflows": child_workflows,
         "globals": ctx.globals_map,
+        "child_globals": ctx.child_globals,
         "stages": _stage_order(state),
         "lint": ctx.lint,
+        "unresolved_includes": list(state.unresolved_includes),
     }
 
 

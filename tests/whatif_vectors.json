@@ -234,6 +234,143 @@
                  "errorsContain": ["fail to create"]}
         }
       }
+    },
+    {
+      "name": "features: except ORs its clause kinds — schedules ref alone excludes",
+      "fixture": "whatif_features",
+      "config": {"scenario": "schedule", "branch": "main"},
+      "expect": {
+        "candidates": {"schedule": {"jobs": {"legacy_except_multi": "not-added"}}}
+      }
+    },
+    {
+      "name": "features: except variables clause excludes on a branch push",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": [],
+                 "overrides": {"SKIP_ALL": "yes"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"legacy_except_multi": "not-added"}}}
+      }
+    },
+    {
+      "name": "features: except with no matching clause keeps the job",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": []},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"legacy_except_multi": "runs"}}}
+      }
+    },
+    {
+      "name": "nested: flattened rules evaluate in order (catch-all reached)",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main", "changedFiles": null},
+      "expect": {
+        "candidates": {
+          "branch": {"created": true,
+                     "jobs": {"job_a": "runs", "flag_job": "conditional",
+                              "brace_job": "conditional", "never_job": "skipped",
+                              "legacy_manual": "manual"},
+                     "jobsDetail": {"legacy_manual": {"allow_failure": true}}}
+        }
+      }
+    },
+    {
+      "name": "nested: the nested when:never rule fires first",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "overrides": {"MAIN_BUMPED": "1", "OTHER_FLAG": "yes"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"job_a": "skipped"}}}
+      }
+    },
+    {
+      "name": "nested: second flattened rule matches when the first does not",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "overrides": {"OTHER_FLAG": "yes"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"job_a": "runs"}}}
+      }
+    },
+    {
+      "name": "nested: brace glob keeps its wildcards",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["docs/guide.md"]},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"brace_job": "runs"}}}
+      }
+    },
+    {
+      "name": "nested: brace glob non-match",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["src/app.py"]},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"brace_job": "not-added"}}}
+      }
+    },
+    {
+      "name": "nested: pinning the runtime variable resolves the conditional",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "overrides": {"CI_KUBERNETES_ACTIVE": "true"}},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"flag_job": "runs"}}}
+      }
+    },
+    {
+      "name": "dedup: the documented pattern also suppresses SCHEDULED branch pipelines",
+      "fixture": "whatif_dedup",
+      "config": {"scenario": "schedule", "branch": "feature/widget", "openMR": true},
+      "expect": {
+        "candidates": {"schedule": {"created": false}}
+      }
+    },
+    {
+      "name": "dedup: schedule without an open MR passes the workflow",
+      "fixture": "whatif_dedup",
+      "config": {"scenario": "schedule", "branch": "feature/widget"},
+      "expect": {
+        "candidates": {"schedule": {"created": true}}
+      }
+    },
+    {
+      "name": "dup: manual web run on a TAG",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "web", "refKind": "tag", "tag": "v9.9.9"},
+      "expect": {
+        "candidates": {
+          "web": {"created": true,
+                  "jobs": {"build_all": "runs", "test_mr": "not-added",
+                           "lint_everything": "runs"}}
+        }
+      }
+    },
+    {
+      "name": "prepost: a .pre-only pipeline is not created",
+      "fixture": "whatif_prepost",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {"branch": {"created": false, "reasonContains": ".pre"}}
+      }
+    },
+    {
+      "name": "childwf: the child's own workflow blocks it, the trigger job fails",
+      "fixture": "whatif_childwf",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "created": true,
+            "jobs": {"build": "runs", "trigger_child": "runs"},
+            "artifactErrorsAtLeast": 1,
+            "errorsContain": ["would have been empty"],
+            "notesContain": ["not available offline"],
+            "children": {"ci/mronly.yml": {"created": false}}
+          }
+        }
+      }
     }
   ]
 }

@@ -1,6 +1,13 @@
 # Child pipeline: CI_PIPELINE_SOURCE is parent_pipeline in here, so the
 # merge_request_event rule can never match (a documented gotcha the what-if
-# simulation surfaces).
+# simulation surfaces). The child evaluates its own workflow:rules.
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+
+variables:
+  CHILD_ONLY: "yes"
 
 child_build:
   stage: build

@@ -70,6 +70,19 @@ legacy_deploy:
   except:
     - tags
 
+## except combines its clause kinds with OR: matching refs alone excludes
+legacy_except_multi:
+  stage: test
+  script:
+    - true
+  only:
+    - branches
+  except:
+    refs:
+      - schedules
+    variables:
+      - '$SKIP_ALL == "yes"'
+
 ## Unparseable expression: degrades to unknown, never crashes
 weird_rules:
   stage: test

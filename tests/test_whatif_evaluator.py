@@ -101,6 +101,23 @@ def _check_candidate(name: str, cand: dict, expect: dict, failures: list[str]) -
                 f"{name}/{cand['id']}: created expected {want!r}, got {got!r} "
                 f"({cand.get('reason')})"
             )
+    if "reasonContains" in expect:
+        if expect["reasonContains"] not in (cand.get("reason") or ""):
+            failures.append(
+                f"{name}/{cand['id']}: reason {cand.get('reason')!r} does not "
+                f"contain {expect['reasonContains']!r}"
+            )
+    for job_id, details in expect.get("jobsDetail", {}).items():
+        job = cand["jobs"].get(job_id)
+        if job is None:
+            failures.append(f"{name}/{cand['id']}: job {job_id} not evaluated")
+            continue
+        for key, want_val in details.items():
+            if job.get(key) != want_val:
+                failures.append(
+                    f"{name}/{cand['id']}/{job_id}: {key} expected {want_val!r}, "
+                    f"got {job.get(key)!r}"
+                )
     for job_id, want_state in expect.get("jobs", {}).items():
         job = cand["jobs"].get(job_id)
         if job is None:
