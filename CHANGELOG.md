@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+Report UI: **tooltips never run off-screen**. Every `data-tip` hover
+(variable docs, chips, toolbar buttons) now renders into one shared
+`position: fixed` element that JS clamps to the viewport, replacing the
+per-anchor CSS pseudo-element.
+
+- Fixes doc tooltips getting cut off at the window edges — seen in the
+  What-If "variables in effect" table, the unknown-variables panel, and
+  the rule-trace job details; scroll containers can no longer clip a tip
+  either. The one-off left-alignment patch for the unknown-variables
+  panel is gone, superseded by the general clamp.
+- Tips flip above the anchor when there is no room below, follow the
+  anchor while a container scrolls under a hovering pointer, still show
+  on keyboard focus, and now dismiss on Escape.
+- Also resolves a silent `::after` collision between the tooltip and the
+  splitter's grip line, which both claimed the same pseudo-element.
+- Variables tab: a predefined name in the table now carries its docs
+  tooltip on the name itself (dotted underline), matching the What-If
+  views; the detail panel and origin chip already had them.
+
 GitLab CI **predefined-variable docs** (see
 `docs/superpowers/specs/2026-08-19-gitlab-predefined-variable-docs-design.md`).
 GitLab reports now explain the `CI_*`/`GITLAB_*` variables they surface —
