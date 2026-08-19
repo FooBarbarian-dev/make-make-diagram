@@ -2551,7 +2551,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         ? ' (blocking — the pipeline waits)' : ' (optional)');
     }
     if (out.state === 'delayed') return 'delayed' + (out.start_in ? ' ' + out.start_in : '');
-    if (out.state === 'skipped') return 'skipped (matched a when: never rule)';
+    if (out.state === 'skipped') {
+      return out.reason ? 'skipped — ' + out.reason
+        : 'skipped (matched a when: never rule)';
+    }
     return 'not added (' + (out.reason || 'no rule matched') + ')';
   }
 
@@ -2843,6 +2846,14 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         + ':</b> ' + names + ' — may run in more than one pipeline for this single event. '
         + 'The usual fix is the documented <code>workflow:rules</code> dedup pattern.'));
     }
+    const rgDups = result.duplicates.filter(d => d.resource_group);
+    if (rgDups.length) {
+      strip.push(wiDiag('info', rgDups.map(d =>
+        '<code>' + esc(nodeMap[d.job] ? nodeMap[d.job].name : d.job)
+        + '</code> runs in ' + d.candidates.length + ' pipelines but shares '
+        + '<code>resource_group: ' + esc(d.resource_group) + '</code> — the '
+        + 'runs serialize, order undefined').join('<br>')));
+    }
     if (result.crossPipelineArtifacts) {
       strip.push(wiDiag('info', 'More than one of these pipelines produces artifacts on the '
         + 'same ref — anything that fetches artifacts <i>by ref</i> (downstream projects, '
@@ -2925,7 +2936,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     let afterUnknown = false;
     return '<ol class="timeline">' + res.trace.map(t => {
       const label = t.rule === null ? '' : 'rule ' + (t.rule + 1) + ': ';
-      const contingent = afterUnknown && t.verdict !== 'unknown';
+      // a collapsed verdict is definite — no contingency chips
+      const contingent = !res.collapsed && afterUnknown && t.verdict !== 'unknown';
       if (t.verdict === 'unknown') afterUnknown = true;
       return '<li class="tl-event"><div class="tl-head">'
         + '<span class="chip ' + (VERDICT_CHIP[t.verdict] || '') + '">' + esc(t.verdict) + '</span>'

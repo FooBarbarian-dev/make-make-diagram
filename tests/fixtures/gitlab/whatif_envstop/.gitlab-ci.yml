@@ -20,3 +20,30 @@ stop_review:
   environment:
     name: review
     action: stop
+
+## artifacts uploaded only on failure — consumers get nothing on success
+crashlogs:
+  script:
+    - echo run
+  artifacts:
+    when: on_failure
+    paths:
+      - logs/
+
+uses_crash:
+  script:
+    - echo inspect
+  needs:
+    - crashlogs
+
+## a when:on_failure job — its dependents only run in failing pipelines
+failjob:
+  script:
+    - echo cleanup
+  when: on_failure
+
+after_fail:
+  script:
+    - echo notify
+  needs:
+    - failjob

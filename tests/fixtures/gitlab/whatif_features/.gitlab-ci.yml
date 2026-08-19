@@ -70,6 +70,14 @@ legacy_deploy:
   except:
     - tags
 
+## GitLab accepts singular source names in legacy refs too
+legacy_singular:
+  stage: test
+  script:
+    - true
+  only:
+    - schedule
+
 ## except combines its clause kinds with OR: matching refs alone excludes
 legacy_except_multi:
   stage: test

@@ -36,6 +36,25 @@ v2 JSON still loads.
 - Static lint: GitLab's "job may allow multiple pipelines to run for a
   single action" warning is now emitted at generation time for final
   unconditional `when:` rules.
+- Expert-review hardening (two adversarial review passes, every fix
+  pinned by a doc/source-verified test): unsimulated `CI_*` variables
+  evaluate as honest *unknown* (pin-able) instead of confidently unset;
+  nested `rules:` arrays flatten; legacy `except:` ORs its clause kinds
+  and singular source keywords work; `CI_OPEN_MERGE_REQUESTS` is set in
+  scheduled/API/web/trigger branch pipelines; schedules/manual runs can
+  target tags; child pipelines evaluate their own `workflow:rules` and
+  globals (with `trigger:forward` semantics honored, including
+  `yaml_variables: false`); `inherit:variables` filters rules
+  evaluation; conditional `include:rules` gate their files' jobs;
+  `parallel:matrix` expands before rules with per-instance axis
+  variables and instance-name `needs`; configs GitLab rejects outright
+  (dependencies⊄needs, circular needs, invalid expressions, broken
+  `environment:on_stop`) surface as a red invalid-configuration state,
+  and per-candidate creation failures get a distinct "✖ creation fails"
+  chip excluded from run counts; manual-gate blocking defaults follow
+  GitLab's `manual_action? && !has_rules?`; out-of-sync `on_stop`
+  rules, failure-only artifact chains, and duplicated jobs sharing a
+  `resource_group` are called out.
 
 Parser conformance pass (see `docs/parser-audit.md` for the full
 construct-by-construct matrix, verdicts, and accepted limitations). Model

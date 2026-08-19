@@ -21,6 +21,17 @@ inherit_on:
   rules:
     - if: $NESTED_FLAG == "on"
 
+## rules:needs replaces the job's needs when its rule matches
+needs_override_job:
+  script:
+    - echo override
+  needs:
+    - inherit_on
+  rules:
+    - if: $CI_COMMIT_BRANCH == "main"
+      needs: []
+    - if: $CI_COMMIT_BRANCH
+
 ## Nested list entries: three rules after flattening, order preserved
 job_a:
   script:

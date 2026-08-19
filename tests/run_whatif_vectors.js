@@ -14,7 +14,7 @@ const W = require(input.whatifPath);
 const out = { expr: [], scenarios: [] };
 
 for (const v of input.expr) {
-  const got = W.evalExpr(v.ast, v.env);
+  const got = W.evalExpr(v.ast, v.env, [], v.controlled || null);
   out.expr.push({ name: v.name, got: got === null ? 'unknown' : got });
 }
 

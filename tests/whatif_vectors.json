@@ -49,6 +49,12 @@
      "src": "$A == \"a\" != \"b\"", "env": {"A": "a"}, "expect": true},
     {"name": "invalid unquoted boolean evaluates unknown", "src": "$X == true",
      "env": {"X": "true"}, "expect": "unknown"},
+    {"name": "unsimulated predefined is runtime-unknown when controlled info is present",
+     "src": "$CI_KUBERNETES_ACTIVE", "env": {},
+     "controlled": {"names": [], "prefixes": []}, "expect": "unknown"},
+    {"name": "deliberately-unset predefined stays definite false",
+     "src": "$CI_COMMIT_TAG", "env": {},
+     "controlled": {"names": ["CI_COMMIT_TAG"], "prefixes": []}, "expect": false},
     {"name": "documented substring fallback: 23 in 1234", "src": "$A =~ $B",
      "env": {"A": "23", "B": "1234"}, "expect": true},
     {"name": "var to var equality", "src": "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH",
@@ -184,7 +190,8 @@
               "ci/child.yml": {
                 "jobs": {"ci/child.yml::child_build": "runs",
                          "ci/child.yml::child_mr_only": "not-added",
-                         "ci/child.yml::child_always": "runs"}
+                         "ci/child.yml::child_always": "runs",
+                         "ci/child.yml::child_only_pipelines": "not-added"}
               }
             }
           }
@@ -255,7 +262,16 @@
       "fixture": "whatif_features",
       "config": {"scenario": "schedule", "branch": "main"},
       "expect": {
-        "candidates": {"schedule": {"jobs": {"legacy_except_multi": "not-added"}}}
+        "candidates": {"schedule": {"jobs": {"legacy_except_multi": "not-added",
+                                             "legacy_singular": "runs"}}}
+      }
+    },
+    {
+      "name": "features: singular legacy source keywords do not match branch names",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "schedule", "changedFiles": []},
+      "expect": {
+        "candidates": {"branch": {"jobs": {"legacy_singular": "not-added"}}}
       }
     },
     {
@@ -289,7 +305,8 @@
                               "manual_rules_joblevel": "manual"},
                      "jobsDetail": {"legacy_manual": {"allow_failure": true},
                                     "manual_block_legacy": {"allow_failure": false},
-                                    "manual_rules_joblevel": {"allow_failure": false}}}
+                                    "manual_rules_joblevel": {"allow_failure": false},
+                                    "needs_override_job": {"needsOverride": []}}}
         }
       }
     },
@@ -507,7 +524,9 @@
         "candidates": {
           "branch": {"created": true,
                      "jobs": {"deploy_review": "runs", "stop_review": "not-added"},
-                     "notesContain": ["auto-stopped"]}
+                     "notesContain": ["auto-stopped",
+                                      "uploads them only when it FAILS",
+                                      "skipped in green pipelines"]}
         }
       }
     },

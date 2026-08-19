@@ -500,19 +500,30 @@ var PipeviewWhatIf = (function () {
     return conditional;
   }
 
+  // GitLab matches both the plural keywords and the singular sanitized
+  // source names; `pipelines`/`pipeline` match multi-project downstreams
+  // ONLY — parent_pipeline (child pipelines) does not pluralize to it.
   var LEGACY_KEYWORDS = {
     branches: function (c) { return c.refType === 'branch'; },
     tags: function (c) { return c.refType === 'tag'; },
     merge_requests: function (c) { return c.source === 'merge_request_event'; },
+    merge_request: function (c) { return c.source === 'merge_request_event'; },
     pushes: function (c) { return c.source === 'push'; },
+    push: function (c) { return c.source === 'push'; },
     schedules: function (c) { return c.source === 'schedule'; },
+    schedule: function (c) { return c.source === 'schedule'; },
     triggers: function (c) { return c.source === 'trigger'; },
+    trigger: function (c) { return c.source === 'trigger'; },
     api: function (c) { return c.source === 'api'; },
     web: function (c) { return c.source === 'web'; },
-    pipelines: function (c) { return c.source === 'pipeline' || c.source === 'parent_pipeline'; },
+    pipelines: function (c) { return c.source === 'pipeline'; },
+    pipeline: function (c) { return c.source === 'pipeline'; },
+    parent_pipelines: function (c) { return c.source === 'parent_pipeline'; },
+    parent_pipeline: function (c) { return c.source === 'parent_pipeline'; },
     chat: function (c) { return c.source === 'chat'; },
     external: function (c) { return c.source === 'external'; },
-    external_pull_requests: function (c) { return c.source === 'external_pull_request_event'; }
+    external_pull_requests: function (c) { return c.source === 'external_pull_request_event'; },
+    external_pull_request: function (c) { return c.source === 'external_pull_request_event'; }
   };
 
   function legacyRefsMatch(refs, candidate, notes) {
@@ -524,6 +535,10 @@ var PipeviewWhatIf = (function () {
       } else if (entry.indexOf('@') >= 0) {
         results.push(null);
         notes.push('ref@project form "' + entry + '" is not simulated');
+      } else if (candidate.refType === 'merge_request') {
+        // ref name/regex patterns match branch and tag names only — never
+        // merge request pipelines
+        results.push(false);
       } else {
         var m = /^\/(.*)\/([a-z]*)$/.exec(entry);
         if (m) {
@@ -897,13 +912,18 @@ var PipeviewWhatIf = (function () {
         var targetId = (w.child_of ? w.child_of + '::' : '') + lookupName;
         var target = byId[targetId];
         if (!target) {
-          var node = nodeIds[targetId] || nodeIds[name];
+          var node = nodeIds[targetId] || nodeIds[lookupName];
           if (node && node.kind === 'job') {
-            // a template (.job) or otherwise never-runnable definition
+            var isTemplate = lookupName.charAt(0) === '.'
+              || (node.flags || []).indexOf('template') >= 0;
             errors.push({ job: job.id, target: name, kind: kindLabel,
-              message: '"' + w.name + '" ' + kindLabel + ' "' + name + '", a '
-                + 'hidden/template job that is never added to pipelines — '
-                + 'GitLab fails to create the pipeline' });
+              message: isTemplate
+                ? '"' + w.name + '" ' + kindLabel + ' "' + name + '", a '
+                  + 'hidden/template job that is never added to pipelines — '
+                  + 'GitLab fails to create the pipeline'
+                : '"' + w.name + '" ' + kindLabel + ' "' + name + '", a job in '
+                  + 'a different pipeline scope (parent/child) — needs cannot '
+                  + 'cross pipelines; GitLab fails to create the pipeline' });
           } else if (unresolvedIncludes.length) {
             notes.push({ job: job.id, kind: 'external',
               message: kindLabel + ' "' + name + '" is not in the local files — '
@@ -931,7 +951,7 @@ var PipeviewWhatIf = (function () {
             return;
           }
           if (inst) {
-            st = { state: inst.state,
+            st = { state: inst.state, when: inst.when,
                    included: inst.state === 'conditional' ? true : undefined };
           }
         }
@@ -962,6 +982,18 @@ var PipeviewWhatIf = (function () {
           notes.push({ job: job.id, kind: 'manual-producer',
             message: '"' + w.name + '" consumes artifacts from "' + name + '", '
               + 'a manual job — the artifacts exist only after its gate is run' });
+        }
+        if (st.when === 'on_failure') {
+          notes.push({ job: job.id, kind: 'on-failure-chain',
+            message: '"' + w.name + '" needs "' + name + '", which runs only '
+              + 'after an earlier failure — "' + w.name + '" is effectively '
+              + 'skipped in green pipelines' });
+        }
+        if (wantArtifacts && target.whatif.artifacts.when === 'on_failure') {
+          notes.push({ job: job.id, kind: 'artifacts-when',
+            message: '"' + w.name + '" consumes artifacts from "' + name + '", '
+              + 'which uploads them only when it FAILS (artifacts:when: '
+              + 'on_failure) — on success there is nothing to download' });
         }
         if (wantArtifacts && target.whatif.artifacts.dotenv.length) {
           dotenvIn.push(target.id);
@@ -1223,11 +1255,17 @@ var PipeviewWhatIf = (function () {
           }
         });
       });
+      var jobById = {};
+      allJobs.forEach(function (j) { jobById[j.id] = j; });
       Object.keys(seen).forEach(function (id) {
         if (seen[id].length > 1) {
           var entry = { job: id, candidates: seen[id] };
           var c0 = candidates.filter(function (c) { return c.jobs[id]; })[0];
           if (c0 && c0.jobs[id].matrixCount) entry.instances = c0.jobs[id].matrixCount;
+          // a shared resource_group serializes the duplicated runs
+          if (jobById[id] && jobById[id].whatif.resource_group) {
+            entry.resource_group = jobById[id].whatif.resource_group;
+          }
           duplicates.push(entry);
         }
       });

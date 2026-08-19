@@ -37,7 +37,8 @@ def _run_vectors() -> dict:
         ast = v.get("ast")
         if ast is None:
             ast, _, _ = parse_expression(v["src"])
-        expr_in.append({"name": v["name"], "ast": ast, "env": v["env"]})
+        expr_in.append({"name": v["name"], "ast": ast, "env": v["env"],
+                        "controlled": v.get("controlled")})
 
     scenarios_in = []
     report_cache: dict[str, dict] = {}

@@ -27,3 +27,11 @@ child_always:
     - echo "runs whenever the parent triggers"
   rules:
     - if: $CI_PIPELINE_SOURCE == "parent_pipeline"
+
+## only:pipelines matches multi-project downstreams, NOT parent_pipeline
+child_only_pipelines:
+  stage: build
+  script:
+    - echo "never in a child pipeline"
+  only:
+    - pipelines

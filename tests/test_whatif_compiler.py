@@ -343,14 +343,19 @@ class TestCompiledPrograms:
         assert not any("[{" in s for s in display)
 
     def test_rules_needs_override_captured(self):
-        _, _, err = parse_expression("$X")
-        assert err is None  # sanity
+        r = parse_gitlab(str(FIXTURES / "whatif_nested" / ".gitlab-ci.yml"))
+        rules = whatif_of(r, "needs_override_job")["program"]["rules"]
+        assert rules[0]["needs"] == []          # rules:needs replaces needs
+        assert "needs" not in rules[1]
 
-        from pipeview.parsers.gitlab_whatif import _compile_needs
-        assert _compile_needs(["a", {"job": "b", "optional": True}]) == [
-            {"job": "a", "optional": False, "artifacts": True},
-            {"job": "b", "optional": True, "artifacts": True},
-        ]
+    def test_default_artifacts_reach_the_program(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_incgate" / ".gitlab-ci.yml"))
+        assert whatif_of(r, "always_job")["artifacts"]["paths"] == ["common/"]
+
+    def test_artifacts_when_compiled(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_envstop" / ".gitlab-ci.yml"))
+        assert whatif_of(r, "crashlogs")["artifacts"]["when"] == "on_failure"
+        assert whatif_of(r, "deploy_review")["artifacts"]["when"] == "on_success"
 
     def test_braced_var_form_warns(self):
         _, notes, err = parse_expression('${FOO} == "x"')

@@ -563,12 +563,15 @@ def _compile_needs(needs: Any) -> list[dict] | None:
 def _compile_artifacts(artifacts: Any) -> dict:
     paths: list[str] = []
     dotenv: list[str] = []
+    when = "on_success"
     if isinstance(artifacts, dict):
         paths = [str(p) for p in _as_list(artifacts.get("paths"))]
         reports = artifacts.get("reports")
         if isinstance(reports, dict) and "dotenv" in reports:
             dotenv = [str(p) for p in _as_list(reports["dotenv"])]
-    return {"paths": paths, "dotenv": dotenv}
+        if artifacts.get("when") in ("on_success", "on_failure", "always"):
+            when = str(artifacts["when"])
+    return {"paths": paths, "dotenv": dotenv, "when": when}
 
 
 def _compile_trigger(trigger: Any) -> dict | None:
@@ -818,6 +821,16 @@ def compile_whatif(state) -> dict:
                                  for r in resolved_gate)
                                 if r is not None]
 
+        # default: artifacts apply when the job defines none (and inherit
+        # allows) — keep the what-if program consistent with the Graph tab
+        artifacts_raw = flat.get("artifacts")
+        if artifacts_raw is None:
+            inherit_default = inherit_cfg.get("default", True)
+            if inherit_default is True or (
+                    isinstance(inherit_default, list) and "artifacts" in inherit_default):
+                artifacts_raw = state.global_defaults.get(
+                    "artifacts", state.legacy_defaults.get("artifacts"))
+
         env_cfg = None
         env_raw = flat.get("environment")
         if isinstance(env_raw, str):
@@ -843,7 +856,7 @@ def compile_whatif(state) -> dict:
             "needs": _compile_needs(flat.get("needs")),
             "dependencies": [_plain_value(d) for d in deps]
             if isinstance(deps, list) else None,
-            "artifacts": _compile_artifacts(flat.get("artifacts")),
+            "artifacts": _compile_artifacts(artifacts_raw),
             "trigger": _compile_trigger(flat.get("trigger")),
             "environment": env_cfg,
             "child_of": namespace.rstrip(":") if namespace else None,
@@ -855,6 +868,9 @@ def compile_whatif(state) -> dict:
             node.annotations["whatif"]["include_gate"] = include_gate
         if matrix_cfg is not None:
             node.annotations["whatif"]["parallel"] = matrix_cfg
+        if "resource_group" in flat:
+            node.annotations["whatif"]["resource_group"] = \
+                _plain_value(flat["resource_group"])
 
     _config_fatal_checks(state, ctx)
 

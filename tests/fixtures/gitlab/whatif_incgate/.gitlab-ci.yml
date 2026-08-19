@@ -1,6 +1,11 @@
 # Conditional include: web-only.yml exists only in pipelines where the
 # include gate matches — its jobs must not leak into push pipelines.
 
+default:
+  artifacts:
+    paths:
+      - common/
+
 include:
   - local: web-only.yml
     rules:
