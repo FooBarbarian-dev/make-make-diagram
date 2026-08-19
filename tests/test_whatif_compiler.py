@@ -248,8 +248,10 @@ class TestCompiledPrograms:
         assert whatif_of(features, "package")["dependencies"] == ["build_meta"]
 
     def test_trigger_child(self, features):
-        assert whatif_of(features, "trigger_child")["trigger"] == \
-            {"children": ["ci/child.yml"], "unresolved": []}
+        trig = whatif_of(features, "trigger_child")["trigger"]
+        assert trig["children"] == ["ci/child.yml"]
+        assert trig["unresolved"] == []
+        assert trig["forward"] == {"yaml_variables": True, "pipeline_variables": False}
 
     def test_child_jobs_marked(self, features):
         w = whatif_of(features, "ci/child.yml::child_mr_only")
@@ -298,6 +300,23 @@ class TestCompiledPrograms:
         trig = whatif_of(r, "trigger_remote")["trigger"]
         assert trig["children"] == []
         assert trig["unresolved"] and "other/proj" in trig["unresolved"][0]
+        assert trig["forward"] == {"yaml_variables": True, "pipeline_variables": False}
+
+    def test_trigger_forward_compiled(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_forward" / ".gitlab-ci.yml"))
+        assert whatif_of(r, "trig_nofwd")["trigger"]["forward"]["yaml_variables"] is False
+        assert whatif_of(r, "trig_default")["trigger"]["forward"]["yaml_variables"] is True
+
+    def test_inherit_variables_compiled(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_nested" / ".gitlab-ci.yml"))
+        assert whatif_of(r, "inherit_off")["inherit_variables"] is False
+        assert "inherit_variables" not in whatif_of(r, "inherit_on")
+
+    def test_include_gate_compiled(self):
+        r = parse_gitlab(str(FIXTURES / "whatif_incgate" / ".gitlab-ci.yml"))
+        gate = whatif_of(r, "manual_cleanup")["include_gate"]
+        assert gate[0]["if"]["right"]["value"] == "web"
+        assert "include_gate" not in whatif_of(r, "always_job")
 
     def test_nested_rules_flatten_in_order(self):
         r = parse_gitlab(str(FIXTURES / "whatif_nested" / ".gitlab-ci.yml"))

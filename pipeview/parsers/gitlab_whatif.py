@@ -578,6 +578,15 @@ def _compile_trigger(trigger: Any) -> dict | None:
         return {"project": trigger}
     if not isinstance(trigger, dict):
         return None
+    # trigger:forward defaults: the trigger job's yaml variables (and the
+    # global defaults) ARE forwarded; pipeline variables are NOT
+    forward = {"yaml_variables": True, "pipeline_variables": False}
+    fwd = trigger.get("forward")
+    if isinstance(fwd, dict):
+        if "yaml_variables" in fwd:
+            forward["yaml_variables"] = fwd["yaml_variables"] is not False
+        if "pipeline_variables" in fwd:
+            forward["pipeline_variables"] = fwd["pipeline_variables"] is True
     includes = trigger.get("include")
     if includes is not None:
         children = []
@@ -593,9 +602,9 @@ def _compile_trigger(trigger: Any) -> dict | None:
                 kind = next((k for k in ("artifact", "template", "remote",
                                          "project") if k in inc), "unknown")
                 unresolved.append(f"{kind}: {inc.get(kind, '?')}")
-        return {"children": children, "unresolved": unresolved}
+        return {"children": children, "unresolved": unresolved, "forward": forward}
     if "project" in trigger:
-        return {"project": str(trigger["project"])}
+        return {"project": str(trigger["project"]), "forward": forward}
     return None
 
 
@@ -765,6 +774,24 @@ def compile_whatif(state) -> dict:
                          for k, v in source_vars.items()
                          if not isinstance(v, _Reference)}
 
+        inherit_cfg = flat.get("inherit") if isinstance(flat.get("inherit"), dict) else {}
+        inherit_vars: Any = inherit_cfg.get("variables", True)
+        if isinstance(inherit_vars, list):
+            inherit_vars = [_plain_value(v) for v in inherit_vars]
+        elif inherit_vars is not False:
+            inherit_vars = True
+
+        include_gate = None
+        gate_rules = getattr(state, "include_gates", {}).get(
+            rel_path.replace(os.sep, "/"))
+        if gate_rules:
+            resolved_gate, _gr = resolve_and_flatten(gate_rules)
+            if isinstance(resolved_gate, list):
+                include_gate = [r for r in
+                                (_compile_rule(r, ctx, f"include ({rel_path})", line_no)
+                                 for r in resolved_gate)
+                                if r is not None]
+
         env_cfg = None
         env_raw = flat.get("environment")
         if isinstance(env_raw, str):
@@ -796,6 +823,10 @@ def compile_whatif(state) -> dict:
             "child_of": namespace.rstrip(":") if namespace else None,
             "name": plain_name,
         }
+        if inherit_vars is not True:
+            node.annotations["whatif"]["inherit_variables"] = inherit_vars
+        if include_gate is not None:
+            node.annotations["whatif"]["include_gate"] = include_gate
 
     _config_fatal_checks(state, ctx)
 

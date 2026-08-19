@@ -2705,16 +2705,19 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   }
 
   function wiEnvTable(cand) {
+    // mirrors the evaluation layering: predefined < yaml < workflow <
+    // forwarded (trigger:forward, pipeline precedence) < overrides
     const globalsFor = cand.childOf
-      ? Object.assign({}, (WHATIF.child_globals || {})[cand.childOf] || {},
-                      WHATIF.globals || {})
+      ? ((WHATIF.child_globals || {})[cand.childOf] || {})
       : (WHATIF.globals || {});
     const overrideMap = {};
     wiState.overrides.forEach(o => { if (o.name) overrideMap[o.name] = o.value; });
     const wfVars = cand.workflowVariables || {};
-    const merged = Object.assign({}, cand.env, globalsFor, wfVars, overrideMap);
+    const fwdVars = cand.forwardedVars || {};
+    const merged = Object.assign({}, cand.env, globalsFor, wfVars, fwdVars, overrideMap);
     const rows = Object.keys(merged).sort().map(name => {
       const origin = Object.prototype.hasOwnProperty.call(overrideMap, name) ? 'override'
+        : Object.prototype.hasOwnProperty.call(fwdVars, name) ? 'forwarded'
         : Object.prototype.hasOwnProperty.call(wfVars, name) ? 'workflow'
         : Object.prototype.hasOwnProperty.call(globalsFor, name) ? 'YAML' : 'predefined';
       return '<tr><td><code>' + esc(name) + '</code></td>'

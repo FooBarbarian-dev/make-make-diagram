@@ -2,6 +2,25 @@
 # predefined variables, brace globs, and a rule chain that excludes the job
 # whichever way its unknown condition goes.
 
+variables:
+  NESTED_FLAG: "on"
+
+## inherit:variables:false — global defaults invisible to this job's rules
+inherit_off:
+  script:
+    - echo isolated
+  inherit:
+    variables: false
+  rules:
+    - if: $NESTED_FLAG == "on"
+
+## control: same rule, inheritance intact
+inherit_on:
+  script:
+    - echo sees-globals
+  rules:
+    - if: $NESTED_FLAG == "on"
+
 ## Nested list entries: three rules after flattening, order preserved
 job_a:
   script:

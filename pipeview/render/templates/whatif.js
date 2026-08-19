@@ -602,7 +602,7 @@ var PipeviewWhatIf = (function () {
   }
 
 
-  function evaluateJob(jobWhatif, candidate, ctx) {
+  function evaluateJobProgram(jobWhatif, candidate, ctx) {
     var defaults = {
       when: jobWhatif.when || 'on_success',
       allow_failure: jobWhatif.allow_failure,
@@ -626,6 +626,61 @@ var PipeviewWhatIf = (function () {
     }
     outcome.trace = trace;
     return outcome;
+  }
+
+  // include:rules — the file's jobs exist only when the include gate lets
+  // the file in (no matching rule → the include is NOT processed)
+  function walkIncludeGate(rules, ctx) {
+    function walk(idx) {
+      if (idx >= rules.length) return false;
+      var cond = evalRuleCondition(rules[idx], ctx);
+      var thenV = rules[idx].when !== 'never';
+      if (cond.v === true) return thenV;
+      if (cond.v === false) return walk(idx + 1);
+      var rest = walk(idx + 1);
+      return rest === thenV ? rest : null;
+    }
+    return walk(0);
+  }
+
+  function evaluateJob(jobWhatif, candidate, ctx) {
+    var gateRules = jobWhatif.include_gate;
+    if (!gateRules) return evaluateJobProgram(jobWhatif, candidate, ctx);
+    var gv = walkIncludeGate(gateRules, ctx);
+    var gdesc = gateRules.map(function (r) { return describeCondition(r, ctx); })
+      .join(' | ');
+    if (gv === false) {
+      return { included: false, state: 'not-added',
+        reason: 'its include is not processed for this pipeline',
+        trace: [{ rule: null, verdict: 'no match',
+          desc: 'from a conditional include gated on: ' + gdesc
+            + ' — the include is not processed, the job does not exist here' }] };
+    }
+    var inner = evaluateJobProgram(jobWhatif, candidate, ctx);
+    if (gv === true) {
+      inner.trace.unshift({ rule: null, verdict: 'matched',
+        desc: 'from a conditional include (gate matched): ' + gdesc });
+      return inner;
+    }
+    if (!inner.included && inner.state !== 'conditional') {
+      inner.trace.unshift({ rule: null, verdict: 'unknown',
+        desc: 'include gate unknown (' + gdesc + ') — the job is excluded either way' });
+      return inner;
+    }
+    var wrapped = {
+      state: 'conditional',
+      condition: 'include gated on: ' + gdesc,
+      then: inner.state === 'conditional' ? inner.then : inner,
+      otherwise: { included: false, state: 'not-added' },
+      included: inner.included,
+      trace: inner.trace
+    };
+    if (inner.needsUncertain || inner.needsOverride !== undefined) {
+      wrapped.needsUncertain = true;
+    }
+    wrapped.trace.unshift({ rule: null, verdict: 'unknown',
+      desc: 'from a conditional include gated on: ' + gdesc });
+    return wrapped;
   }
 
   // The honest might-this-job-run test: conditional counts only when some
@@ -910,14 +965,15 @@ var PipeviewWhatIf = (function () {
     var env = buildEnv(candidate, config, whatif);
     var controlled = controlledFor(env);
     var overrides = config.overrides || {};
-    // Child pipelines: the child file's own globals apply, and the parent's
-    // globals are forwarded by trigger:forward (pipeline-variable
-    // precedence: forwarded values beat the child's YAML).
-    var childGlobals = candidate.childOf
-      ? ((whatif.child_globals || {})[candidate.childOf] || {}) : null;
-    var base = candidate.childOf
-      ? Object.assign({}, env, childGlobals, whatif.globals || {})
-      : Object.assign({}, env, whatif.globals || {});
+    // yaml defaults visible in this candidate: the child file's own globals
+    // for a child pipeline, the main pipeline's globals otherwise
+    var yamlView = candidate.childOf
+      ? ((whatif.child_globals || {})[candidate.childOf] || {})
+      : (whatif.globals || {});
+    // trigger:forward-ed variables arrive at pipeline-variable precedence
+    // (above the child's own yaml values)
+    var pipelineView = candidate.forwardedVars || {};
+    var base = Object.assign({}, env, yamlView, pipelineView);
     var changesAlwaysTrue = candidate.noPushEvent
       || !!(config.newBranch && candidate.source === 'push'
             && candidate.refType === 'branch');
@@ -937,8 +993,20 @@ var PipeviewWhatIf = (function () {
     });
     var results = {};
     jobs.forEach(function (job) {
-      var jobEnv = Object.assign({}, base, gate.variables || {},
-                                 job.whatif.variables || {}, overrides);
+      // inherit:variables filters the yaml defaults BEFORE rules evaluate
+      var inh = job.whatif.inherit_variables;
+      var globalsPart = yamlView;
+      if (inh === false) globalsPart = {};
+      else if (Array.isArray(inh)) {
+        globalsPart = {};
+        inh.forEach(function (n) {
+          if (Object.prototype.hasOwnProperty.call(yamlView, n)) {
+            globalsPart[n] = yamlView[n];
+          }
+        });
+      }
+      var jobEnv = Object.assign({}, env, globalsPart, gate.variables || {},
+                                 job.whatif.variables || {}, pipelineView, overrides);
       var ctx = { env: jobEnv, controlled: controlled,
                   changedFiles: config.changedFiles,
                   changesAlwaysTrue: changesAlwaysTrue };
@@ -1004,6 +1072,12 @@ var PipeviewWhatIf = (function () {
               + ' levels are not expanded' });
           return;
         }
+        // trigger:forward — by default the trigger job's yaml variables
+        // (over the parent's yaml defaults) are forwarded to the child
+        var fwd = trig.forward || { yaml_variables: true };
+        var forwardedVars = fwd.yaml_variables === false
+          ? {}
+          : Object.assign({}, yamlView, job.whatif.variables || {});
         var childCandidate = {
           id: candidate.id + '>' + job.id + '>' + childRel,
           source: 'parent_pipeline',
@@ -1015,6 +1089,7 @@ var PipeviewWhatIf = (function () {
           childOf: childRel,
           parentJob: job.id,
           parentConditional: results[job.id].state === 'conditional',
+          forwardedVars: forwardedVars,
           lineage: lineage.concat([candidate.childOf || '(root)'])
         };
         var childResult = evaluateCandidate(childCandidate, allJobs, config, whatif, report);
@@ -1053,6 +1128,7 @@ var PipeviewWhatIf = (function () {
       created: created, reason: reason, creationFails: creationFails,
       workflowTrace: gate.trace || [],
       workflowVariables: gate.variables || {},
+      forwardedVars: pipelineView,
       env: env, controlled: controlled,
       jobs: results, jobOrder: jobs.map(function (j) { return j.id; }),
       artifacts: artifacts, children: children

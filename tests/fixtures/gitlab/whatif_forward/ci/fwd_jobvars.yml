@@ -1,0 +1,5 @@
+gets_jobvar:
+  script:
+    - echo jobvar
+  rules:
+    - if: '$CHILD_MODE == "full"'

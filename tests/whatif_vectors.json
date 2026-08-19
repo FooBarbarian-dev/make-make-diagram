@@ -404,6 +404,61 @@
       }
     },
     {
+      "name": "nested: inherit variables false hides globals from rules",
+      "fixture": "whatif_nested",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"jobs": {"inherit_off": "not-added", "inherit_on": "runs"}}
+        }
+      }
+    },
+    {
+      "name": "forward: default forwards the parent yaml; yaml_variables:false does not",
+      "fixture": "whatif_forward",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {
+            "created": true,
+            "children": {
+              "ci/fwd_default.yml": {
+                "jobs": {"ci/fwd_default.yml::sees_parent": "runs",
+                         "ci/fwd_default.yml::sees_child": "not-added"}
+              },
+              "ci/fwd_off.yml": {
+                "jobs": {"ci/fwd_off.yml::c_child": "runs",
+                         "ci/fwd_off.yml::c_parent": "not-added"}
+              },
+              "ci/fwd_jobvars.yml": {
+                "jobs": {"ci/fwd_jobvars.yml::gets_jobvar": "runs"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "incgate: a web-gated include's jobs do not exist in push pipelines",
+      "fixture": "whatif_incgate",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"jobs": {"always_job": "runs", "manual_cleanup": "not-added"}}
+        }
+      }
+    },
+    {
+      "name": "incgate: the same jobs exist in web pipelines",
+      "fixture": "whatif_incgate",
+      "config": {"scenario": "web", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "web": {"jobs": {"always_job": "runs", "manual_cleanup": "runs"}}
+        }
+      }
+    },
+    {
       "name": "invalid: GitLab-rejected configs are fatal, not green",
       "fixture": "whatif_invalid",
       "config": {"scenario": "push_branch", "branch": "main"},

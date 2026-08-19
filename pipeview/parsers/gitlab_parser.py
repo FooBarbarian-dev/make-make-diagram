@@ -184,6 +184,9 @@ class _ParserState:
         # child-pipeline namespace → its raw workflow:rules (children
         # evaluate their own workflow, independent of the parent's)
         self.child_workflows: dict[str, list] = {}
+        # rel path of a conditionally-included file → its include:rules
+        # (compiled into a per-job gate by the what-if compiler)
+        self.include_gates: dict[str, list] = {}
         self.child_workflow_entry: set[str] = set()   # namespaces whose ENTRY file set it
         self.workflow_root = False            # the root file defined workflow:
         self.workflow_root_has_rules = False  # ... with a rules: list
@@ -623,12 +626,14 @@ def _process_includes(
         if not isinstance(inc, dict):
             continue
 
+        inc_rules = inc["rules"] if isinstance(inc.get("rules"), list) else None
         if "rules" in inc:
             state.diagnostics.append(Diagnostic(
                 severity="info",
                 message=(
                     f"Include of {inc.get('local', inc.get('project', '…'))} is "
-                    "conditional (include:rules) — it is analyzed as if included"
+                    "conditional (include:rules) — the What-If tab gates its "
+                    "jobs on those rules"
                 ),
                 source=loc,
             ))
@@ -664,6 +669,8 @@ def _process_includes(
                     ))
                     continue
                 if os.path.isfile(abs_path):
+                    if inc_rules:
+                        state.include_gates[inc_rel.replace(os.sep, "/")] = inc_rules
                     _parse_file(abs_path, state, namespace)
                     state.edges.append(Edge(src=rel_path, dst=inc_rel, kind="includes"))
                 else:
