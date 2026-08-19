@@ -741,6 +741,16 @@ td .btn.copy-btn { min-height: var(--hit); }
 
 .wi-legend { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
 
+/* per-pipeline "variables in effect" disclosure */
+.wi-env { margin: var(--sp-1) var(--sp-3) var(--sp-2); font-size: var(--fs-0); }
+.wi-env summary { cursor: pointer; color: var(--text-muted); min-height: 24px; user-select: none; }
+.wi-env summary:hover { color: var(--text); }
+.wi-env table { border-collapse: collapse; width: 100%; margin-top: var(--sp-1); }
+.wi-env td {
+  padding: 2px 10px 2px 0; vertical-align: top;
+  border-bottom: 1px solid var(--border); font-size: var(--fs-0);
+}
+
 /* ============================================================
    Search
    ============================================================ */
@@ -2181,20 +2191,23 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
 
   const wiState = {
     scenario: 'push_branch',
-    branchKind: 'feature',            // 'main' | 'dev' | 'feature'
+    branchKind: 'feature',            // 'main' | 'dev' | 'feature' | 'tag'
     featureName: 'feature/widget',
     tag: 'v1.0.0',
     tagProtected: false,
     openMR: true,
+    newBranch: false,
     target: 'main',
     draft: false,
     mrFlavor: 'detached',
+    mrLabels: '',
     commitMessage: '',
     changedMode: 'unknown',           // 'unknown' | 'all' | 'none' | 'list'
     changedList: '',
     overrides: []                     // [{name, value}]
   };
 
+  const WI_BRANCHY = ['push_branch', 'schedule', 'web', 'api', 'trigger'];
   const WI_SCENARIOS = [
     ['push_branch', 'Push to a branch'],
     ['push_tag', 'Push a new tag'],
@@ -2212,38 +2225,50 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     runs: 'chip-ok', manual: 'chip-warn', delayed: 'chip-warn',
     skipped: 'chip-error', 'not-added': '', conditional: 'chip-info'
   };
-  const wiMightRun = s =>
-    s === 'runs' || s === 'manual' || s === 'delayed' || s === 'conditional';
 
   let wiDupSet = new Set();
   let wiLastResult = null;
   let wiRenderTimer = null;
 
+  const wiMight = res => whatifAvailable && PipeviewWhatIf.mightRun(res);
+
   function wiBranchName() {
     if (wiState.scenario === 'mr') return wiState.featureName || 'feature/widget';
     if (wiState.branchKind === 'feature') return wiState.featureName || 'feature/widget';
-    return wiState.branchKind;
+    return wiState.branchKind === 'tag' ? 'main' : wiState.branchKind;
   }
 
   function wiConfig() {
+    const s = wiState;
     const overrides = {};
-    wiState.overrides.forEach(o => { if (o.name) overrides[o.name] = o.value; });
+    s.overrides.forEach(o => { if (o.name) overrides[o.name] = o.value; });
     let changedFiles = null;
-    if (wiState.changedMode === 'all') changedFiles = 'all';
-    else if (wiState.changedMode === 'none') changedFiles = [];
-    else if (wiState.changedMode === 'list') {
-      changedFiles = wiState.changedList.split('\n').map(s => s.trim()).filter(Boolean);
+    if (s.changedMode === 'all') changedFiles = 'all';
+    else if (s.changedMode === 'none') changedFiles = [];
+    else if (s.changedMode === 'list') {
+      changedFiles = s.changedList.split('\n').map(x => x.trim()).filter(Boolean);
     }
+    const isBranchy = WI_BRANCHY.indexOf(s.scenario) >= 0;
+    const refKind = s.scenario === 'push_tag' ? 'tag'
+      : (isBranchy && s.scenario !== 'push_branch' && s.branchKind === 'tag')
+        ? 'tag' : 'branch';
     return {
-      scenario: wiState.scenario,
+      scenario: s.scenario,
       branch: wiBranchName(),
-      tag: wiState.tag || 'v1.0.0',
-      tagProtected: wiState.tagProtected,
-      openMR: wiState.scenario === 'push_branch' ? wiState.openMR : wiState.scenario === 'mr',
-      target: wiState.target,
-      draft: wiState.draft,
-      mrFlavor: wiState.mrFlavor,
-      commitMessage: wiState.commitMessage,
+      tag: s.tag || 'v1.0.0',
+      refKind: refKind,
+      tagProtected: s.tagProtected,
+      // CI_OPEN_MERGE_REQUESTS is set in EVERY branch pipeline with an open
+      // MR — schedule/api/web/trigger included (that's what the documented
+      // dedup pattern relies on)
+      openMR: s.scenario === 'mr' ? true
+        : (isBranchy && refKind === 'branch' ? s.openMR : false),
+      newBranch: s.scenario === 'push_branch' ? s.newBranch : false,
+      target: s.target,
+      draft: s.draft,
+      mrFlavor: s.mrFlavor,
+      mrLabels: s.mrLabels.trim(),
+      commitMessage: s.commitMessage,
       changedFiles: changedFiles,
       overrides: overrides
     };
@@ -2264,28 +2289,43 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
 
   function renderWiControls() {
     const s = wiState;
-    const isBranchy = s.scenario === 'push_branch' || s.scenario === 'schedule'
-      || s.scenario === 'web' || s.scenario === 'api' || s.scenario === 'trigger';
-    const mrKnobs = (s.scenario === 'push_branch' && s.openMR) || s.scenario === 'mr';
+    const isBranchy = WI_BRANCHY.indexOf(s.scenario) >= 0;
+    const tagable = isBranchy && s.scenario !== 'push_branch';
+    const onTag = s.scenario === 'push_tag' || (tagable && s.branchKind === 'tag');
+    const mrKnobs = (isBranchy && !onTag && s.openMR) || s.scenario === 'mr';
 
     let html = '<div class="wi-group"><h3>Event</h3>'
       + WI_SCENARIOS.map(([v, l]) => wiRadio('wi-scenario', v, l, s.scenario === v)).join('')
       + '</div>';
 
     if (isBranchy) {
-      html += '<div class="wi-group"><h3>Branch</h3>'
+      html += '<div class="wi-group"><h3>' + (tagable ? 'Ref' : 'Branch') + '</h3>'
         + wiRadio('wi-branch', 'main', 'main', s.branchKind === 'main',
                   '<span class="chip chip-info" data-tip="default branch, protected">default</span>')
         + wiRadio('wi-branch', 'dev', 'dev', s.branchKind === 'dev',
                   '<span class="chip" data-tip="long-lived, protected">protected</span>')
         + wiRadio('wi-branch', 'feature', 'feature branch…', s.branchKind === 'feature',
                   '<span class="chip" data-tip="any other branch — unprotected">unprotected</span>')
-        + '<div class="wi-field" id="wi-feature-field"' + (s.branchKind === 'feature' ? '' : ' hidden')
+        + (tagable
+            ? wiRadio('wi-branch', 'tag', 'a tag…', s.branchKind === 'tag',
+                      '<span class="chip" data-tip="schedules, manual runs, API and trigger tokens can all target tags">tag</span>')
+            : '')
+        + '<div class="wi-field" id="wi-feature-field"'
+        + (s.branchKind === 'feature' && !onTag ? '' : ' hidden')
         + '><label for="wi-feature-name">branch name (rules may regex-match it)</label>'
         + '<input class="input" id="wi-feature-name" value="' + esc(s.featureName) + '"></div>';
-      if (s.scenario === 'push_branch') {
+      if (onTag && tagable) {
+        html += '<div class="wi-field"><label for="wi-tag-name">tag name</label>'
+          + '<input class="input" id="wi-tag-name" value="' + esc(s.tag) + '"></div>'
+          + wiCheck('wi-tag-protected', 'protected tag', s.tagProtected);
+      }
+      if (!onTag) {
         html += wiCheck('wi-openmr', 'an open MR uses this branch as source', s.openMR,
-          'The duplicate-pipeline situation: GitLab evaluates a branch pipeline AND a merge request pipeline for the same push');
+          'Sets CI_OPEN_MERGE_REQUESTS — in push pipelines this is the duplicate-pipeline situation; in scheduled/API/manual pipelines it is what the documented dedup pattern keys on');
+        if (s.scenario === 'push_branch') {
+          html += wiCheck('wi-newbranch', 'first push of a new branch', s.newBranch,
+            'On a new branch, rules:changes is always true and CI_COMMIT_BEFORE_SHA is all zeros');
+        }
       }
       html += '</div>';
     }
@@ -2306,20 +2346,26 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }
 
     if (mrKnobs) {
+      const sameBranch = s.scenario !== 'mr' && (s.branchKind === 'main' || s.branchKind === 'dev')
+        ? s.branchKind : null;
+      const targets = ['main', 'dev'].filter(t => t !== sameBranch);
+      if (targets.indexOf(s.target) < 0) s.target = targets[0];
       html += '<div class="wi-group"><h3>Merge request</h3>'
         + '<div class="wi-field"><label for="wi-target">target branch</label>'
         + '<select class="input" id="wi-target">'
-        + '<option value="main"' + (s.target === 'main' ? ' selected' : '') + '>main</option>'
-        + '<option value="dev"' + (s.target === 'dev' ? ' selected' : '') + '>dev</option>'
+        + targets.map(t => '<option value="' + t + '"' + (s.target === t ? ' selected' : '')
+            + '>' + t + '</option>').join('')
         + '</select></div>'
         + wiCheck('wi-draft', 'draft MR', s.draft,
-                  'Sets CI_MERGE_REQUEST_DRAFT — GitLab does not skip drafts unless your rules say so')
+                  'Sets CI_MERGE_REQUEST_DRAFT ("true"/"false" — always set in MR pipelines). GitLab does not skip drafts unless your rules say so')
         + '<div class="wi-field"><label for="wi-flavor">MR pipeline flavor</label>'
         + '<select class="input" id="wi-flavor">'
         + '<option value="detached"' + (s.mrFlavor === 'detached' ? ' selected' : '') + '>detached (default)</option>'
         + '<option value="merged_result"' + (s.mrFlavor === 'merged_result' ? ' selected' : '') + '>merged results</option>'
         + '<option value="merge_train"' + (s.mrFlavor === 'merge_train' ? ' selected' : '') + '>merge train</option>'
         + '</select></div>'
+        + '<div class="wi-field"><label for="wi-mr-labels">MR labels (comma-separated → CI_MERGE_REQUEST_LABELS; empty = unset)</label>'
+        + '<input class="input" id="wi-mr-labels" value="' + esc(s.mrLabels) + '"></div>'
         + '</div>';
     }
 
@@ -2334,11 +2380,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + esc(s.changedList) + '</textarea></div>'
       + '</div>';
 
-    if (s.scenario === 'push_branch' || s.scenario === 'push_tag') {
-      html += '<div class="wi-group"><h3>Commit message</h3>'
-        + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
-        + esc(s.commitMessage) + '"></div></div>';
-    }
+    html += '<div class="wi-group"><h3>Commit message</h3>'
+      + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
+      + esc(s.commitMessage) + '"></div></div>';
 
     html += '<div class="wi-group"><h3>Variables '
       + '<span style="text-transform:none;letter-spacing:0">(project/group level — beat YAML values)</span></h3>'
@@ -2346,11 +2390,12 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + s.overrides.map((o, i) =>
           '<div class="wi-var-row" data-idx="' + i + '">'
           + '<input class="input wi-var-name" placeholder="NAME" value="' + esc(o.name) + '">'
-          + '<input class="input wi-var-value" placeholder="value" value="' + esc(o.value) + '">'
+          + '<input class="input wi-var-value" placeholder="(empty string)" value="' + esc(o.value) + '">'
           + '<button class="btn btn-quiet wi-var-del" data-tip="Remove">&times;</button></div>'
         ).join('')
       + '</div>'
       + '<div class="wi-inline-btns"><button class="btn" id="wi-var-add">+ variable</button></div>'
+      + '<div class="legend-note">an empty value is the empty string — which is different from unset</div>'
       + '<div id="wi-unknown-list"></div>'
       + '</div>';
 
@@ -2374,12 +2419,14 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     bindText('wi-tag-name', 'tag');
     bindText('wi-changed-list', 'changedList');
     bindText('wi-commit-msg', 'commitMessage');
+    bindText('wi-mr-labels', 'mrLabels');
 
     const bindCheck = (id, key) => {
       const el = document.getElementById(id);
       if (el) el.addEventListener('change', () => { wiState[key] = el.checked; wiRefresh(true); });
     };
     bindCheck('wi-openmr', 'openMR');
+    bindCheck('wi-newbranch', 'newBranch');
     bindCheck('wi-draft', 'draft');
     bindCheck('wi-tag-protected', 'tagProtected');
 
@@ -2419,7 +2466,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     wiRenderTimer = setTimeout(renderWiResults, rebuildControls ? 0 : 160);
   }
 
-  /* ---------------- unknown variables helper ---------------- */
+  /* ---------------- variables panel: three honest buckets ---------------- */
 
   const wiExprVars = whatifAvailable
     ? PipeviewWhatIf.collectExpressionVariables(REPORT) : [];
@@ -2427,30 +2474,64 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   function wiUpdateUnknownVars(result) {
     const box = document.getElementById('wi-unknown-list');
     if (!box) return;
-    const known = new Set(Object.keys(WHATIF.globals || {}));
-    result.candidates.forEach(c => Object.keys(c.env).forEach(k => known.add(k)));
+    const defined = new Set(Object.keys(WHATIF.globals || {}));
+    Object.keys(WHATIF.child_globals || {}).forEach(cg =>
+      Object.keys(WHATIF.child_globals[cg]).forEach(k => defined.add(k)));
     REPORT.nodes.forEach(n => {
       const w = n.annotations && n.annotations.whatif;
-      if (w) Object.keys(w.variables || {}).forEach(k => known.add(k));
+      if (w) Object.keys(w.variables || {}).forEach(k => defined.add(k));
     });
     if (WHATIF.workflow) (WHATIF.workflow.rules || []).forEach(r =>
-      Object.keys(r.variables || {}).forEach(k => known.add(k)));
-    wiState.overrides.forEach(o => { if (o.name) known.add(o.name); });
+      Object.keys(r.variables || {}).forEach(k => defined.add(k)));
+    wiState.overrides.forEach(o => { if (o.name) defined.add(o.name); });
 
-    const unknown = wiExprVars.filter(name => !known.has(name));
-    if (!unknown.length) { box.innerHTML = ''; return; }
-    box.innerHTML = '<div class="legend-note" style="margin-top:var(--sp-2)">'
-      + 'referenced in rules but defined nowhere — currently <b>unset</b>:</div>'
-      + unknown.map(name =>
-          '<div class="wi-unknown-var"><span class="clip" title="' + esc(name) + '">'
-          + esc(name) + '</span><button class="btn wi-set-var" data-var="'
-          + esc(name) + '">set</button></div>').join('');
+    const envSet = new Set();
+    const decided = new Set();
+    let prefixes = [];
+    result.candidates.forEach(c => {
+      Object.keys(c.env).forEach(k => envSet.add(k));
+      (c.controlled.names || []).forEach(n => decided.add(n));
+      prefixes = c.controlled.prefixes || prefixes;
+    });
+
+    const runtime = [], unsetType = [], nowhere = [];
+    wiExprVars.forEach(name => {
+      if (defined.has(name) || envSet.has(name)) return;
+      const isPre = /^(CI|GITLAB)_/.test(name);
+      const isDecided = decided.has(name)
+        || prefixes.some(p => name.indexOf(p) === 0);
+      if (isPre && isDecided) unsetType.push(name);
+      else if (isPre) runtime.push(name);
+      else nowhere.push(name);
+    });
+
+    const rows = (names, btn) => names.map(name =>
+      '<div class="wi-unknown-var"><span class="clip" title="' + esc(name) + '">'
+      + esc(name) + '</span><button class="btn wi-set-var" data-var="'
+      + esc(name) + '">' + btn + '</button></div>').join('');
+    let html = '';
+    if (runtime.length) {
+      html += '<div class="legend-note" style="margin-top:var(--sp-2)">'
+        + 'GitLab sets these at pipeline time — <b>not simulated</b>; rules '
+        + 'using them show “depends” until you pin a value:</div>'
+        + rows(runtime, 'pin');
+    }
+    if (unsetType.length) {
+      html += '<div class="legend-note" style="margin-top:var(--sp-2)">'
+        + 'predefined, but <b>unset in this pipeline type</b> (that is usually '
+        + 'the point of the rule):</div>' + rows(unsetType, 'set');
+    }
+    if (nowhere.length) {
+      html += '<div class="legend-note" style="margin-top:var(--sp-2)">'
+        + 'defined nowhere — currently <b>unset</b>:</div>' + rows(nowhere, 'set');
+    }
+    box.innerHTML = html;
     box.querySelectorAll('.wi-set-var').forEach(btn =>
       btn.addEventListener('click', () => {
         wiState.overrides.push({ name: btn.dataset.var, value: '' });
         wiRefresh(true);
-        const rows = wiControls.querySelectorAll('.wi-var-value');
-        if (rows.length) rows[rows.length - 1].focus();
+        const rowEls = wiControls.querySelectorAll('.wi-var-value');
+        if (rowEls.length) rowEls[rowEls.length - 1].focus();
       }));
   }
 
@@ -2458,12 +2539,15 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
 
   function wiOutcomeSummary(out) {
     if (!out) return '';
-    if (out.state === 'conditional') {
-      return 'depends on: ' + out.condition;
+    if (out.state === 'conditional') return 'depends on: ' + out.condition;
+    if (out.state === 'runs') {
+      return out.when === 'on_failure'
+        ? 'runs only after an earlier job fails'
+        : 'runs (when: ' + (out.when || 'on_success') + ')';
     }
-    if (out.state === 'runs') return 'runs (when: ' + (out.when || 'on_success') + ')';
     if (out.state === 'manual') {
-      return 'manual gate' + (out.allow_failure === false ? ' (blocking)' : '');
+      return 'manual gate' + (out.allow_failure === false
+        ? ' (blocking — the pipeline waits)' : ' (optional)');
     }
     if (out.state === 'delayed') return 'delayed' + (out.start_in ? ' ' + out.start_in : '');
     if (out.state === 'skipped') return 'skipped (matched a when: never rule)';
@@ -2472,9 +2556,42 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
 
   function wiSafeId(s) { return s.replace(/[^A-Za-z0-9_-]/g, '-'); }
 
+  // per-candidate edges: needs from the compiled programs, stage ordering
+  // recomputed for THIS candidate's included set (the full-config edges
+  // would point at jobs that aren't in this pipeline)
+  function wiEdgesFor(cand, ids, idSet) {
+    const edges = [];
+    ids.forEach(id => {
+      const w = nodeMap[id].annotations.whatif;
+      (w.needs || []).forEach(need => {
+        if (need.kind) return;
+        const tid = (w.child_of ? w.child_of + '::' : '') + need.job;
+        if (idSet.has(tid)) edges.push({ src: id, dst: tid, kind: 'needs' });
+      });
+    });
+    const stages = WHATIF.stages || [];
+    const byStage = {};
+    ids.forEach(id => {
+      const st = nodeMap[id].annotations.whatif.stage;
+      (byStage[st] = byStage[st] || []).push(id);
+    });
+    ids.forEach(id => {
+      const w = nodeMap[id].annotations.whatif;
+      if (w.needs !== null && w.needs !== undefined) return;  // [] = starts immediately
+      for (let i = stages.indexOf(w.stage) - 1; i >= 0; i--) {
+        const prev = byStage[stages[i]];
+        if (prev && prev.length) {
+          prev.forEach(pid => edges.push({ src: id, dst: pid, kind: 'stage_order' }));
+          break;
+        }
+      }
+    });
+    return edges;
+  }
+
   function wiGraphSvg(cand) {
     const show = wiShowSkippedEl.checked;
-    const ids = cand.jobOrder.filter(id => show || wiMightRun(cand.jobs[id].state));
+    const ids = cand.jobOrder.filter(id => show || wiMight(cand.jobs[id]));
     if (!ids.length) {
       return '<div class="wi-pipe-reason">No jobs to draw'
         + (show ? '' : ' — skipped jobs are hidden') + '.</div>';
@@ -2488,15 +2605,20 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     g.setGraph({ rankdir: 'LR', nodesep: 18, ranksep: 48, marginx: 14, marginy: 14 });
     g.setDefaultEdgeLabel(() => ({}));
     ids.forEach(id => {
+      const w = nodeMap[id].annotations.whatif;
+      const res = cand.jobs[id];
       const label = midTrunc(nodeMap[id].name, 24);
-      g.setNode(id, { label, width: Math.max(92, label.length * 6.8 + 24), height: 40 });
+      const sub = w.stage + ' · ' + (res.when === 'on_failure'
+        ? 'on failure only' : (WI_STATE_LABEL[res.state] || res.state));
+      g.setNode(id, {
+        label, sub,
+        width: Math.max(92, Math.max(label.length * 6.8, sub.length * 5.4) + 24),
+        height: 42
+      });
     });
-    const edges = graphEdges.filter(e =>
-      (e.kind === 'needs' || e.kind === 'stage_order')
-      && idSet.has(e.src) && idSet.has(e.dst));
     // Model edges point job → dependency; pipelines read better as
     // execution flow, so draw dependency → dependent (build on the left).
-    edges.forEach(e => g.setEdge(e.dst, e.src, { kind: e.kind }));
+    wiEdgesFor(cand, ids, idSet).forEach(e => g.setEdge(e.dst, e.src, { kind: e.kind }));
     dagre.layout(g);
     const gr = g.graph();
     const w = Math.max(gr.width || 200, 60), h = Math.max(gr.height || 80, 60);
@@ -2524,18 +2646,17 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       const res = cand.jobs[id];
       const x = lo.x - lo.width / 2, y = lo.y - lo.height / 2;
       const dup = wiDupSet.has(id);
-      const stateText = WI_STATE_LABEL[res.state] || res.state;
       const firstNote = (res.trace && res.trace.length)
         ? res.trace[res.trace.length - 1].desc : '';
       svg += '<g class="wi-node st-' + res.state + (dup ? ' wi-dup' : '')
         + '" data-job="' + esc(id) + '" data-cand="' + esc(cand.id) + '" tabindex="0">'
-        + '<title>' + esc(nodeMap[id].name) + ' — ' + esc(stateText)
+        + '<title>' + esc(nodeMap[id].name) + ' — ' + esc(lo.sub)
         + (dup ? ' · DUPLICATE: may run in more than one pipeline for this event' : '')
         + (firstNote ? '\n' + esc(firstNote) : '') + '</title>'
         + '<rect x="' + x + '" y="' + y + '" width="' + lo.width + '" height="' + lo.height + '" rx="5"/>'
-        + '<text x="' + lo.x + '" y="' + (lo.y - 1) + '" text-anchor="middle">' + esc(lo.label) + '</text>'
-        + '<text class="wi-state-label" x="' + lo.x + '" y="' + (lo.y + 13) + '" text-anchor="middle">'
-        + esc(stateText) + '</text>'
+        + '<text x="' + lo.x + '" y="' + lo.y + '" text-anchor="middle">' + esc(lo.label) + '</text>'
+        + '<text class="wi-state-label" x="' + lo.x + '" y="' + (lo.y + 14) + '" text-anchor="middle">'
+        + esc(lo.sub) + '</text>'
         + (dup ? '<circle class="wi-dup-badge" cx="' + (x + lo.width - 1) + '" cy="' + (y + 1) + '" r="5"/>' : '')
         + '</g>';
     });
@@ -2567,6 +2688,26 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '</span><span class="diag-msg">' + message + '</span></div>';
   }
 
+  function wiEnvTable(cand) {
+    const globalsFor = cand.childOf
+      ? Object.assign({}, (WHATIF.child_globals || {})[cand.childOf] || {},
+                      WHATIF.globals || {})
+      : (WHATIF.globals || {});
+    const overrideMap = {};
+    wiState.overrides.forEach(o => { if (o.name) overrideMap[o.name] = o.value; });
+    const merged = Object.assign({}, cand.env, globalsFor, overrideMap);
+    const rows = Object.keys(merged).sort().map(name => {
+      const origin = Object.prototype.hasOwnProperty.call(overrideMap, name) ? 'override'
+        : Object.prototype.hasOwnProperty.call(globalsFor, name) ? 'YAML' : 'predefined';
+      return '<tr><td><code>' + esc(name) + '</code></td>'
+        + '<td class="wrap-any"><code>' + esc(merged[name]) + '</code></td>'
+        + '<td><span class="chip">' + origin + '</span></td></tr>';
+    });
+    return '<details class="wi-env"><summary>variables in effect (' + rows.length
+      + ') — anything else predefined is set at runtime, anything else custom is unset</summary>'
+      + '<table>' + rows.join('') + '</table></details>';
+  }
+
   function renderWiPipeline(cand) {
     const dead = cand.created === false;
     let html = '<section class="wi-pipeline' + (dead ? ' wi-dead' : '') + '">'
@@ -2588,7 +2729,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       }
       if (seen.has(n.message) || banners.length >= 9) return;
       seen.add(n.message);
-      banners.push(wiDiag(n.kind === 'conditional-need' ? 'warning' : 'info', esc(n.message)));
+      banners.push(wiDiag(
+        n.kind === 'conditional-need' || n.kind === 'workflow-vars'
+          || n.kind === 'manual-producer' ? 'warning' : 'info',
+        esc(n.message)));
     });
     Object.keys(dotenvByProducer).forEach(producer => {
       const consumers = Array.from(new Set(dotenvByProducer[producer]))
@@ -2604,16 +2748,31 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         'Whether this pipeline is created at all ' + esc(cand.reason || 'is uncertain')));
     }
     if (banners.length) html += '<div class="wi-pipe-banners">' + banners.join('') + '</div>';
+    html += wiEnvTable(cand);
     html += wiGraphSvg(cand);
     if (cand.children && cand.children.length) {
       html += '<div class="wi-children">'
         + '<div class="legend-note" style="margin-bottom:var(--sp-1)">child pipelines '
         + '(CI_PIPELINE_SOURCE becomes parent_pipeline in here — merge_request_event '
-        + 'rules never match)</div>'
+        + 'rules never match; the child evaluates its own workflow:rules)</div>'
         + cand.children.map(renderWiPipeline).join('') + '</div>';
     }
     html += '</section>';
     return html;
+  }
+
+  function wiLegendChip(color, style, label) {
+    return '<span class="chip" style="border:1.5px ' + style + ' ' + color + '">'
+      + esc(label) + '</span>';
+  }
+
+  function wiCountCreated(list) {
+    let n = 0;
+    (list || []).forEach(c => {
+      if (c.created !== false) n += 1;
+      n += wiCountCreated(c.children);
+    });
+    return n;
   }
 
   function renderWiResults() {
@@ -2639,9 +2798,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         + 'The usual fix is the documented <code>workflow:rules</code> dedup pattern.'));
     }
     if (result.crossPipelineArtifacts) {
-      strip.push(wiDiag('info', 'Both pipelines produce artifacts on the same ref — anything '
-        + 'that fetches artifacts <i>by ref</i> (downstream projects, “latest artifacts” '
-        + 'links) may get either pipeline’s output.'));
+      strip.push(wiDiag('info', 'More than one of these pipelines produces artifacts on the '
+        + 'same ref — anything that fetches artifacts <i>by ref</i> (downstream projects, '
+        + '“latest artifacts” links) may get either pipeline’s output.'));
     }
     if (result.lint.length) {
       strip.push('<details><summary class="toolbar-note" style="cursor:pointer">'
@@ -2650,15 +2809,26 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         + result.lint.map(l => wiDiag('warning', esc(l.message))).join('') + '</details>');
     }
 
-    const createdCount = result.candidates.filter(c => c.created !== false).length
-      + result.candidates.reduce((n, c) => n
-          + (c.children || []).filter(ch => ch.created !== false).length, 0);
-    document.getElementById('count-whatif').textContent = ' ' + createdCount;
-    wiNoteEl.textContent = result.candidates.length + ' candidate pipeline'
-      + (result.candidates.length > 1 ? 's' : '') + ' · ' + createdCount + ' would run';
+    const legend = '<div class="wi-legend">'
+      + wiLegendChip('var(--ok)', 'solid', 'runs')
+      + wiLegendChip('var(--warn)', 'solid', 'manual gate')
+      + wiLegendChip('var(--warn)', 'dashed', 'delayed')
+      + wiLegendChip('var(--info)', 'dotted', 'depends (unknown)')
+      + '<span class="chip" style="opacity:.55;border-style:dashed">skipped / not added</span>'
+      + '<span class="chip"><span style="color:var(--warn)">●</span> duplicate</span>'
+      + '</div>';
 
-    wiResults.innerHTML =
-      (strip.length ? '<div class="wi-banner-strip">' + strip.join('') + '</div>' : '')
+    const topCount = result.candidates.length;
+    const createdAll = wiCountCreated(result.candidates);
+    document.getElementById('count-whatif').textContent = ' ' + createdAll;
+    const nested = createdAll
+      - result.candidates.filter(c => c.created !== false).length;
+    wiNoteEl.textContent = topCount + ' candidate pipeline'
+      + (topCount > 1 ? 's' : '') + ' · ' + createdAll + ' would run'
+      + (nested ? ' (' + nested + ' nested)' : '');
+
+    wiResults.innerHTML = legend
+      + (strip.length ? '<div class="wi-banner-strip">' + strip.join('') + '</div>' : '')
       + result.candidates.map(renderWiPipeline).join('');
 
     wiResults.querySelectorAll('.wi-node').forEach(el => {
@@ -2680,12 +2850,24 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   }
 
   function wiFindCandidate(candId) {
-    if (!wiLastResult) return null;
-    for (const c of wiLastResult.candidates) {
-      if (c.id === candId) return c;
-      for (const ch of (c.children || [])) if (ch.id === candId) return ch;
+    function walk(list) {
+      for (const c of (list || [])) {
+        if (c.id === candId) return c;
+        const hit = walk(c.children);
+        if (hit) return hit;
+      }
+      return null;
     }
-    return null;
+    return wiLastResult ? walk(wiLastResult.candidates) : null;
+  }
+
+  function wiVarsLine(vars) {
+    if (!vars || !vars.length) return '';
+    return '<div class="tl-note">' + vars.map(v =>
+      '$' + esc(v.name) + (v.runtime
+        ? ' = set at runtime (not simulated)'
+        : v.value === null ? ' is unset'
+        : ' = "' + esc(v.value) + '"')).join(' · ') + '</div>';
   }
 
   function wiTraceHtml(res) {
@@ -2693,12 +2875,17 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     const VERDICT_CHIP = {
       matched: 'chip-ok', 'no match': '', unknown: 'chip-info', end: ''
     };
+    let afterUnknown = false;
     return '<ol class="timeline">' + res.trace.map(t => {
       const label = t.rule === null ? '' : 'rule ' + (t.rule + 1) + ': ';
+      const contingent = afterUnknown && t.verdict !== 'unknown';
+      if (t.verdict === 'unknown') afterUnknown = true;
       return '<li class="tl-event"><div class="tl-head">'
         + '<span class="chip ' + (VERDICT_CHIP[t.verdict] || '') + '">' + esc(t.verdict) + '</span>'
         + (t.when ? '<span class="chip chip-warn">when: ' + esc(t.when) + '</span>' : '')
+        + (contingent ? '<span class="chip" data-tip="This rule is only reached if the unknown rule above does not match">contingent</span>' : '')
         + '</div><div class="tl-value">' + esc(label + t.desc) + '</div>'
+        + wiVarsLine(t.vars)
         + (t.notes && t.notes.length
             ? '<div class="tl-note">' + t.notes.map(esc).join('<br>') + '</div>' : '')
         + '</li>';
@@ -2714,9 +2901,12 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     panelName.textContent = node.name;
     panelName.title = node.name;
 
+    const stage = node.annotations.whatif ? node.annotations.whatif.stage : null;
     let html = '<div class="panel-section"><div class="panel-idrow">'
       + '<span class="chip ' + (WI_STATE_CHIP[res.state] || '') + '">'
-      + esc(WI_STATE_LABEL[res.state] || res.state) + '</span>'
+      + esc(res.when === 'on_failure' ? 'on failure only'
+          : (WI_STATE_LABEL[res.state] || res.state)) + '</span>'
+      + (stage ? '<span class="chip" data-tip="stage">' + esc(stage) + '</span>' : '')
       + '<span class="chip">' + esc(cand.label) + '</span>'
       + (wiDupSet.has(jobId)
           ? '<span class="chip chip-warn" data-tip="This job may run in more than one pipeline spawned by the same event">duplicate</span>'
@@ -2741,7 +2931,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       if (e.job === jobId || e.target === jobId) related.push(wiDiag('error', esc(e.message)));
     });
     cand.artifacts.notes.forEach(n => {
-      if (n.job === jobId || n.producer === jobId) related.push(wiDiag(n.kind === 'dotenv' ? 'info' : 'warning', esc(n.message)));
+      if (n.job === jobId || n.producer === jobId) {
+        related.push(wiDiag(n.kind === 'dotenv' ? 'info' : 'warning', esc(n.message)));
+      }
     });
     if (related.length) {
       html += '<div class="panel-section"><h3>Artifacts &amp; environment</h3>'
