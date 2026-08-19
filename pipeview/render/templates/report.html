@@ -238,14 +238,15 @@ code { font-family: var(--font-mono); font-size: var(--fs-1); }
 }
 a.loc:hover, .loc.loc-link:hover { color: var(--accent); text-decoration: underline; cursor: pointer; }
 
-/* tooltips: shown on hover AND focus */
-[data-tip] { position: relative; }
-[data-tip]:hover::after, [data-tip]:focus-visible::after {
-  content: attr(data-tip);
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 50%;
-  transform: translateX(-50%);
+/* tooltips ([data-tip]): shown on hover AND focus. One shared element,
+   position:fixed and placed by the tooltip engine in the script, which
+   clamps it to the viewport — a per-anchor ::after can neither avoid
+   running off a window edge nor escape an overflow-clipping ancestor,
+   and it collides with anchors that use ::after themselves (splitter) */
+.tooltip {
+  position: fixed;
+  top: 0;
+  left: 0;
   background: var(--text);
   color: var(--surface);
   font: 400 var(--fs-0) var(--font-ui);
@@ -259,13 +260,18 @@ a.loc:hover, .loc.loc-link:hover { color: var(--accent); text-decoration: underl
   z-index: 200;
   pointer-events: none;
 }
+.tooltip[hidden] { display: none; }
 
 /* predefined-variable docs: dotted underline marks "hover for what this is" */
 .pre-doc {
   text-decoration: underline dotted var(--text-muted);
   text-underline-offset: 2px;
   cursor: help;
+  min-width: 0;
 }
+/* names that may ellipsize keep the .clip one level in, so the doc tip
+   (and its underline) stays on the wrapper */
+.pre-doc .clip { display: block; }
 
 /* predefined-variables reference (Variables tab, GitLab reports) */
 .pre-ref { margin-top: var(--sp-5); }
@@ -717,14 +723,6 @@ td .btn.copy-btn { min-height: var(--hit); }
   min-height: 24px;
 }
 .wi-unknown-var .btn { margin-left: auto; min-height: 22px; font-size: var(--fs-0); padding: 0 var(--sp-2); }
-/* the tooltip wrapper must not clip: overflow-hidden on a [data-tip]
-   element would swallow its own tooltip, so the ellipsis lives one level in */
-.wi-unknown-var .pre-doc { min-width: 0; }
-.wi-unknown-var .pre-doc .clip { display: block; }
-/* these names hug the viewport's left edge — a centered tooltip would
-   escape it, so left-align the tooltip instead */
-.wi-unknown-var .pre-doc:hover::after,
-.wi-unknown-var .pre-doc:focus-visible::after { left: 0; transform: none; }
 
 .wi-banner-strip { margin-bottom: var(--sp-3); }
 .wi-banner-strip .diag-item { max-width: none; }
@@ -1097,6 +1095,94 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     if (!iso) return '';
     return iso.replace('T', ' ').replace('Z', ' UTC');
   }
+
+  /* ==========================================================
+     Tooltips: every [data-tip] anchor shares one fixed-position
+     element, kept fully inside the viewport. Views re-render and
+     scroll freely, so the tip follows delegated events instead of
+     living in any view's DOM.
+     ========================================================== */
+  const tipEl = document.createElement('div');
+  tipEl.className = 'tooltip';
+  tipEl.setAttribute('role', 'tooltip');
+  tipEl.hidden = true;
+  document.body.appendChild(tipEl);
+  let tipAnchor = null;
+  const TIP_GAP = 6;
+
+  function placeTip() {
+    const a = tipAnchor.getBoundingClientRect();
+    const vw = document.documentElement.clientWidth;
+    const vh = document.documentElement.clientHeight;
+    // measure unconstrained: a leftover left offset would eat into the
+    // available width and re-wrap the text
+    tipEl.style.left = '0px';
+    tipEl.style.top = '0px';
+    const w = tipEl.offsetWidth;
+    const h = tipEl.offsetHeight;
+    const x = Math.max(TIP_GAP, Math.min(a.left + a.width / 2 - w / 2, vw - w - TIP_GAP));
+    // below the anchor; above it when there is no room underneath
+    let y = a.bottom + TIP_GAP;
+    if (y + h > vh - TIP_GAP && a.top - h - TIP_GAP >= TIP_GAP) y = a.top - h - TIP_GAP;
+    tipEl.style.left = x + 'px';
+    tipEl.style.top = Math.max(TIP_GAP, Math.min(y, vh - h - TIP_GAP)) + 'px';
+  }
+
+  function showTip(el) {
+    const text = el.getAttribute('data-tip');
+    if (!text) { hideTip(); return; }
+    tipAnchor = el;
+    tipEl.textContent = text;
+    tipEl.hidden = false;
+    placeTip();
+  }
+
+  function hideTip() {
+    tipAnchor = null;
+    tipEl.hidden = true;
+  }
+
+  const tipAnchorFocused = () =>
+    tipAnchor && tipAnchor.matches && tipAnchor.matches(':focus-visible');
+
+  document.addEventListener('mouseover', e => {
+    const el = e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (el) showTip(el);
+    else if (tipAnchor && !tipAnchorFocused()) hideTip();
+  });
+  document.addEventListener('mouseout', e => {
+    if (!tipAnchor || tipAnchorFocused()) return;
+    if (tipAnchor.contains(e.target) && !(e.relatedTarget && tipAnchor.contains(e.relatedTarget))) {
+      hideTip();
+    }
+  });
+  document.addEventListener('focusin', e => {
+    const el = e.target;
+    if (el.matches && el.matches('[data-tip]:focus-visible')) showTip(el);
+  });
+  document.addEventListener('focusout', e => {
+    if (e.target === tipAnchor) hideTip();
+  });
+  // a click can re-render the DOM under the pointer or rewrite the
+  // anchor's data-tip (theme toggle) — re-sync instead of going stale
+  document.addEventListener('click', () => {
+    if (!tipAnchor) return;
+    if (document.contains(tipAnchor)) showTip(tipAnchor);
+    else hideTip();
+  });
+  document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') hideTip();
+  });
+  // scrolling moves the anchor while a fixed-position tip stays put:
+  // follow the anchor while the pointer (or focus) is still on it,
+  // hide once it slid out from under the pointer
+  const tipResync = () => {
+    if (!tipAnchor) return;
+    if ((tipAnchor.matches && tipAnchor.matches(':hover')) || tipAnchorFocused()) placeTip();
+    else hideTip();
+  };
+  document.addEventListener('scroll', tipResync, true);
+  window.addEventListener('resize', tipResync);
 
   /* ==========================================================
      Header
@@ -2174,9 +2260,16 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       const nameChips =
         (v.exported ? ' <span class="chip chip-ok" title="exported — passed into recipe environments">exported</span>' : '')
         + (v.origin && val != null ? ' <span class="chip chip-info" title="' + esc(ORIGIN_TIPS[v.origin] || '') + '">' + esc(v.origin) + '</span>' : '');
+      // a name the catalog documents carries its docs right here, like
+      // everywhere else; the tip restates the name since the cell may clip it
+      const nameDoc = preDocTip(v.name);
+      const nameHtml = nameDoc
+        ? '<span class="pre-doc" data-tip="' + esc(v.name + ' — ' + nameDoc) + '">'
+          + '<span class="clip"><code>' + esc(v.name) + '</code></span></span>'
+        : '<span class="clip" title="' + esc(v.name) + '"><code>' + esc(v.name) + '</code></span>';
       html += '<tr data-var="' + esc(v.name) + '" tabindex="0">'
         + '<td class="cell-name"><span style="display:flex;align-items:center;gap:6px;min-width:0">'
-        + '<span class="clip" title="' + esc(v.name) + '"><code>' + esc(v.name) + '</code></span>' + nameChips + '</span></td>'
+        + nameHtml + nameChips + '</span></td>'
         + '<td class="cell-value">' + valCell + '</td>'
         + '<td class="num">' + v.events.length + '</td>'
         + '<td class="num">' + v.used_by.length + '</td>'
