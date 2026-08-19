@@ -35,6 +35,20 @@
      "env": {}, "expect": true},
     {"name": "regex stored in a variable", "src": "$T =~ $P",
      "env": {"T": "abcde", "P": "/^ab.*/"}, "expect": true},
+    {"name": "unset left matches an empty-string-matching regex", "src": "$U =~ /.*/",
+     "env": {}, "expect": true},
+    {"name": "negative of the empty-string match", "src": "$U !~ /.*/",
+     "env": {}, "expect": false},
+    {"name": "unset pattern variable is a definite no-match", "src": "\"x\" =~ $PAT",
+     "env": {}, "expect": false},
+    {"name": "unset pattern variable with !~ is true", "src": "\"x\" !~ $PAT",
+     "env": {}, "expect": true},
+    {"name": "chained comparison: boolean never equals a string",
+     "src": "$A == \"a\" == \"b\"", "env": {"A": "a"}, "expect": false},
+    {"name": "chained comparison with != flips it",
+     "src": "$A == \"a\" != \"b\"", "env": {"A": "a"}, "expect": true},
+    {"name": "invalid unquoted boolean evaluates unknown", "src": "$X == true",
+     "env": {"X": "true"}, "expect": "unknown"},
     {"name": "documented substring fallback: 23 in 1234", "src": "$A =~ $B",
      "env": {"A": "23", "B": "1234"}, "expect": true},
     {"name": "var to var equality", "src": "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH",
@@ -387,6 +401,38 @@
       "config": {"scenario": "push_branch", "branch": "main"},
       "expect": {
         "candidates": {"branch": {"created": false, "reasonContains": ".pre"}}
+      }
+    },
+    {
+      "name": "invalid: GitLab-rejected configs are fatal, not green",
+      "fixture": "whatif_invalid",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "fatalAtLeast": 4,
+        "fatalContain": ["should be part of needs", "circular needs",
+                         "invalid expression syntax", "on_stop job"]
+      }
+    },
+    {
+      "name": "envstop: started environment whose stop job is excluded gets a warning",
+      "fixture": "whatif_envstop",
+      "config": {"scenario": "push_branch", "branch": "feature/widget"},
+      "expect": {
+        "candidates": {
+          "branch": {"created": true,
+                     "jobs": {"deploy_review": "runs", "stop_review": "not-added"},
+                     "notesContain": ["auto-stopped"]}
+        }
+      }
+    },
+    {
+      "name": "envstop: on main both jobs run, no warning needed",
+      "fixture": "whatif_envstop",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "branch": {"jobs": {"deploy_review": "runs", "stop_review": "runs"}}
+        }
       }
     },
     {

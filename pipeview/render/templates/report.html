@@ -2678,7 +2678,11 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   function wiCandChips(cand) {
     let chips = '<span class="chip">' + esc(cand.source) + '</span>'
       + '<span class="chip" style="font-family:var(--font-mono)">' + esc(cand.ref) + '</span>';
-    if (cand.created === true) chips += '<span class="chip chip-ok">✓ created</span>';
+    if (wiFatalActive) {
+      chips += '<span class="chip chip-error" data-tip="The configuration is invalid — GitLab refuses to create any pipeline">✖ invalid config</span>';
+    } else if (cand.created === true && cand.creationFails) {
+      chips += '<span class="chip chip-error" data-tip="A needs/dependencies problem in this pipeline makes GitLab fail to create it">✖ creation fails</span>';
+    } else if (cand.created === true) chips += '<span class="chip chip-ok">✓ created</span>';
     else if (cand.created === false) chips += '<span class="chip chip-error">✖ not created</span>';
     else chips += '<span class="chip chip-info" data-tip="' + esc(cand.reason || '') + '">? depends</span>';
     const counts = {};
@@ -2745,7 +2749,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       seen.add(n.message);
       banners.push(wiDiag(
         n.kind === 'conditional-need' || n.kind === 'workflow-vars'
-          || n.kind === 'manual-producer' ? 'warning' : 'info',
+          || n.kind === 'manual-producer' || n.kind === 'env-stop'
+          ? 'warning' : 'info',
         esc(n.message)));
     });
     Object.keys(dotenvByProducer).forEach(producer => {
@@ -2780,10 +2785,12 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + esc(label) + '</span>';
   }
 
+  let wiFatalActive = false;
+
   function wiCountCreated(list) {
     let n = 0;
     (list || []).forEach(c => {
-      if (c.created !== false) n += 1;
+      if (c.created !== false && !c.creationFails) n += 1;
       n += wiCountCreated(c.children);
     });
     return n;
@@ -2801,8 +2808,21 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }
     wiLastResult = result;
     wiDupSet = new Set(result.duplicates.map(d => d.job));
+    const fatal = result.fatal || [];
+    wiFatalActive = fatal.length > 0;
+    const topCountEarly = result.candidates.length;
+    const createdAllEarly = wiFatalActive ? 0 : wiCountCreated(result.candidates);
 
     const strip = [];
+    if (fatal.length) {
+      strip.push(wiDiag('error',
+        '<b>Invalid configuration — GitLab refuses to create ANY pipeline:</b><br>'
+        + fatal.map(f => esc(f.message)).join('<br>')));
+    } else if (topCountEarly > 0 && createdAllEarly === 0) {
+      strip.push(wiDiag('warning',
+        '<b>This event produces NO pipelines</b> — every candidate is '
+        + 'suppressed or fails creation.'));
+    }
     if (result.duplicates.length) {
       const names = result.duplicates.map(d =>
         '<code>' + esc(nodeMap[d.job] ? nodeMap[d.job].name : d.job) + '</code>').join(', ');
@@ -2832,14 +2852,15 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '<span class="chip"><span style="color:var(--warn)">●</span> duplicate</span>'
       + '</div>';
 
-    const topCount = result.candidates.length;
-    const createdAll = wiCountCreated(result.candidates);
+    const topCount = topCountEarly;
+    const createdAll = createdAllEarly;
     document.getElementById('count-whatif').textContent = ' ' + createdAll;
-    const nested = createdAll
-      - result.candidates.filter(c => c.created !== false).length;
+    const nested = wiFatalActive ? 0 : createdAll
+      - result.candidates.filter(c => c.created !== false && !c.creationFails).length;
     wiNoteEl.textContent = topCount + ' candidate pipeline'
       + (topCount > 1 ? 's' : '') + ' · ' + createdAll + ' would run'
-      + (nested ? ' (' + nested + ' nested)' : '');
+      + (wiFatalActive ? ' (configuration invalid)'
+         : nested ? ' (' + nested + ' nested)' : '');
 
     wiResults.innerHTML = legend
       + (strip.length ? '<div class="wi-banner-strip">' + strip.join('') + '</div>' : '')

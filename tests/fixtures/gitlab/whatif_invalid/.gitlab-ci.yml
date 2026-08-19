@@ -1,0 +1,58 @@
+# Configs GitLab rejects outright — no pipeline of any kind is created.
+# The simulator must say so instead of showing a healthy green pipeline.
+
+stages:
+  - build
+  - test
+
+other:
+  stage: build
+  script:
+    - echo other
+
+build:
+  stage: build
+  script:
+    - echo build
+
+## dependencies must be a subset of needs
+bad_deps:
+  stage: test
+  script:
+    - echo test
+  needs:
+    - build
+  dependencies:
+    - other
+
+## circular needs
+cyc_a:
+  stage: test
+  script:
+    - echo a
+  needs:
+    - cyc_b
+
+cyc_b:
+  stage: test
+  script:
+    - echo b
+  needs:
+    - cyc_a
+
+## unquoted booleans are invalid expression syntax on the server
+bad_expr:
+  stage: test
+  script:
+    - echo expr
+  rules:
+    - if: $PROTECTED == true
+
+## on_stop must reference an existing stop job
+env_missing_stop:
+  stage: test
+  script:
+    - echo deploy
+  environment:
+    name: production
+    on_stop: stop_missing

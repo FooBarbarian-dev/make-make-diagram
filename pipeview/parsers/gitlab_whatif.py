@@ -182,9 +182,14 @@ class _Parser:
         return self.parse_comparison()
 
     def parse_comparison(self) -> dict:
-        left = self.parse_term()
-        tok = self.peek()
-        if tok and tok[0] == "op" and tok[1] in ("==", "!=", "=~", "!~"):
+        # GitLab's shunting-yard parser accepts CHAINED comparisons,
+        # left-associative: $A == "a" == "b" is ($A == "a") == "b" — a
+        # boolean compared to a string, which is always false. Model it.
+        left: dict = self.parse_term()
+        while True:
+            tok = self.peek()
+            if not (tok and tok[0] == "op" and tok[1] in ("==", "!=", "=~", "!~")):
+                break
             self.take()
             right = self.parse_term()
             if tok[1] in ("=~", "!~") and right.get("t") == "re":
@@ -195,7 +200,9 @@ class _Parser:
                         "GitLab's RE2 engine rejects these patterns and the "
                         "pipeline would fail to be created"
                     )
-            return {"op": "cmp", "cmp": tok[1], "left": left, "right": right}
+            left = {"op": "cmp", "cmp": tok[1], "left": left, "right": right}
+        if left.get("op") == "cmp":
+            return left
         return {"op": "truthy", "term": left}
 
     def parse_term(self) -> dict:
@@ -213,12 +220,23 @@ class _Parser:
 
 def parse_expression(src: Any) -> tuple[dict, list[str], str | None]:
     """Parse one variable expression. Returns (ast, notes, error).
-    On failure the AST is {"op": "opaque", "src": …} which the evaluator
-    treats as *unknown* — never a crash, never a guess."""
+
+    Failure classes differ in meaning:
+    - token-level junk (bare words, `== true` unquoted, empty) is rejected
+      by GitLab itself ("invalid expression syntax" → the whole config is
+      invalid) → {"op": "invalid"} so the caller can flag a fatal;
+    - structure this grammar can't parse (but might be GitLab-legal) →
+      {"op": "opaque"} which evaluates to *unknown* — never a guess."""
     text = str(src)
     lex_notes: list[str] = []
     try:
-        parser = _Parser(_tokenize(text, lex_notes))
+        tokens = _tokenize(text, lex_notes)
+    except _ExprError as e:
+        return {"op": "invalid", "src": text}, lex_notes, str(e)
+    if not tokens:
+        return {"op": "invalid", "src": text}, lex_notes, "empty expression"
+    try:
+        parser = _Parser(tokens)
         ast = parser.parse()
         return ast, lex_notes + parser.notes, None
     except _ExprError as e:
@@ -376,9 +394,18 @@ def _compile_rule(
         out["if"] = ast
         out["raw_if"] = str(rule["if"])
         for note in notes:
-            ctx.diag("warning" if "reject" in note else "info",
-                     f"{where}: {note}", line)
-        if err:
+            if "RE2" in note:
+                ctx.fatal_add(where, note)
+            else:
+                ctx.diag("warning" if "reject" in note else "info",
+                         f"{where}: {note}", line)
+        if ast.get("op") == "invalid":
+            ctx.fatal_add(
+                where,
+                f"invalid expression syntax in {str(rule['if'])!r} ({err}) — "
+                "GitLab rejects the configuration",
+            )
+        elif err:
             ctx.diag(
                 "warning",
                 f"{where}: cannot parse rules:if expression "
@@ -474,9 +501,18 @@ def _compile_only_except(spec: Any, ctx: "_CompileCtx", where: str,
             ast, notes, err = parse_expression(expr)
             asts.append(ast)
             for note in notes:
-                ctx.diag("warning" if "reject" in note else "info",
-                         f"{where}: {note}", line)
-            if err:
+                if "RE2" in note:
+                    ctx.fatal_add(where, note)
+                else:
+                    ctx.diag("warning" if "reject" in note else "info",
+                             f"{where}: {note}", line)
+            if ast.get("op") == "invalid":
+                ctx.fatal_add(
+                    where,
+                    f"invalid expression syntax in {str(expr)!r} ({err}) — "
+                    "GitLab rejects the configuration",
+                )
+            elif err:
                 ctx.diag(
                     "warning",
                     f"{where}: cannot parse variable expression "
@@ -573,6 +609,12 @@ class _CompileCtx:
         self.repo_files, self.repo_truncated = _repo_file_list(state.repo_root)
         self.globals_map, self.child_globals = _collect_globals(state)
         self.lint: list[dict] = []
+        # config-invalid findings: GitLab refuses to create ANY pipeline
+        self.fatal: list[dict] = []
+
+    def fatal_add(self, where: str, message: str) -> None:
+        self.fatal.append({"where": where, "message": message})
+        self.diag("error", f"{where}: {message}", None)
 
     def diag(self, severity: str, message: str, line: int | None,
              file: str | None = None, node: str | None = None) -> None:
@@ -723,6 +765,18 @@ def compile_whatif(state) -> dict:
                          for k, v in source_vars.items()
                          if not isinstance(v, _Reference)}
 
+        env_cfg = None
+        env_raw = flat.get("environment")
+        if isinstance(env_raw, str):
+            env_cfg = {"name": env_raw, "action": "start", "on_stop": None}
+        elif isinstance(env_raw, dict):
+            env_cfg = {
+                "name": _plain_value(env_raw["name"]) if "name" in env_raw else None,
+                "action": _plain_value(env_raw.get("action", "start")),
+                "on_stop": _plain_value(env_raw["on_stop"])
+                if "on_stop" in env_raw else None,
+            }
+
         deps = flat.get("dependencies")
         node.annotations["whatif"] = {
             "program": program,
@@ -738,9 +792,12 @@ def compile_whatif(state) -> dict:
             if isinstance(deps, list) else None,
             "artifacts": _compile_artifacts(flat.get("artifacts")),
             "trigger": _compile_trigger(flat.get("trigger")),
+            "environment": env_cfg,
             "child_of": namespace.rstrip(":") if namespace else None,
             "name": plain_name,
         }
+
+    _config_fatal_checks(state, ctx)
 
     workflow = None
     raw_workflow = getattr(state, "workflow_raw", None)
@@ -783,8 +840,89 @@ def compile_whatif(state) -> dict:
         "child_globals": ctx.child_globals,
         "stages": _stage_order(state),
         "lint": ctx.lint,
+        "fatal": ctx.fatal,
         "unresolved_includes": list(state.unresolved_includes),
     }
+
+
+def _config_fatal_checks(state, ctx: _CompileCtx) -> None:
+    """Config-invalid conditions GitLab rejects outright — no pipeline of
+    any kind is created. Scenario-independent, so checked at compile time."""
+    progs: dict[str, dict] = {}
+    for nid, node in state.nodes.items():
+        if node.kind == "job" and "whatif" in node.annotations:
+            progs[nid] = node.annotations["whatif"]
+
+    def plain_needs(w: dict) -> list[str]:
+        prefix = (w["child_of"] + "::") if w["child_of"] else ""
+        return [prefix + n["job"] for n in (w.get("needs") or [])
+                if isinstance(n, dict) and "job" in n and not n.get("kind")]
+
+    # dependencies must be a subset of needs when both are present
+    for nid, w in progs.items():
+        needs = w.get("needs")
+        deps = w.get("dependencies")
+        if needs is None or not deps:
+            continue
+        need_names = {n["job"] for n in needs
+                      if isinstance(n, dict) and "job" in n and not n.get("kind")}
+        for dep in deps:
+            if dep not in need_names:
+                ctx.fatal_add(
+                    f"job '{nid}'",
+                    f"'{w['name']}' uses needs together with dependencies, but "
+                    f"'{dep}' is not in needs — GitLab: 'the {dep} should be "
+                    "part of needs' and rejects the configuration",
+                )
+
+    # circular needs
+    mark: dict[str, int] = {}
+
+    def dfs(node_id: str, path: list[str]) -> None:
+        mark[node_id] = 1
+        for nxt in plain_needs(progs[node_id]):
+            if nxt not in progs:
+                continue
+            if mark.get(nxt) == 1:
+                cyc = path[path.index(nxt):] + [nxt] if nxt in path else [node_id, nxt]
+                ctx.fatal_add(
+                    f"job '{nxt}'",
+                    "circular needs dependency: " + " → ".join(cyc)
+                    + " — GitLab rejects the configuration",
+                )
+                continue
+            if mark.get(nxt) is None:
+                dfs(nxt, path + [nxt])
+        mark[node_id] = 2
+
+    for nid in progs:
+        if mark.get(nid) is None:
+            dfs(nid, [nid])
+
+    # environment on_stop must point at a stop job for the same environment
+    for nid, w in progs.items():
+        env = w.get("environment")
+        if not env or not env.get("on_stop"):
+            continue
+        prefix = (w["child_of"] + "::") if w["child_of"] else ""
+        target = progs.get(prefix + env["on_stop"])
+        where = f"job '{nid}'"
+        if target is None:
+            ctx.fatal_add(where, f"environment '{env.get('name')}': on_stop job "
+                                 f"'{env['on_stop']}' is not defined — GitLab "
+                                 "rejects the configuration")
+        elif not target.get("environment"):
+            ctx.fatal_add(where, f"on_stop job '{env['on_stop']}' defines no "
+                                 "environment — GitLab rejects the configuration")
+        elif target["environment"].get("name") != env.get("name"):
+            ctx.fatal_add(where, f"on_stop job '{env['on_stop']}' uses environment "
+                                 f"'{target['environment'].get('name')}', not "
+                                 f"'{env.get('name')}' — GitLab rejects the "
+                                 "configuration")
+        elif target["environment"].get("action") != "stop":
+            ctx.fatal_add(where, f"on_stop job '{env['on_stop']}' must have "
+                                 "environment action: stop — GitLab rejects the "
+                                 "configuration")
 
 
 def _lint_final_bare_when(rules: list[dict], job_id: str, ctx: _CompileCtx,

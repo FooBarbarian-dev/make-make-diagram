@@ -96,13 +96,15 @@ var PipeviewWhatIf = (function () {
   // "left is contained in right".
   function matchAgainst(leftVal, right, env, controlled, notes) {
     if (leftVal === UNKNOWN) return null;
+    // GitLab scans text.to_s — an unset left side behaves as "" (so a
+    // pattern that matches the empty string, like /.*/, DOES match)
+    if (leftVal === null) leftVal = '';
     if (right.t === 're') {
       if (right.non_re2) {
         notes.push('/' + right.source + '/ uses lookaround or backreferences — '
-          + "GitLab's RE2 engine rejects it and the pipeline would fail to be created");
+          + "GitLab's RE2 engine rejects it and the configuration is invalid");
         return null;
       }
-      if (leftVal === null) return false;
       var rx = compileRegex(right.source, right.flags, notes);
       if (!rx) { notes.push('invalid regex /' + right.source + '/'); return null; }
       return rx.test(leftVal);
@@ -110,11 +112,10 @@ var PipeviewWhatIf = (function () {
     var rv = termValue(right, env, controlled, notes);
     if (rv === UNKNOWN) return null;
     if (rv === null) {
-      notes.push('the pattern variable is unset — GitLab treats this as an '
-        + 'invalid expression');
-      return null;
+      // GitLab: `return false unless regexp` — a definite no-match
+      notes.push('the pattern variable is unset — GitLab returns no-match');
+      return false;
     }
-    if (leftVal === null) return false;
     var m = /^\/(.*)\/([a-z]*)$/.exec(rv);
     if (m) {
       var rx2 = compileRegex(m[1], m[2], notes);
@@ -133,6 +134,10 @@ var PipeviewWhatIf = (function () {
       case 'opaque':
         notes.push('expression could not be parsed: ' + (ast.src || ''));
         return null;
+      case 'invalid':
+        notes.push('GitLab rejects this expression (invalid expression syntax): '
+          + (ast.src || ''));
+        return null;
       case 'and': return triAnd(ast.args.map(function (a) { return evalExpr(a, env, notes, controlled); }));
       case 'or': return triOr(ast.args.map(function (a) { return evalExpr(a, env, notes, controlled); }));
       case 'not': return triNot(evalExpr(ast.arg, env, notes, controlled));
@@ -142,12 +147,30 @@ var PipeviewWhatIf = (function () {
         return v !== null && v !== '';   // "false" and "0" are truthy
       }
       case 'cmp': {
-        var left = termValue(ast.left, env, controlled, notes);
+        // chained comparisons: the left side may itself be a comparison
+        // (left-associative, GitLab's shunting-yard behavior)
+        var leftIsExpr = !!ast.left.op;
+        var left = leftIsExpr ? evalExpr(ast.left, env, notes, controlled)
+                              : termValue(ast.left, env, controlled, notes);
         if (ast.cmp === '==' || ast.cmp === '!=') {
-          var right = termValue(ast.right, env, controlled, notes);
+          var rightIsExpr = !!ast.right.op;
+          var right = rightIsExpr ? evalExpr(ast.right, env, notes, controlled)
+                                  : termValue(ast.right, env, controlled, notes);
+          if (leftIsExpr !== rightIsExpr) {
+            // a boolean result never equals a string/null, unknown or not
+            return ast.cmp === '==' ? false : true;
+          }
+          if (leftIsExpr) {
+            if (left === null || right === null) return null;
+            return ast.cmp === '==' ? left === right : left !== right;
+          }
           if (left === UNKNOWN || right === UNKNOWN) return null;
           var eq = left === right;       // null == null is true (both unset)
           return ast.cmp === '==' ? eq : !eq;
+        }
+        if (leftIsExpr) {
+          notes.push('matching a boolean result with =~ is not modeled');
+          return null;
         }
         var matched = matchAgainst(left, ast.right, env, controlled, notes);
         if (matched === null) return null;
@@ -938,6 +961,23 @@ var PipeviewWhatIf = (function () {
     }
 
     var artifacts = analyzeArtifacts(candidate, jobs, results, whatif, report);
+    // a started environment whose on_stop job is excluded here can never be
+    // auto-stopped — the docs tell users to keep both jobs' rules in sync
+    jobs.forEach(function (job) {
+      var envc = job.whatif.environment;
+      if (!envc || !envc.on_stop) return;
+      if (envc.action && envc.action !== 'start') return;
+      if (!mightRun(results[job.id])) return;
+      var stopId = (job.whatif.child_of ? job.whatif.child_of + '::' : '') + envc.on_stop;
+      var stop = results[stopId];
+      if (stop && !mightRun(stop)) {
+        artifacts.notes.push({ job: job.id, kind: 'env-stop',
+          message: '"' + job.whatif.name + '" starts environment "' + envc.name
+            + '" but its on_stop job "' + envc.on_stop + '" is not in this '
+            + 'pipeline (' + stop.state + ') — the environment can never be '
+            + 'auto-stopped; keep both jobs’ rules in sync' });
+      }
+    });
     if (gate.variablesUncertain) {
       artifacts.notes.unshift({ job: null, kind: 'workflow-vars',
         message: 'workflow variables ' + gate.variablesUncertain.join(', ')
@@ -999,12 +1039,19 @@ var PipeviewWhatIf = (function () {
       }
     });
 
+    // needs/dependencies problems make GitLab refuse to create THIS pipeline
+    // (trigger-kind errors fail only the trigger job, not the pipeline)
+    var creationFails = created !== false && artifacts.errors.some(function (e) {
+      return e.kind !== 'trigger';
+    });
+
     return {
       id: candidate.id, label: candidate.label, source: candidate.source,
       ref: candidate.ref, refType: candidate.refType, childOf: candidate.childOf || null,
       parentJob: candidate.parentJob || null,
       parentConditional: candidate.parentConditional || false,
-      created: created, reason: reason, workflowTrace: gate.trace || [],
+      created: created, reason: reason, creationFails: creationFails,
+      workflowTrace: gate.trace || [],
       workflowVariables: gate.variables || {},
       env: env, controlled: controlled,
       jobs: results, jobOrder: jobs.map(function (j) { return j.id; }),
@@ -1024,7 +1071,7 @@ var PipeviewWhatIf = (function () {
     if (candidates.length > 1) {
       var seen = {};
       candidates.forEach(function (c) {
-        if (c.created === false) return;
+        if (c.created === false || c.creationFails) return;
         c.jobOrder.forEach(function (id) {
           if (mightRun(c.jobs[id])) {
             (seen[id] = seen[id] || []).push(c.id);
@@ -1044,7 +1091,8 @@ var PipeviewWhatIf = (function () {
       candidates: candidates,
       duplicates: duplicates,
       crossPipelineArtifacts: producing.length >= 2,
-      lint: whatif.lint || []
+      lint: whatif.lint || [],
+      fatal: whatif.fatal || []
     };
   }
 

@@ -185,4 +185,14 @@ def test_scenario_vectors(run):
                 failures.append(
                     f"{name}: duplicates expected {expect['duplicates']}, got {got_dups}"
                 )
+        if "fatalAtLeast" in expect:
+            n = len(got.get("fatal", []))
+            if n < expect["fatalAtLeast"]:
+                failures.append(
+                    f"{name}: expected >= {expect['fatalAtLeast']} fatal entries, "
+                    f"got {n}: {got.get('fatal')}"
+                )
+        for needle in expect.get("fatalContain", []):
+            if needle not in json.dumps(got.get("fatal", [])):
+                failures.append(f"{name}: no fatal entry contains {needle!r}")
     assert not failures, "\n" + "\n".join(failures)

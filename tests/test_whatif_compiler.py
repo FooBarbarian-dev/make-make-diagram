@@ -92,16 +92,32 @@ class TestExpressionParser:
         assert err is None
         assert notes and "RE2" in notes[0]
 
-    def test_parse_error_degrades_to_opaque(self):
+    def test_token_junk_is_invalid_not_opaque(self):
+        # GitLab itself rejects these ("invalid expression syntax")
         ast, _, err = parse_expression('CI_COMMIT_BRANCH === "oops"')
         assert err is not None
-        assert ast["op"] == "opaque"
+        assert ast["op"] == "invalid"
         assert "CI_COMMIT_BRANCH" in ast["src"]
+        for src in ("$X == true", "", "   "):
+            ast, _, err = parse_expression(src)
+            assert ast["op"] == "invalid", src
 
-    def test_unterminated_string_is_opaque(self):
+    def test_unterminated_string_is_invalid(self):
         ast, _, err = parse_expression('$A == "unclosed')
         assert err is not None
+        assert ast["op"] == "invalid"
+
+    def test_structural_failure_stays_opaque(self):
+        ast, _, err = parse_expression('($A == "x"')   # tokens fine, structure not
+        assert err is not None
         assert ast["op"] == "opaque"
+
+    def test_chained_comparisons_parse_left_associative(self):
+        ast, _, err = parse_expression('$A == "a" == "b"')
+        assert err is None
+        assert ast["cmp"] == "=="
+        assert ast["left"]["cmp"] == "=="
+        assert ast["right"] == {"t": "str", "value": "b"}
 
 
 class TestGlobTranslation:
@@ -209,11 +225,14 @@ class TestCompiledPrograms:
         assert program["only"]["variables"][0]["cmp"] == "=="
         assert program["except"]["refs"] == ["tags"]
 
-    def test_unparseable_if_becomes_opaque_with_diagnostic(self, features):
+    def test_gitlab_rejected_if_is_invalid_and_fatal(self, features):
+        # 'CI_COMMIT_BRANCH === ...' is token junk GitLab itself rejects
         rules = whatif_of(features, "weird_rules")["program"]["rules"]
-        assert rules[0]["if"]["op"] == "opaque"
-        assert any("weird_rules" in d.message and "unknown" in d.message
-                   for d in features.diagnostics if d.severity == "warning")
+        assert rules[0]["if"]["op"] == "invalid"
+        fatal = features.annotations["whatif"]["fatal"]
+        assert any("weird_rules" in f["where"] for f in fatal)
+        assert any("invalid expression syntax" in d.message
+                   for d in features.diagnostics if d.severity == "error")
 
     def test_artifacts_and_dotenv(self, features):
         w = whatif_of(features, "build_meta")
