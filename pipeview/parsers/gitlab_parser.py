@@ -17,6 +17,7 @@ from pipeview.model import (
     Variable,
     VariableEvent,
 )
+from pipeview.parsers.gitlab_predefined import PREDEFINED_VAR_DOCS
 from pipeview.parsers.gitlab_whatif import compile_whatif, flatten_rules
 
 # Top-level configuration keywords — never jobs. `pages` is deliberately NOT
@@ -161,6 +162,7 @@ def parse_gitlab(path: str) -> Report:
     if state.workflow_name:
         report.annotations["workflow_name"] = state.workflow_name
     report.annotations["whatif"] = whatif
+    report.annotations["predefined_var_docs"] = PREDEFINED_VAR_DOCS
     return report
 
 

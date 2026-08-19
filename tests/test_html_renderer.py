@@ -82,6 +82,27 @@ class TestHtmlGeneration:
             content = f.read()
         assert "build_job" in content
 
+    # A distinctive catalog sentence separates data from template code: the
+    # docs must ride in via the model JSON, so they appear in GitLab reports
+    # and never in Make reports.
+    _CATALOG_SNIPPET = "Marks that the script runs under GitLab CI/CD"
+
+    def test_predefined_docs_in_gitlab_html(self, gitlab_report, tmpdir):
+        path = os.path.join(tmpdir, "report.html")
+        render_html(gitlab_report, path)
+        with open(path) as f:
+            content = f.read()
+        assert '"predefined_var_docs"' in content
+        assert self._CATALOG_SNIPPET in content
+
+    def test_predefined_docs_absent_from_make_html(self, make_report, tmpdir):
+        path = os.path.join(tmpdir, "report.html")
+        render_html(make_report, path)
+        with open(path) as f:
+            content = f.read()
+        assert '"predefined_var_docs"' not in content
+        assert self._CATALOG_SNIPPET not in content
+
 
 class TestNoNetworkResources:
     """MANDATORY: Generated HTML must never reference external resources."""

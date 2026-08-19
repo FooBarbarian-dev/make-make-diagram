@@ -260,6 +260,28 @@ a.loc:hover, .loc.loc-link:hover { color: var(--accent); text-decoration: underl
   pointer-events: none;
 }
 
+/* predefined-variable docs: dotted underline marks "hover for what this is" */
+.pre-doc {
+  text-decoration: underline dotted var(--text-muted);
+  text-underline-offset: 2px;
+  cursor: help;
+}
+
+/* predefined-variables reference (Variables tab, GitLab reports) */
+.pre-ref { margin-top: var(--sp-5); }
+.pre-ref summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: var(--sp-2) 0;
+  color: var(--text-muted);
+}
+.pre-ref[open] summary { color: var(--text); }
+.pre-ref .input { margin: var(--sp-2) 0; max-width: 320px; }
+.pre-ref-entry { padding: var(--sp-2) 0; border-bottom: 1px solid var(--border); }
+.pre-ref-head { display: flex; align-items: center; gap: var(--sp-2); }
+.pre-ref-head .btn { min-height: 22px; padding: 0 var(--sp-2); font-size: var(--fs-0); }
+.pre-ref-eg { color: var(--text-muted); }
+
 /* designed empty states */
 .empty {
   margin: var(--sp-6) auto;
@@ -695,6 +717,14 @@ td .btn.copy-btn { min-height: var(--hit); }
   min-height: 24px;
 }
 .wi-unknown-var .btn { margin-left: auto; min-height: 22px; font-size: var(--fs-0); padding: 0 var(--sp-2); }
+/* the tooltip wrapper must not clip: overflow-hidden on a [data-tip]
+   element would swallow its own tooltip, so the ellipsis lives one level in */
+.wi-unknown-var .pre-doc { min-width: 0; }
+.wi-unknown-var .pre-doc .clip { display: block; }
+/* these names hug the viewport's left edge — a centered tooltip would
+   escape it, so left-align the tooltip instead */
+.wi-unknown-var .pre-doc:hover::after,
+.wi-unknown-var .pre-doc:focus-visible::after { left: 0; transform: none; }
 
 .wi-banner-strip { margin-bottom: var(--sp-3); }
 .wi-banner-strip .diag-item { max-width: none; }
@@ -1149,6 +1179,29 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   const whatifAvailable = !!(WHATIF && typeof PipeviewWhatIf !== 'undefined');
   if (whatifAvailable) document.getElementById('tab-whatif').hidden = false;
 
+  // Predefined-variable documentation (GitLab reports only, presence-based).
+  // A name with no catalog entry keeps the generic honest wording everywhere —
+  // the report never invents a description.
+  const PRE_DOCS = (REPORT.annotations || {}).predefined_var_docs || {};
+  function preDocTip(name) {
+    const d = PRE_DOCS[name];
+    if (!d) return null;
+    return d.summary + ' E.g. "' + d.example + '". Set: ' + d.set_when
+      + (d.unset_when ? '; unset: ' + d.unset_when : '') + '.';
+  }
+  // Wraps already-escaped inner HTML in a docs tooltip when the catalog
+  // knows the name; otherwise returns the inner HTML untouched.
+  function preDocWrap(name, innerHtml) {
+    const tip = preDocTip(name);
+    if (!tip) return innerHtml;
+    return '<span class="pre-doc" data-tip="' + esc(tip) + '">' + innerHtml + '</span>';
+  }
+  // Every name referenced in a rules/workflow expression of this
+  // configuration ($VAR in scripts lands in REPORT.variables instead).
+  const RULE_EXPR_VARS = new Set(
+    (WHATIF && typeof PipeviewWhatIf !== 'undefined')
+      ? PipeviewWhatIf.collectExpressionVariables(REPORT) : []);
+
   const tabs = Array.from(document.querySelectorAll('.tab')).filter(t => !t.hidden);
   const views = Array.from(document.querySelectorAll('.view'));
   const viewScroll = {};   // per-view scroll memory
@@ -1530,8 +1583,19 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
         + 'Never assigned in the parsed files — make supplies a built-in default for this variable.</div></div>';
     } else if (v.origin === 'predefined') {
-      html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
-        + 'A GitLab predefined variable: the runner provides its value for every job.</div></div>';
+      const d = PRE_DOCS[v.name];
+      if (d) {
+        html += '<div class="panel-section"><h3>Predefined by GitLab</h3>'
+          + '<div class="value wrap-any">' + esc(d.summary) + '</div>'
+          + '<div class="codeblock soft-wrap">e.g. ' + esc(d.example) + '</div>'
+          + '<div class="tl-note">GitLab sets it: ' + esc(d.set_when) + '.</div>'
+          + (d.unset_when ? '<div class="tl-note">Unset: ' + esc(d.unset_when) + '.</div>' : '')
+          + (d.note ? '<div class="tl-note">' + esc(d.note) + '</div>' : '')
+          + '</div>';
+      } else {
+        html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
+          + 'A GitLab predefined variable: the runner provides its value for every job.</div></div>';
+      }
     } else if (v.origin === 'environment') {
       html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
         + 'The value comes from the environment make runs in.</div></div>';
@@ -1990,6 +2054,74 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     return effectiveValue(v.events[v.events.length - 1]);
   }
 
+  /* Predefined-variables reference (GitLab reports only): the whole catalog,
+     collapsed below the table. Names referenced in this configuration sort
+     first and link back to their variable row. */
+  let preRefOpen = false;
+  let preRefFilter = '';
+
+  function preRefEntriesHtml() {
+    // referenced names first: in scripts (clickable — the variable has a
+    // row) or in rules expressions; then the rest, all alphabetical
+    const usedRank = n => (varMap[n] ? 2 : RULE_EXPR_VARS.has(n) ? 1 : 0);
+    let names = Object.keys(PRE_DOCS)
+      .sort((a, b) => usedRank(b) - usedRank(a) || a.localeCompare(b));
+    if (preRefFilter) names = names.filter(n => n.toLowerCase().includes(preRefFilter));
+    if (!names.length) {
+      return '<div class="tl-note">No predefined variable name contains “'
+        + esc(preRefFilter) + '”.</div>';
+    }
+    return names.map(n => {
+      const d = PRE_DOCS[n];
+      return '<div class="pre-ref-entry">'
+        + '<div class="pre-ref-head"><code>' + esc(n) + '</code>'
+        + (varMap[n]
+            ? '<button class="btn pre-ref-jump" data-var="' + esc(n)
+              + '" data-tip="Referenced in this configuration — open its detail">used here</button>'
+            : RULE_EXPR_VARS.has(n)
+            ? '<span class="chip chip-info" data-tip="Referenced in rules/workflow expressions of this configuration — see the What-If tab">in rules</span>'
+            : '')
+        + '</div>'
+        + '<div class="value wrap-any">' + esc(d.summary)
+        + ' <span class="pre-ref-eg">e.g. <code>' + esc(d.example) + '</code></span></div>'
+        + '<div class="tl-note">Set: ' + esc(d.set_when)
+        + (d.unset_when ? ' · unset: ' + esc(d.unset_when) : '') + '</div>'
+        + (d.note ? '<div class="tl-note">' + esc(d.note) + '</div>' : '')
+        + '</div>';
+    }).join('');
+  }
+
+  function preRefSectionHtml() {
+    const count = Object.keys(PRE_DOCS).length;
+    if (!count) return '';
+    return '<details class="pre-ref" id="pre-ref"' + (preRefOpen ? ' open' : '') + '>'
+      + '<summary>GitLab predefined variables reference (' + count + ')</summary>'
+      + '<div class="legend-note">What GitLab itself supplies to jobs: what each '
+      + 'variable is, an example value, and when it is set. Values shown are '
+      + 'illustrations, not this pipeline’s values.</div>'
+      + '<input type="text" class="input" id="pre-ref-filter" placeholder="Filter by name…"'
+      + ' aria-label="Filter predefined variables" value="' + esc(preRefFilter) + '">'
+      + '<div id="pre-ref-list">' + preRefEntriesHtml() + '</div></details>';
+  }
+
+  function wirePreRefJumps() {
+    variablesBody.querySelectorAll('.pre-ref-jump').forEach(btn =>
+      btn.addEventListener('click', () => showVarDetail(btn.dataset.var)));
+  }
+
+  function wirePreRef() {
+    const det = document.getElementById('pre-ref');
+    if (!det) return;
+    det.addEventListener('toggle', () => { preRefOpen = det.open; });
+    document.getElementById('pre-ref-filter').addEventListener('input', e => {
+      preRefFilter = e.target.value.toLowerCase().trim();
+      // re-render only the list so the filter input keeps focus
+      document.getElementById('pre-ref-list').innerHTML = preRefEntriesHtml();
+      wirePreRefJumps();
+    });
+    wirePreRefJumps();
+  }
+
   function renderVariables() {
     document.getElementById('variables-note').textContent = REPORT.variables.length
       ? REPORT.variables.length + ' variable' + (REPORT.variables.length === 1 ? '' : 's')
@@ -1997,7 +2129,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     if (!REPORT.variables.length) {
       variablesBody.innerHTML = '<div class="empty"><div class="empty-title">No variables found</div>'
         + '<p>This pipeline defines no variables in the parsed files. Values may still arrive '
-        + 'from the environment at run time.</p></div>';
+        + 'from the environment at run time.</p></div>' + preRefSectionHtml();
+      wirePreRef();
       return;
     }
     let rows = REPORT.variables.slice();
@@ -2029,10 +2162,13 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     rows.forEach(v => {
       const val = varCurrentValue(v);
       // A variable make/GitLab itself supplies is not "unresolved" — its
-      // origin chip says where the value actually comes from.
+      // origin chip says where the value actually comes from. Predefined
+      // GitLab variables with a catalog entry get their own summary.
+      const originTip = v.origin === 'predefined' && preDocTip(v.name)
+        ? preDocTip(v.name) : (ORIGIN_TIPS[v.origin] || 'value supplied by the tool');
       const valCell = val == null
         ? (v.origin
-            ? '<span class="chip chip-info" data-tip="' + esc(ORIGIN_TIPS[v.origin] || 'value supplied by the tool') + '">' + esc(v.origin) + '</span>'
+            ? '<span class="chip chip-info" data-tip="' + esc(originTip) + '">' + esc(v.origin) + '</span>'
             : '<span class="chip chip-warn" data-tip="No assignment found in the parsed files; the value likely arrives from the environment at run time">unresolved</span>')
         : '<span class="clip" style="display:block" title="' + esc(val) + '"><code>' + esc(val) + '</code></span>';
       const nameChips =
@@ -2053,7 +2189,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         + '<p>No variable name contains “' + esc(varFilter) + '”. Clear the filter to see all '
         + REPORT.variables.length + ' variables.</p></div>';
     }
+    html += preRefSectionHtml();
     variablesBody.innerHTML = html;
+    wirePreRef();
 
     variablesBody.querySelectorAll('tr[data-var]').forEach(tr => {
       const open = () => { markRowSelected(tr); showVarDetail(tr.dataset.var); };
@@ -2469,8 +2607,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
 
   /* ---------------- variables panel: three honest buckets ---------------- */
 
-  const wiExprVars = whatifAvailable
-    ? PipeviewWhatIf.collectExpressionVariables(REPORT) : [];
+  const wiExprVars = Array.from(RULE_EXPR_VARS);   // sorted at collection
 
   function wiUpdateUnknownVars(result) {
     const box = document.getElementById('wi-unknown-list');
@@ -2506,10 +2643,16 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       else nowhere.push(name);
     });
 
-    const rows = (names, btn) => names.map(name =>
-      '<div class="wi-unknown-var"><span class="clip" title="' + esc(name) + '">'
-      + esc(name) + '</span><button class="btn wi-set-var" data-var="'
-      + esc(name) + '">' + btn + '</button></div>').join('');
+    const rows = (names, btn) => names.map(name => {
+      const tip = preDocTip(name);
+      const label = tip
+        ? '<span class="pre-doc" data-tip="' + esc(name + ' — ' + tip) + '">'
+          + '<span class="clip">' + esc(name) + '</span></span>'
+        : '<span class="clip" title="' + esc(name) + '">' + esc(name) + '</span>';
+      return '<div class="wi-unknown-var">' + label
+        + '<button class="btn wi-set-var" data-var="'
+        + esc(name) + '">' + btn + '</button></div>';
+    }).join('');
     let html = '';
     if (runtime.length) {
       html += '<div class="legend-note" style="margin-top:var(--sp-2)">'
@@ -2731,7 +2874,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         : Object.prototype.hasOwnProperty.call(fwdVars, name) ? 'forwarded'
         : Object.prototype.hasOwnProperty.call(wfVars, name) ? 'workflow'
         : Object.prototype.hasOwnProperty.call(globalsFor, name) ? 'YAML' : 'predefined';
-      return '<tr><td><code>' + esc(name) + '</code></td>'
+      const nameHtml = origin === 'predefined'
+        ? preDocWrap(name, '<code>' + esc(name) + '</code>')
+        : '<code>' + esc(name) + '</code>';
+      return '<tr><td>' + nameHtml + '</td>'
         + '<td class="wrap-any"><code>' + esc(merged[name]) + '</code></td>'
         + '<td><span class="chip">' + origin + '</span></td></tr>';
     });
@@ -2922,7 +3068,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   function wiVarsLine(vars) {
     if (!vars || !vars.length) return '';
     return '<div class="tl-note">' + vars.map(v =>
-      '$' + esc(v.name) + (v.runtime
+      preDocWrap(v.name, '$' + esc(v.name)) + (v.runtime
         ? ' = set at runtime (not simulated)'
         : v.value === null ? ' is unset'
         : ' = "' + esc(v.value) + '"')).join(' · ') + '</div>';

@@ -100,7 +100,10 @@ The generated report is a single self-contained HTML file with four views
 3. **Variable Explorer** — Searchable table of all variables with event
    timelines showing where each was defined, overridden, or appended, with
    scope and file:line. Recipe text renders `$(VAR)` references as clickable
-   links.
+   links. For GitLab CI, predefined `CI_*`/`GITLAB_*` variables carry curated
+   docs — what each is, an example value, and when GitLab sets it — and a
+   collapsible reference below the table documents the whole catalog, with
+   the names this configuration references sorted first.
 
 4. **File Map** — Tree of source files with include/recursion structure,
    per-file status, and all diagnostics.
@@ -120,7 +123,9 @@ The generated report is a single self-contained HTML file with four views
    changed-files list, variables defined nowhere) is shown as
    *depends* — never guessed. The simulated world assumes protected
    `main` and `dev` branches; every other branch is a generic unprotected
-   feature branch.
+   feature branch. Predefined variable names throughout the tab carry
+   documentation tooltips (what the variable is, an example value, and when
+   GitLab sets it).
 
 ## The `##` docstring convention
 

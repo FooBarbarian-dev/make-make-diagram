@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+GitLab CI **predefined-variable docs** (see
+`docs/superpowers/specs/2026-08-19-gitlab-predefined-variable-docs-design.md`).
+GitLab reports now explain the `CI_*`/`GITLAB_*` variables they surface —
+what each is, an example value, and when GitLab sets (or notably unsets) it.
+
+- New curated catalog `pipeview/parsers/gitlab_predefined.py` (~100
+  entries: summary, example, set/unset conditions, documented gotchas),
+  embedded whole in `report.annotations["predefined_var_docs"]` and
+  therefore in `model.json`. Additive — schema stays v3; Make reports are
+  untouched.
+- Variable Explorer: predefined variables get their own summary on the
+  origin chip and a full docs block in the detail panel; a collapsible
+  "GitLab predefined variables reference" below the table lists the whole
+  catalog with a filter. Names referenced in this configuration sort
+  first — "used here" links back to the variable's row, "in rules" marks
+  rules/workflow-expression references.
+- What-If tab: predefined names in the per-pipeline "variables in effect"
+  table, the rule-by-rule traces, and the unknown-variables panel carry
+  documentation tooltips (dotted underline = hover for what this is).
+- Docs can never contradict the simulator: a test scans the shipped
+  templates and fails on any predefined name without a catalog entry;
+  entries restate the simulator's verified facts; examples are always
+  labeled "e.g."; names outside the catalog keep the generic honest
+  wording, never an invented description.
+
 GitLab CI **What-If simulation** (see
 `docs/superpowers/specs/2026-08-18-gitlab-what-if-design.md`). Model schema
 bumped to v3 (`Node.annotations["whatif"]`, `Report.annotations["whatif"]`);
