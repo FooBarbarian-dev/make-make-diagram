@@ -800,6 +800,23 @@ td .btn.copy-btn { min-height: var(--hit); }
 .wi-node.wi-dup rect { stroke-width: 2.75; }
 .wi-node.wi-dup .wi-dup-badge { fill: var(--warn); }
 .wi-node.wi-hl rect { stroke: var(--accent); stroke-width: 3; }
+/* delta mode: the diff class outranks the state class */
+.wi-node.d-added rect { stroke: var(--ok); stroke-width: 2.5; stroke-dasharray: none; }
+.wi-node.d-removed { opacity: 0.55; }
+.wi-node.d-removed rect { stroke: var(--error); stroke-dasharray: 5 3; }
+.wi-node.d-removed text { text-decoration: line-through; }
+.wi-node.d-changed rect { stroke: var(--warn); stroke-width: 2.5; stroke-dasharray: none; }
+.wi-text { margin-bottom: var(--sp-3); font-size: var(--fs-0); }
+.wi-text summary { cursor: pointer; color: var(--text-muted); min-height: 24px; user-select: none; }
+.wi-text summary:hover { color: var(--text); }
+.wi-text pre {
+  margin-top: var(--sp-1); padding: var(--sp-2) var(--sp-3);
+  background: var(--surface-sunken); border: 1px solid var(--border);
+  border-radius: 6px; overflow-x: auto;
+  font-family: var(--font-mono); font-size: var(--fs-0); line-height: 1.5;
+  user-select: text; cursor: text;
+}
+#wi-pin-baseline.wi-pinned { border-color: var(--accent); color: var(--accent); }
 .wi-edge { fill: none; stroke: var(--edge-needs); stroke-width: 1.4; }
 .wi-edge.kind-stage_order { stroke: var(--edge-stage-order); stroke-dasharray: 4 4; opacity: 0.6; }
 
@@ -976,6 +993,10 @@ kbd {
         <span class="toolbar-note"
           data-tip="The simulation shows what GitLab would PROBABLY do. Unknowns are shown as 'depends', never guessed. Assumed world: branches main and dev exist and are protected; other branches are unprotected.">
           probable behavior — hover for assumptions</span>
+        <button class="btn" id="wi-copy-text"
+          data-tip="Copy the plain-text job listing (or the delta when a baseline is pinned)">Copy text</button>
+        <button class="btn" id="wi-pin-baseline"
+          data-tip="Freeze the current scenario as a baseline, then change any knob — the scenario preset included — to see what the change adds, removes, or alters">Pin as baseline</button>
         <label class="legend-item" style="min-height:0">
           <input type="checkbox" id="wi-show-skipped" checked>
           <span>show skipped jobs</span>
@@ -2751,6 +2772,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   let wiDupSet = new Set();
   let wiLastResult = null;
   let wiRenderTimer = null;
+  let wiBaseline = null;      // {config, result, label} — delta mode while set
+  let wiCopyText = '';        // what the Copy text button copies
+  let wiTextOpen = false;     // the plain-text <details> survives re-renders
 
   const wiMight = res => whatifAvailable && PipeviewWhatIf.mightRun(res);
 
@@ -3341,9 +3365,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
 
   function renderWiResults() {
     if (!whatifAvailable) return;
+    const cfg = wiConfig();
     let result;
     try {
-      result = PipeviewWhatIf.evaluateEvent(REPORT, wiConfig());
+      result = PipeviewWhatIf.evaluateEvent(REPORT, cfg);
     } catch (err) {
       wiResults.innerHTML = '<div class="empty"><div class="empty-title">Simulation failed</div><p>'
         + esc(String(err)) + '</p></div>';
@@ -3351,6 +3376,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }
     wiLastResult = result;
     wiDupSet = new Set(result.duplicates.map(d => d.job));
+    if (wiBaseline) { renderWiDelta(result, cfg); return; }
     const fatal = result.fatal || [];
     wiFatalActive = fatal.length > 0;
     const topCountEarly = result.candidates.length;
@@ -3414,12 +3440,32 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + (wiFatalActive ? ' (configuration invalid)'
          : nested ? ' (' + nested + ' nested)' : '');
 
+    wiCopyText = PipeviewWhatIf.textSummary(REPORT, result, cfg);
     wiResults.innerHTML = legend
       + (strip.length ? '<div class="wi-banner-strip">' + strip.join('') + '</div>' : '')
+      + wiTextBlock('plain-text job listing (for copy/paste)')
       + result.candidates.map(renderWiPipeline).join('');
+    wiFillTextBlock();
+    wireWiNodes();
+    wiUpdateUnknownVars(result);
+  }
 
+  function wiTextBlock(title) {
+    return '<details class="wi-text" id="wi-text-details"' + (wiTextOpen ? ' open' : '')
+      + '><summary>' + esc(title) + '</summary><pre id="wi-text-pre"></pre></details>';
+  }
+
+  // textContent, not innerHTML — the listing is verbatim text
+  function wiFillTextBlock() {
+    const pre = document.getElementById('wi-text-pre');
+    if (pre) pre.textContent = wiCopyText;
+    const det = document.getElementById('wi-text-details');
+    if (det) det.addEventListener('toggle', () => { wiTextOpen = det.open; });
+  }
+
+  function wireWiNodes() {
     wiResults.querySelectorAll('.wi-node').forEach(el => {
-      const open = () => showWiJobDetail(el.dataset.job, el.dataset.cand);
+      const open = () => showWiJobDetail(el.dataset.job, el.dataset.cand, el.dataset.side);
       el.addEventListener('click', ev => { ev.stopPropagation(); open(); });
       el.addEventListener('keydown', ev => {
         if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); open(); }
@@ -3427,7 +3473,183 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       el.addEventListener('mouseenter', () => wiHighlight(el.dataset.job, true));
       el.addEventListener('mouseleave', () => wiHighlight(el.dataset.job, false));
     });
+  }
+
+  /* ---------------- delta mode (a baseline is pinned) ---------------- */
+
+  function renderWiDelta(result, cfg) {
+    const curLabel = PipeviewWhatIf.describeConfig(cfg);
+    const diff = PipeviewWhatIf.diffEvents(wiBaseline.result, result);
+    wiCopyText = PipeviewWhatIf.textDiff(REPORT, diff, wiBaseline.label, curLabel);
+    const c = diff.counts;
+    const identical = !c.added && !c.removed && !c.changed;
+
+    document.getElementById('count-whatif').textContent =
+      ' Δ' + (c.added + c.removed + c.changed);
+    wiNoteEl.textContent = 'delta vs baseline · ' + c.added + ' added · '
+      + c.removed + ' removed · ' + c.changed + ' changed';
+
+    const legend = '<div class="wi-legend">'
+      + wiLegendChip('var(--ok)', 'solid', 'added')
+      + wiLegendChip('var(--error)', 'dashed', 'removed')
+      + wiLegendChip('var(--warn)', 'solid', 'state changed')
+      + '<span class="chip">unchanged</span>'
+      + '</div>';
+
+    const strip = [];
+    if ((result.fatal || []).length) {
+      strip.push(wiDiag('error',
+        '<b>Invalid configuration — GitLab refuses to create ANY pipeline:</b><br>'
+        + result.fatal.map(f => esc(f.message)).join('<br>')));
+    }
+    strip.push(wiDiag('info', '<b>Comparing against the pinned baseline.</b><br>'
+      + 'baseline: ' + esc(wiBaseline.label) + '<br>'
+      + 'current: ' + esc(curLabel) + '<br>'
+      + (identical
+          ? '<b>no differences</b> — both configurations run the same jobs the same way'
+          : c.added + ' added, ' + c.removed + ' removed, ' + c.changed
+            + ' changed, ' + c.same + ' unchanged')));
+
+    wiResults.innerHTML = legend
+      + '<div class="wi-banner-strip">' + strip.join('') + '</div>'
+      + wiTextBlock('plain-text delta (for copy/paste)')
+      + diff.pairs.map(renderWiDeltaPair).join('');
+    wiFillTextBlock();
+    wireWiNodes();
     wiUpdateUnknownVars(result);
+  }
+
+  function renderWiDeltaPair(pair) {
+    const cand = pair.b || pair.a;
+    let title = esc(cand.label);
+    let chips = '<span class="chip">' + esc(cand.source) + '</span>'
+      + '<span class="chip" style="font-family:var(--font-mono)">' + esc(cand.ref) + '</span>';
+    if (pair.a && pair.b
+        && (pair.a.label !== pair.b.label || pair.a.ref !== pair.b.ref)) {
+      title = esc(pair.a.label) + ' → ' + esc(pair.b.label);
+      chips = '<span class="chip">' + esc(pair.a.source) + ' → ' + esc(pair.b.source) + '</span>'
+        + '<span class="chip" style="font-family:var(--font-mono)">'
+        + esc(pair.a.ref) + ' → ' + esc(pair.b.ref) + '</span>';
+    }
+    if (!pair.a) chips += '<span class="chip chip-ok">pipeline added</span>';
+    else if (!pair.b) chips += '<span class="chip chip-error">pipeline removed</span>';
+    const sideChip = (cnd, side) => {
+      if (!cnd) return '';
+      if (cnd.created === false) {
+        return '<span class="chip chip-error" data-tip="' + esc(cnd.reason || '')
+          + '">' + side + ': not created</span>';
+      }
+      if (cnd.creationFails) {
+        return '<span class="chip chip-error">' + side + ': creation fails</span>';
+      }
+      if (cnd.created === null) {
+        return '<span class="chip chip-info" data-tip="' + esc(cnd.reason || '')
+          + '">' + side + ': depends</span>';
+      }
+      return '';
+    };
+    chips += sideChip(pair.a, 'baseline') + sideChip(pair.b, 'current');
+    return '<section class="wi-pipeline">'
+      + '<div class="wi-pipe-head"><span class="wi-pipe-title">' + title
+      + '</span>' + chips + '</div>'
+      + wiDeltaGraphSvg(pair)
+      + '</section>';
+  }
+
+  // Union edges: each side's edges over its own might-run set (so
+  // stage-order fallbacks stay true to that side's pipeline), deduped.
+  function wiDeltaEdges(pair) {
+    const seen = new Set(), out = [];
+    const addSide = cnd => {
+      if (!cnd || cnd.created === false || cnd.creationFails) return;
+      const ids = pair.ids.filter(id => cnd.jobs[id] && wiMight(cnd.jobs[id]));
+      const idSet = new Set(ids);
+      wiEdgesFor(cnd, ids, idSet).forEach(e => {
+        const k = e.src + '|' + e.dst + '|' + e.kind;
+        if (!seen.has(k)) { seen.add(k); out.push(e); }
+      });
+    };
+    addSide(pair.b);
+    addSide(pair.a);
+    return out;
+  }
+
+  function wiDeltaGraphSvg(pair) {
+    const ids = pair.ids;
+    if (!ids.length) {
+      return '<div class="wi-pipe-reason">No jobs would run on either side.</div>';
+    }
+    if (typeof dagre === 'undefined') {
+      return '<div class="wi-pipe-reason">' + ids.map(id => esc(nodeMap[id].name)).join(' · ')
+        + '</div>';
+    }
+    const stLabel = o => {
+      let t = o.when === 'on_failure'
+        ? 'on failure only' : (WI_STATE_LABEL[o.state] || o.state);
+      if (o.matrixCount) t += ' ×' + o.matrixCount;
+      return t;
+    };
+    const g = new dagre.graphlib.Graph();
+    g.setGraph({ rankdir: 'LR', nodesep: 18, ranksep: 48, marginx: 14, marginy: 14 });
+    g.setDefaultEdgeLabel(() => ({}));
+    ids.forEach(id => {
+      const d = pair.deltas[id];
+      const aOut = pair.a ? pair.a.jobs[id] : null;
+      const bOut = pair.b ? pair.b.jobs[id] : null;
+      const label = midTrunc(nodeMap[id].name, 24);
+      let sub;
+      if (d === 'added') sub = 'added · ' + stLabel(bOut);
+      else if (d === 'removed') sub = 'removed · was ' + stLabel(aOut);
+      else if (d === 'changed') sub = stLabel(aOut) + ' → ' + stLabel(bOut);
+      else sub = nodeMap[id].annotations.whatif.stage + ' · ' + stLabel(bOut);
+      g.setNode(id, {
+        label, sub,
+        width: Math.max(92, Math.max(label.length * 6.8, sub.length * 5.4) + 24),
+        height: 42
+      });
+    });
+    wiDeltaEdges(pair).forEach(e => g.setEdge(e.dst, e.src, { kind: e.kind }));
+    dagre.layout(g);
+    const gr = g.graph();
+    const w = Math.max(gr.width || 200, 60), h = Math.max(gr.height || 80, 60);
+    const marker = 'wi-arrow-' + wiSafeId('d-' + pair.key);
+
+    let svg = '<svg width="' + w + '" height="' + h + '" role="img" aria-label="'
+      + esc((pair.b || pair.a).label) + ' delta">'
+      + '<defs><marker id="' + marker + '" markerWidth="9" markerHeight="7" refX="8" refY="3.5"'
+      + ' orient="auto" markerUnits="userSpaceOnUse">'
+      + '<polygon points="0 0,8 3.5,0 7" fill="var(--edge-needs)"/></marker></defs>';
+
+    g.edges().forEach(e => {
+      const edge = g.edge(e);
+      const pts = edge.points || [];
+      if (pts.length < 2) return;
+      let d = 'M' + pts[0].x + ',' + pts[0].y;
+      for (let i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ',' + pts[i].y;
+      svg += '<path class="wi-edge kind-' + edge.kind + '" d="' + d
+        + '" marker-end="url(#' + marker + ')"/>';
+    });
+
+    g.nodes().forEach(id => {
+      const lo = g.node(id);
+      if (!lo) return;
+      const d = pair.deltas[id];
+      // detail panel prefers the side where the job still runs
+      const side = pair.b && pair.b.jobs[id] && wiMight(pair.b.jobs[id]) ? 'cur' : 'base';
+      const cnd = side === 'cur' ? pair.b : pair.a;
+      const res = cnd.jobs[id];
+      const x = lo.x - lo.width / 2, y = lo.y - lo.height / 2;
+      svg += '<g class="wi-node st-' + res.state + (d !== 'same' ? ' d-' + d : '')
+        + '" data-job="' + esc(id) + '" data-cand="' + esc(cnd.id)
+        + '" data-side="' + side + '" tabindex="0">'
+        + '<title>' + esc(nodeMap[id].name) + ' — ' + esc(lo.sub) + '</title>'
+        + '<rect x="' + x + '" y="' + y + '" width="' + lo.width + '" height="' + lo.height + '" rx="5"/>'
+        + '<text x="' + lo.x + '" y="' + lo.y + '" text-anchor="middle">' + esc(lo.label) + '</text>'
+        + '<text class="wi-state-label" x="' + lo.x + '" y="' + (lo.y + 14) + '" text-anchor="middle">'
+        + esc(lo.sub) + '</text>'
+        + '</g>';
+    });
+    return '<div class="wi-graph">' + svg + '</svg></div>';
   }
 
   function wiHighlight(jobId, on) {
@@ -3436,7 +3658,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     });
   }
 
-  function wiFindCandidate(candId) {
+  function wiFindCandidate(candId, fromBaseline) {
     function walk(list) {
       for (const c of (list || [])) {
         if (c.id === candId) return c;
@@ -3445,7 +3667,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       }
       return null;
     }
-    return wiLastResult ? walk(wiLastResult.candidates) : null;
+    const result = fromBaseline ? (wiBaseline && wiBaseline.result) : wiLastResult;
+    return result ? walk(result.candidates) : null;
   }
 
   function wiVarsLine(vars) {
@@ -3480,9 +3703,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }).join('') + '</ol>';
   }
 
-  function showWiJobDetail(jobId, candId) {
+  function showWiJobDetail(jobId, candId, side) {
     const node = nodeMap[jobId];
-    const cand = wiFindCandidate(candId);
+    const fromBaseline = side === 'base';
+    const cand = wiFindCandidate(candId, fromBaseline);
     if (!node || !cand) return;
     const res = cand.jobs[jobId];
     openPanel();
@@ -3496,6 +3720,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
           : (WI_STATE_LABEL[res.state] || res.state)) + '</span>'
       + (stage ? '<span class="chip" data-tip="stage">' + esc(stage) + '</span>' : '')
       + '<span class="chip">' + esc(cand.label) + '</span>'
+      + (fromBaseline
+          ? '<span class="chip chip-info" data-tip="Outcome in the pinned baseline scenario, not the current one">baseline</span>'
+          : '')
       + (wiDupSet.has(jobId)
           ? '<span class="chip chip-warn" data-tip="This job may run in more than one pipeline spawned by the same event">duplicate</span>'
           : '')
@@ -3552,8 +3779,75 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     if (btn) btn.addEventListener('click', () => showNodeDetail(jobId));
   }
 
+  const wiCopyBtn = document.getElementById('wi-copy-text');
+  const wiPinBtn = document.getElementById('wi-pin-baseline');
+
+  // Clipboard fallback for browsers where the async API is unavailable or
+  // denied on file:// — and if even that fails, select the visible text so
+  // a manual Ctrl+C finishes the job.
+  function wiCopyFallback(text) {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (err) { /* stays false */ }
+    document.body.removeChild(ta);
+    return ok;
+  }
+
+  function wiSelectText() {
+    const det = document.getElementById('wi-text-details');
+    if (det) { det.open = true; wiTextOpen = true; }
+    const pre = document.getElementById('wi-text-pre');
+    if (!pre) return;
+    const range = document.createRange();
+    range.selectNodeContents(pre);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  function wiUpdatePinBtn() {
+    wiPinBtn.textContent = wiBaseline ? 'Unpin baseline' : 'Pin as baseline';
+    wiPinBtn.classList.toggle('wi-pinned', !!wiBaseline);
+  }
+
   if (whatifAvailable) {
     wiShowSkippedEl.addEventListener('change', renderWiResults);
+    wiCopyBtn.addEventListener('click', () => {
+      const done = ok => {
+        wiCopyBtn.textContent = ok ? 'Copied ✓' : 'Select + Ctrl+C';
+        if (!ok) wiSelectText();
+        setTimeout(() => { wiCopyBtn.textContent = 'Copy text'; }, 1800);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(wiCopyText)
+          .then(() => done(true), () => done(wiCopyFallback(wiCopyText)));
+      } else {
+        done(wiCopyFallback(wiCopyText));
+      }
+    });
+    wiPinBtn.addEventListener('click', () => {
+      if (wiBaseline) {
+        wiBaseline = null;
+      } else {
+        const cfg = wiConfig();
+        try {
+          wiBaseline = {
+            config: cfg,
+            result: PipeviewWhatIf.evaluateEvent(REPORT, cfg),
+            label: PipeviewWhatIf.describeConfig(cfg)
+          };
+        } catch (err) {
+          wiBaseline = null;
+        }
+      }
+      wiUpdatePinBtn();
+      renderWiResults();
+    });
     renderWiControls();
     renderWiResults();
   }

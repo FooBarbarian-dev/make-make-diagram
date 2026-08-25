@@ -2,6 +2,31 @@
 
 ## Unreleased
 
+**What-If: copy/paste job listing + trigger delta comparison** (see
+`docs/superpowers/specs/2026-08-25-whatif-text-listing-and-delta-design.md`).
+
+- **Plain-text job listing**: every What-If evaluation renders a
+  collapsible text block — one section per candidate pipeline (children
+  indented) listing the jobs that would run with stage and verdict, a
+  self-describing event header, and a duplicate-jobs footer. A **Copy
+  text** toolbar button copies it (async clipboard API with a
+  hidden-textarea fallback; if both fail the text is selected for a
+  manual Ctrl+C).
+- **Pin as baseline → delta view**: freeze the current scenario, then
+  change any knob — the event preset included — and the results column
+  shows the delta. Per-pipeline diff graphs (MR-type candidates match
+  MR-type, non-MR match non-MR, children by trigger job + file): added
+  jobs green, removed red-dashed, verdict changes amber with a
+  `runs → manual gate` sub-label; unmatched pipelines are flagged whole.
+  The text block switches to a `+ / - / ~ / =` job-level diff (which the
+  Copy button picks up), and "same verdict but now in 2 pipelines
+  instead of 1" — the duplicate-pipeline case — counts as changed.
+- The logic ships as DOM-free helpers in the inlined evaluator
+  (`textSummary`, `diffEvents`, `textDiff`, `describeConfig`), pinned by
+  a new node-driven suite (`tests/test_whatif_textdiff.py`) on the
+  existing fixtures. Candidate results now also carry the MR `target`
+  ref so listings can say `feature/widget → main`.
+
 **Cross-project pipeline links + tracked-set rollup** (see
 `docs/superpowers/specs/2026-08-25-upstream-downstream-rollup-design.md`).
 `pipeview gitlab sync` now sees across the tracked set: references

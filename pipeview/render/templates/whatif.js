@@ -1223,7 +1223,8 @@ var PipeviewWhatIf = (function () {
 
     return {
       id: candidate.id, label: candidate.label, source: candidate.source,
-      ref: candidate.ref, refType: candidate.refType, childOf: candidate.childOf || null,
+      ref: candidate.ref, refType: candidate.refType, target: candidate.target || null,
+      childOf: candidate.childOf || null,
       parentJob: candidate.parentJob || null,
       parentConditional: candidate.parentConditional || false,
       created: created, reason: reason, creationFails: creationFails,
@@ -1314,6 +1315,311 @@ var PipeviewWhatIf = (function () {
     return Object.keys(out).sort();
   }
 
+  /* ---------------- plain-text listing + scenario delta ---------------- */
+
+  var SCENARIO_LABEL = {
+    push_branch: 'Push to a branch', push_tag: 'Push a new tag',
+    mr: 'MR created / "Run pipeline" on MR', schedule: 'Scheduled run',
+    web: 'Manual run (web UI)', api: 'API pipeline', trigger: 'Trigger token'
+  };
+
+  // One line that makes a pasted listing self-describing: scenario, ref,
+  // MR knobs, changed-files assumption, variable overrides.
+  function describeConfig(config) {
+    var parts = [SCENARIO_LABEL[config.scenario] || config.scenario];
+    var onTag = config.scenario === 'push_tag' || config.refKind === 'tag';
+    if (config.scenario === 'mr') {
+      parts.push('MR ' + config.branch + ' → ' + (config.target || 'main')
+        + (config.draft ? ' (draft)' : ''));
+    } else if (onTag) {
+      parts.push('tag ' + (config.tag || 'v1.0.0')
+        + (config.tagProtected ? ' (protected)' : ''));
+    } else {
+      parts.push('branch ' + config.branch + (config.newBranch ? ' (new)' : ''));
+      if (config.openMR) {
+        parts.push('open MR → ' + (config.target || 'main')
+          + (config.draft ? ' (draft)' : ''));
+      }
+    }
+    if (config.changedFiles === 'all') {
+      parts.push('changed files: every pattern matches');
+    } else if (Array.isArray(config.changedFiles)) {
+      parts.push(config.changedFiles.length
+        ? 'changed files: ' + config.changedFiles.join(', ')
+        : 'changed files: none match');
+    }
+    var ov = Object.keys(config.overrides || {}).sort();
+    if (ov.length) {
+      parts.push('variables: ' + ov.map(function (n) {
+        return n + '="' + config.overrides[n] + '"';
+      }).join(', '));
+    }
+    return parts.join(' — ');
+  }
+
+  function outcomeText(out) {
+    if (!out) return 'not evaluated';
+    var t;
+    if (out.state === 'runs') {
+      t = out.when === 'on_failure' ? 'runs only after an earlier job fails'
+        : out.when === 'always' ? 'runs (when: always)' : 'runs';
+    } else if (out.state === 'manual') {
+      t = 'manual ' + (out.allow_failure === false ? '(blocking)' : '(optional)');
+    } else if (out.state === 'delayed') {
+      t = 'delayed' + (out.start_in ? ' ' + out.start_in : '');
+    } else if (out.state === 'conditional') {
+      t = 'depends: ' + (out.condition || 'unknown condition');
+    } else if (out.state === 'skipped') {
+      t = 'skipped (when: never)';
+    } else {
+      t = 'not added';
+    }
+    if (out.matrixPartial && out.matrix) {
+      var r = out.matrix.filter(function (m) {
+        return ['runs', 'manual', 'delayed', 'conditional'].indexOf(m.state) >= 0;
+      }).length;
+      t += ' [' + r + '/' + out.matrix.length + ' matrix instances]';
+    } else if (out.matrixCount) {
+      t += ' ×' + out.matrixCount;
+    }
+    return t;
+  }
+
+  function jobMeta(report) {
+    var names = {}, stages = {};
+    (report.nodes || []).forEach(function (n) {
+      var w = n.annotations && n.annotations.whatif;
+      names[n.id] = w ? w.name : n.name;
+      stages[n.id] = w ? w.stage : '';
+    });
+    return { names: names, stages: stages };
+  }
+
+  function padTo(s, width) {
+    while (s.length < width) s += ' ';
+    return s;
+  }
+
+  function candHeading(cand) {
+    var ref = cand.refType === 'merge_request' && cand.target
+      ? cand.ref + ' → ' + cand.target : cand.ref;
+    return cand.label + ' (' + cand.source + ' on ' + ref + ')';
+  }
+
+  // The copy/paste answer to "which jobs would run for this trigger?" —
+  // one section per candidate pipeline, only the jobs that might run.
+  function textSummary(report, result, config) {
+    var meta = jobMeta(report);
+    var lines = ['what-if: ' + describeConfig(config)];
+    if (result.fatal && result.fatal.length) {
+      lines.push('');
+      lines.push('invalid configuration — GitLab refuses to create any pipeline:');
+      result.fatal.forEach(function (f) { lines.push('  ' + f.message); });
+      return lines.join('\n');
+    }
+    function section(cand, depth) {
+      var pad = padTo('', depth * 2);
+      lines.push('');
+      var head = pad + (depth ? 'child pipeline: ' : '') + candHeading(cand);
+      if (cand.created === false) {
+        lines.push(head + ' — not created ('
+          + (cand.reason || 'no reason recorded') + ')');
+        return;
+      }
+      if (cand.creationFails) {
+        head += ' — creation FAILS (needs/dependencies problem, see report)';
+      } else if (cand.created === null) {
+        head += ' — creation uncertain: ' + (cand.reason || 'depends');
+      }
+      lines.push(head);
+      var ids = cand.jobOrder.filter(function (id) { return mightRun(cand.jobs[id]); });
+      if (!ids.length) {
+        lines.push(pad + '  (no jobs would run)');
+      } else {
+        var nameW = 0, stageW = 0;
+        ids.forEach(function (id) {
+          nameW = Math.max(nameW, Math.min((meta.names[id] || id).length, 40));
+          stageW = Math.max(stageW, (meta.stages[id] || '').length + 2);
+        });
+        ids.forEach(function (id) {
+          lines.push(pad + '  ' + padTo(meta.names[id] || id, nameW)
+            + '  ' + padTo('[' + (meta.stages[id] || '') + ']', stageW)
+            + '  ' + outcomeText(cand.jobs[id]));
+        });
+      }
+      (cand.children || []).forEach(function (child) { section(child, depth + 1); });
+    }
+    result.candidates.forEach(function (cand) { section(cand, 0); });
+    if (result.duplicates && result.duplicates.length) {
+      lines.push('');
+      lines.push('duplicate jobs (may run in more than one pipeline for this '
+        + 'single event): ' + result.duplicates.map(function (d) {
+          return meta.names[d.job] || d.job;
+        }).join(', '));
+    }
+    return lines.join('\n');
+  }
+
+  // Candidate matching across two evaluations: an event spawns at most one
+  // MR-type and one non-MR top-level candidate (see buildCandidates), so
+  // MR matches MR and non-MR matches non-MR — a branch pipeline compares
+  // against a tag or scheduled pipeline, which IS the trigger delta.
+  // Children match by (parent pair, trigger job, child file).
+  function candMatchKey(cand, parentKey) {
+    if (!parentKey) return cand.source === 'merge_request_event' ? 'mr' : 'main';
+    return parentKey + ' > ' + (cand.parentJob || '?') + ' > ' + (cand.childOf || '?');
+  }
+
+  function flattenCandidates(result) {
+    var out = [];
+    function walk(list, parentKey) {
+      (list || []).forEach(function (c) {
+        var key = candMatchKey(c, parentKey);
+        out.push({ key: key, cand: c });
+        walk(c.children, key);
+      });
+    }
+    walk(result ? result.candidates : [], null);
+    return out;
+  }
+
+  var STATE_RANK = { runs: 4, delayed: 3, manual: 2, conditional: 1 };
+
+  // Event-level view: for each job, its strongest outcome across every
+  // pipeline this event actually creates (children included).
+  function effectiveOutcomes(result) {
+    var eff = {};
+    if (!result || (result.fatal && result.fatal.length)) return eff;
+    flattenCandidates(result).forEach(function (entry) {
+      var c = entry.cand;
+      if (c.created === false || c.creationFails) return;
+      c.jobOrder.forEach(function (id) {
+        var out = c.jobs[id];
+        if (!mightRun(out)) return;
+        var cur = eff[id];
+        if (!cur) {
+          eff[id] = { state: out.state, outcome: out, pipes: [c.label] };
+        } else {
+          cur.pipes.push(c.label);
+          if ((STATE_RANK[out.state] || 0) > (STATE_RANK[cur.state] || 0)) {
+            cur.state = out.state;
+            cur.outcome = out;
+          }
+        }
+      });
+    });
+    return eff;
+  }
+
+  function liveIds(cand) {
+    if (!cand || cand.created === false || cand.creationFails) return [];
+    return cand.jobOrder.filter(function (id) { return mightRun(cand.jobs[id]); });
+  }
+
+  // Structured diff of two evaluateEvent results (A = baseline, B = current).
+  // Job-level: added / removed / changed / same over effective outcomes —
+  // "changed" also covers the duplicate case (same state, but the job now
+  // runs in a different NUMBER of pipelines). Pair-level: matched candidate
+  // pairs with the union of might-run ids and a per-id delta, for graphs.
+  function diffEvents(resultA, resultB) {
+    var effA = effectiveOutcomes(resultA);
+    var effB = effectiveOutcomes(resultB);
+    var order = [];
+    function pushOrder(result) {
+      flattenCandidates(result).forEach(function (entry) {
+        entry.cand.jobOrder.forEach(function (id) {
+          if ((effA[id] || effB[id]) && order.indexOf(id) < 0) order.push(id);
+        });
+      });
+    }
+    pushOrder(resultB);
+    pushOrder(resultA);
+
+    var jobs = {};
+    var counts = { added: 0, removed: 0, changed: 0, same: 0 };
+    order.forEach(function (id) {
+      var a = effA[id] || null, b = effB[id] || null;
+      var delta = !a ? 'added' : !b ? 'removed'
+        : (outcomeText(a.outcome) === outcomeText(b.outcome)
+           && a.pipes.length === b.pipes.length) ? 'same' : 'changed';
+      counts[delta] += 1;
+      jobs[id] = { delta: delta, a: a, b: b };
+    });
+
+    var byKeyA = {}, byKeyB = {};
+    flattenCandidates(resultA).forEach(function (e) { byKeyA[e.key] = e.cand; });
+    flattenCandidates(resultB).forEach(function (e) { byKeyB[e.key] = e.cand; });
+    var keys = Object.keys(byKeyB);
+    Object.keys(byKeyA).forEach(function (k) {
+      if (keys.indexOf(k) < 0) keys.push(k);
+    });
+    var pairs = keys.map(function (k) {
+      var a = byKeyA[k] || null, b = byKeyB[k] || null;
+      var aIds = liveIds(a), bIds = liveIds(b);
+      var ids = bIds.slice();
+      aIds.forEach(function (id) { if (ids.indexOf(id) < 0) ids.push(id); });
+      var deltas = {};
+      ids.forEach(function (id) {
+        var inA = aIds.indexOf(id) >= 0, inB = bIds.indexOf(id) >= 0;
+        deltas[id] = !inA ? 'added' : !inB ? 'removed'
+          : outcomeText(a.jobs[id]) === outcomeText(b.jobs[id]) ? 'same' : 'changed';
+      });
+      return { key: k, a: a, b: b, ids: ids, deltas: deltas };
+    });
+
+    return { jobs: jobs, order: order, counts: counts, pairs: pairs };
+  }
+
+  function pipesNote(eff) {
+    if (!eff || !eff.pipes.length) return '';
+    return '  [' + eff.pipes.join(', ') + ']';
+  }
+
+  // The copy/paste delta: +/-/~/= per job, event-level.
+  function textDiff(report, diff, labelA, labelB) {
+    var meta = jobMeta(report);
+    var c = diff.counts;
+    var lines = [
+      'what-if delta',
+      '  baseline: ' + labelA,
+      '  current:  ' + labelB,
+      '  ' + c.added + ' added, ' + c.removed + ' removed, '
+        + c.changed + ' changed, ' + c.same + ' unchanged'
+    ];
+    var nameW = 0;
+    diff.order.forEach(function (id) {
+      nameW = Math.max(nameW, Math.min((meta.names[id] || id).length, 40));
+    });
+    ['added', 'removed', 'changed', 'same'].forEach(function (kind) {
+      var block = diff.order.filter(function (id) { return diff.jobs[id].delta === kind; });
+      if (!block.length) return;
+      lines.push('');
+      block.forEach(function (id) {
+        var j = diff.jobs[id];
+        var name = padTo(meta.names[id] || id, nameW);
+        if (kind === 'added') {
+          lines.push('+ ' + name + '  ' + outcomeText(j.b.outcome) + pipesNote(j.b));
+        } else if (kind === 'removed') {
+          lines.push('- ' + name + '  was: ' + outcomeText(j.a.outcome) + pipesNote(j.a));
+        } else if (kind === 'changed') {
+          var ta = outcomeText(j.a.outcome), tb = outcomeText(j.b.outcome);
+          lines.push('~ ' + name + '  ' + (ta === tb
+            ? tb + '  [in ' + j.a.pipes.length + ' pipeline'
+              + (j.a.pipes.length > 1 ? 's' : '') + ' → '
+              + j.b.pipes.length + ' pipeline' + (j.b.pipes.length > 1 ? 's' : '') + ']'
+            : ta + ' → ' + tb));
+        } else {
+          lines.push('= ' + name + '  ' + outcomeText(j.b.outcome));
+        }
+      });
+    });
+    if (!diff.order.length) {
+      lines.push('');
+      lines.push('(no jobs would run in either configuration)');
+    }
+    return lines.join('\n');
+  }
+
   return {
     evalExpr: evalExpr,
     globToRegExp: globToRegExp,
@@ -1321,7 +1627,12 @@ var PipeviewWhatIf = (function () {
     buildCandidates: buildCandidates,
     evaluateEvent: evaluateEvent,
     mightRun: mightRun,
-    collectExpressionVariables: collectExpressionVariables
+    collectExpressionVariables: collectExpressionVariables,
+    describeConfig: describeConfig,
+    outcomeText: outcomeText,
+    textSummary: textSummary,
+    diffEvents: diffEvents,
+    textDiff: textDiff
   };
 })();
 
