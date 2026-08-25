@@ -97,8 +97,13 @@ The generated report is a single self-contained HTML file with four views
 (five for GitLab CI):
 
 1. **Dependency Graph** — Interactive DAG with pan/zoom, click-to-inspect,
-   focus mode (highlights the reachable subgraph), edge-kind filters, and a
-   legend. Ghost nodes (unresolved references) appear dashed.
+   focus mode (highlights the reachable subgraph, with direction —
+   dependencies / dependents / both — and hop-depth controls), and a legend
+   that doubles as the view options: edge-kind filters, node-kind toggles
+   (stage lanes, templates, pattern rules, unresolved references), and
+   collapsible groups — GitLab child pipelines and recursive sub-makes fold
+   into one expandable node each, with their trigger/recursion edge attached.
+   Ghost nodes (unresolved references) appear dashed.
 
 2. **Task Catalog** — Runnable targets/jobs listed with name, description,
    invocation command, and flags. The "what can I run?" page.
@@ -160,6 +165,34 @@ Tracked entries are `group/app` (follows the project's default branch) or
 can be tracked at several refs at once; `sync` generates one report per
 entry, and `untrack group/app` sweeps every ref of the project while
 `untrack group/app@dev` removes just that one.
+
+### Cross-project rollup
+
+When `sync` generates two or more reports it also links them:
+`trigger:project` jobs, `needs:project` artifact fetches, and
+`include:project` files that point at another tracked project resolve
+into real cross-project links, written to `rollup.report.html` (and
+`rollup.json`) beside the per-project reports — pass `--no-rollup` to
+skip it. The rollup is one more self-contained offline HTML file:
+
+- **Fleet view** — one node per tracked `project@ref` (job counts, lint
+  verdict, diagnostics), with the three relationship kinds as distinct,
+  filterable edges. Projects referenced but not tracked appear dashed;
+  tracking them and re-syncing links them.
+- **Drill-down** — click a project to explore its job graph in place;
+  trigger jobs marked `↪` jump across to the downstream project's graph,
+  with a breadcrumb trail back. Detail panels spell out GitLab's trigger
+  semantics: a strategy-less trigger job passes when the downstream
+  pipeline is *created* (not when it succeeds), `mirror` tracks its
+  status exactly, forwarded variables are listed.
+- **Honesty rules** — resolution is static, from configuration only.
+  Ref mismatches ("targets `prod`, tracked at `v2`"), CI-variable
+  project/ref values, and dynamic child pipelines are flagged, never
+  guessed, and upstream lists always say *within the tracked set*:
+  configuration alone cannot reveal upstreams outside it.
+
+Per-project reports stay unchanged except that a resolved ghost node's
+panel now links to the rollup.
 
 In the browser: `↑/↓` move, `/` searches server-side, `enter` opens a
 project and then generates a report for the selected ref, `o` opens the

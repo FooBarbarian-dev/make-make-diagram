@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+**Cross-project pipeline links + tracked-set rollup** (see
+`docs/superpowers/specs/2026-08-25-upstream-downstream-rollup-design.md`).
+`pipeview gitlab sync` now sees across the tracked set: references
+between tracked projects resolve into real links instead of dead-end
+ghosts, and a fleet-level **rollup report** is generated beside the
+per-project reports.
+
+- **Typed trigger records (model schema v4, additive)**: trigger jobs
+  carry `annotations["trigger_info"]` — mode (`multi_project` vs
+  `child`; `trigger:include:project` correctly stays a child), raw
+  project/ref with uses-CI-variables flags, `strategy`,
+  `trigger:forward` defaults, include summaries (dynamic
+  `trigger:include:artifact` children marked unresolved). `needs:project`
+  entries record project/job/ref on the needing job
+  (`cross_project_needs`). Older report JSON still loads.
+- **Rollup resolution** (`pipeview/gitlab/rollup.py`, pure): trigger /
+  artifact-needs / config-include references match tracked entries with
+  exact ref semantics — explicit `trigger:branch` against the entry's
+  resolved ref, ref-less triggers against the downstream's default
+  branch (known from its own report) — and every degraded link says why:
+  ref mismatch, pinned-vs-default-branch, CI-variable values, untracked
+  target. Untracked references aggregate into externals ("track them to
+  link their pipelines"); reports generated far apart get a
+  snapshot-skew warning.
+- **`rollup.report.html`** — one more self-contained offline page:
+  fleet graph (projects + dashed untracked externals; the three link
+  kinds dual-encoded and filterable, caveat edges flagged ⚠), drill-down
+  job graphs with `↪` portal jobs that jump along trigger edges,
+  breadcrumbs, cross-project search, and panels that explain trigger
+  semantics (created-vs-succeeded, mirror/depend, forwarded variables)
+  and keep upstream lists honest ("within the tracked set").
+  `rollup.json` carries the same document; `--no-rollup` opts out.
+  Resolved reports re-render so ghost panels link to the rollup.
+- **Graph exploration controls** (both report formats): the legend
+  grows Nodes toggles (stage lanes, templates, pattern rules,
+  unresolved references), collapsible Groups — child pipelines and
+  sub-makes fold to one expandable node, boundary edges deduplicated
+  onto it (with the invokes edge that previously only existed in the
+  Files view), expanding draws a cluster outline — and Focus direction
+  (dependencies / dependents / both) + hop-depth controls. Search and
+  panel reveals auto-expand hidden targets.
+- **Hardening**: inline model JSON is `<`-escaped so content
+  containing `</script>` can no longer break the report page.
+
 **Same-name jobs now merge across files the way GitLab merges them**
 (see `docs/superpowers/specs/2026-08-25-gitlab-job-merge-semantics-design.md`).
 A local job that customizes a job an included file defines — the standard

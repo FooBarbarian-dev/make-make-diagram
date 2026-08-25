@@ -414,3 +414,128 @@ class TestCrossFileJobMerge:
         assert job.annotations.get("image") == "from-root"
         assert any("inc-script" in line for line in job.recipe)
         assert not [d for d in r.diagnostics if "has no script" in d.message]
+
+
+class TestTriggerInfo:
+    """Typed trigger records (schema v4): annotations["trigger_info"]."""
+
+    def _parse(self, tmp_path, text):
+        root = tmp_path / ".gitlab-ci.yml"
+        root.write_text(text)
+        return parse_gitlab(str(root))
+
+    def test_string_shorthand_is_multi_project(self, tmp_path):
+        r = self._parse(tmp_path, "fan-out:\n  trigger: group/app\n")
+        info = r.node_by_id("fan-out").annotations["trigger_info"]
+        assert info["mode"] == "multi_project"
+        assert info["project"] == "group/app"
+        assert info["ref"] is None
+        assert info["strategy"] is None
+        assert info["forward"] == {"yaml_variables": True,
+                                   "pipeline_variables": False}
+        assert info["unresolved"] == []
+
+    def test_project_branch_strategy_forward(self, tmp_path):
+        r = self._parse(tmp_path, (
+            "fan-out:\n"
+            "  trigger:\n"
+            "    project: group/infra\n"
+            "    branch: prod\n"
+            "    strategy: mirror\n"
+            "    forward:\n"
+            "      yaml_variables: false\n"
+            "      pipeline_variables: true\n"
+        ))
+        info = r.node_by_id("fan-out").annotations["trigger_info"]
+        assert info["mode"] == "multi_project"
+        assert info["project"] == "group/infra"
+        assert info["ref"] == "prod"
+        assert info["strategy"] == "mirror"
+        assert info["forward"] == {"yaml_variables": False,
+                                   "pipeline_variables": True}
+
+    def test_variables_in_project_and_ref_marked_unresolved(self, tmp_path):
+        r = self._parse(tmp_path, (
+            "fan-out:\n"
+            "  trigger:\n"
+            "    project: $GROUP/app\n"
+            "    branch: $TARGET\n"
+        ))
+        info = r.node_by_id("fan-out").annotations["trigger_info"]
+        assert "project uses CI variables" in info["unresolved"]
+        assert "ref uses CI variables" in info["unresolved"]
+
+    def test_local_include_is_child_mode(self, tmp_path):
+        (tmp_path / "child.yml").write_text("cjob:\n  script: [echo]\n")
+        r = self._parse(tmp_path, (
+            "spawn:\n"
+            "  trigger:\n"
+            "    include: child.yml\n"
+        ))
+        info = r.node_by_id("spawn").annotations["trigger_info"]
+        assert info["mode"] == "child"
+        assert info["includes"] == [{"type": "local", "value": "child.yml"}]
+        assert info["unresolved"] == []
+
+    def test_include_project_is_still_child_mode(self, tmp_path):
+        # trigger:include:project fetches the FILE elsewhere but the
+        # pipeline is a child of the current project — never multi-project.
+        r = self._parse(tmp_path, (
+            "spawn:\n"
+            "  trigger:\n"
+            "    include:\n"
+            "      - project: group/templates\n"
+            "        file: ci/child.yml\n"
+            "        ref: v1\n"
+        ))
+        info = r.node_by_id("spawn").annotations["trigger_info"]
+        assert info["mode"] == "child"
+        assert info["includes"] == [{
+            "type": "project", "value": "group/templates",
+            "file": "ci/child.yml", "ref": "v1"}]
+
+    def test_dynamic_artifact_child_marked_unresolved(self, tmp_path):
+        r = self._parse(tmp_path, (
+            "spawn:\n"
+            "  trigger:\n"
+            "    include:\n"
+            "      - artifact: generated.yml\n"
+            "        job: make-config\n"
+        ))
+        info = r.node_by_id("spawn").annotations["trigger_info"]
+        assert info["mode"] == "child"
+        assert info["includes"][0]["type"] == "artifact"
+        assert info["includes"][0]["job"] == "make-config"
+        assert any("make-config" in u for u in info["unresolved"])
+
+    def test_display_annotations_unchanged(self, tmp_path):
+        r = self._parse(tmp_path, (
+            "fan-out:\n"
+            "  trigger:\n"
+            "    project: group/app\n"
+            "    strategy: depend\n"
+        ))
+        node = r.node_by_id("fan-out")
+        assert node.annotations["trigger_strategy"] == "depend"
+        ghosts = [n for n in r.nodes if n.kind == "ghost"]
+        assert any(n.id == "downstream:group/app" for n in ghosts)
+
+
+class TestCrossProjectNeedsRecords:
+    def test_needs_project_records_ref_and_job(self, tmp_path):
+        root = tmp_path / ".gitlab-ci.yml"
+        root.write_text(
+            "use-artifacts:\n"
+            "  script: [echo]\n"
+            "  needs:\n"
+            "    - project: group/lib\n"
+            "      job: build\n"
+            "      ref: main\n"
+            "      artifacts: true\n"
+        )
+        r = parse_gitlab(str(root))
+        recs = r.node_by_id("use-artifacts").annotations["cross_project_needs"]
+        assert recs == [{"project": "group/lib", "job": "build",
+                         "ref": "main", "ghost": "group/lib::build"}]
+        ghost = r.node_by_id("group/lib::build")
+        assert ghost.annotations["cross_project_need"] == "group/lib"

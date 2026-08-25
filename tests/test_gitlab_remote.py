@@ -892,3 +892,166 @@ class TestGitLabCli:
                               "-o", out])
         assert rc == 0
         assert os.path.isfile(os.path.join(out, "group-app@dev.report.html"))
+
+
+# ---------------------------------------------------------------------------
+# sync rollup (cross-project linking)
+# ---------------------------------------------------------------------------
+
+APP_TRIGGER_YAML = """\
+stages: [build, fan-out]
+build:
+  stage: build
+  script: [make build]
+use-lib:
+  stage: build
+  script: [make use]
+  needs:
+    - project: group/infra
+      job: build
+      ref: main
+      artifacts: true
+deploy-infra:
+  stage: fan-out
+  trigger:
+    project: group/infra
+    strategy: mirror
+call-unknown:
+  stage: fan-out
+  trigger: group/unknown
+"""
+
+INFRA_YAML = """\
+build:
+  script: [make infra]
+"""
+
+
+@pytest.fixture
+def linked_gl():
+    gl = FakeGitLab()
+    gl.add_project("group/app")
+    gl.add_project("group/infra")
+    gl.lint_responses["group/app"] = {
+        "valid": True, "errors": [], "warnings": [],
+        "merged_yaml": APP_TRIGGER_YAML, "includes": [],
+    }
+    gl.lint_responses["group/infra"] = {
+        "valid": True, "errors": [], "warnings": [],
+        "merged_yaml": INFRA_YAML, "includes": [],
+    }
+    return gl
+
+
+class TestSyncRollup:
+    def _env(self, monkeypatch, tmpdir):
+        cfg_path = str(tmpdir.join("cfg", "gitlab.json"))
+        monkeypatch.setenv("PIPEVIEW_GITLAB_CONFIG", cfg_path)
+        for var in ("PIPEVIEW_GITLAB_HOST", "GITLAB_HOST", "CI_SERVER_URL",
+                    "PIPEVIEW_GITLAB_TOKEN", "GITLAB_TOKEN",
+                    "GITLAB_PRIVATE_TOKEN"):
+            monkeypatch.delenv(var, raising=False)
+
+    def _sync(self, monkeypatch, tmpdir, gl, *extra):
+        monkeypatch.setattr(gitlab_cli, "_make_client",
+                            lambda args, config, host: gl)
+        out = str(tmpdir.join("out"))
+        gitlab_cli.main(["track", "group/app", "--host", HOST])
+        gitlab_cli.main(["track", "group/infra", "--host", HOST])
+        rc = gitlab_cli.main(["sync", "--host", HOST, "-o", out, *extra])
+        return rc, out
+
+    def test_sync_writes_rollup(self, monkeypatch, tmpdir, capsys, linked_gl):
+        self._env(monkeypatch, tmpdir)
+        rc, out = self._sync(monkeypatch, tmpdir, linked_gl)
+        assert rc == 0
+        html = os.path.join(out, "rollup.report.html")
+        assert os.path.isfile(html)
+        with open(os.path.join(out, "rollup.json")) as f:
+            rollup = json.load(f)
+        assert [p["project"] for p in rollup["projects"]] \
+            == ["group/app", "group/infra"]
+        kinds = {(ln["kind"], ln["dst"]["project"] is not None)
+                 for ln in rollup["links"]}
+        assert ("trigger", True) in kinds        # deploy-infra -> group/infra
+        assert ("trigger", False) in kinds       # call-unknown -> untracked
+        assert ("needs_project", True) in kinds  # use-lib -> group/infra
+        assert [x["path"] for x in rollup["externals"]] == ["group/unknown"]
+        assert "rollup:" in capsys.readouterr().out
+
+    def test_rollup_html_embeds_data(self, monkeypatch, tmpdir, capsys, linked_gl):
+        self._env(monkeypatch, tmpdir)
+        _, out = self._sync(monkeypatch, tmpdir, linked_gl)
+        with open(os.path.join(out, "rollup.report.html")) as f:
+            content = f.read()
+        assert "const ROLLUP" in content
+        assert "group/app" in content
+        assert "dagre" in content.lower()
+        assert "/*ROLLUP_JSON_PLACEHOLDER*/" not in content
+
+    def test_reports_re_rendered_with_rollup_link(self, monkeypatch, tmpdir,
+                                                  capsys, linked_gl):
+        self._env(monkeypatch, tmpdir)
+        _, out = self._sync(monkeypatch, tmpdir, linked_gl)
+        with open(os.path.join(out, "group-app@main.model.json")) as f:
+            model = json.load(f)
+        assert model["annotations"]["rollup"] == {"file": "rollup.report.html"}
+        nodes = {n["id"]: n for n in model["nodes"]}
+        link = nodes["deploy-infra"]["annotations"]["rollup_link"]
+        assert link["project"] == "group/infra"
+        assert link["rollup"] == "rollup.report.html"
+        # the embedded rollup copy of the model agrees with the file on disk
+        with open(os.path.join(out, "rollup.json")) as f:
+            rollup = json.load(f)
+        app = next(p for p in rollup["projects"] if p["project"] == "group/app")
+        emb = {n["id"]: n for n in app["model"]["nodes"]}
+        assert emb["deploy-infra"]["annotations"]["rollup_link"] == link
+        with open(os.path.join(out, "group-app@main.report.html")) as f:
+            assert "rollup_link" in f.read()
+
+    def test_no_rollup_flag(self, monkeypatch, tmpdir, capsys, linked_gl):
+        self._env(monkeypatch, tmpdir)
+        rc, out = self._sync(monkeypatch, tmpdir, linked_gl, "--no-rollup")
+        assert rc == 0
+        assert not os.path.exists(os.path.join(out, "rollup.report.html"))
+        assert not os.path.exists(os.path.join(out, "rollup.json"))
+
+    def test_single_entry_writes_no_rollup(self, monkeypatch, tmpdir, capsys,
+                                           linked_gl):
+        self._env(monkeypatch, tmpdir)
+        monkeypatch.setattr(gitlab_cli, "_make_client",
+                            lambda args, config, host: linked_gl)
+        out = str(tmpdir.join("out"))
+        gitlab_cli.main(["track", "group/app", "--host", HOST])
+        rc = gitlab_cli.main(["sync", "--host", HOST, "-o", out])
+        assert rc == 0
+        assert not os.path.exists(os.path.join(out, "rollup.report.html"))
+
+    def test_failed_entry_degrades_rollup(self, monkeypatch, tmpdir, capsys,
+                                          linked_gl):
+        self._env(monkeypatch, tmpdir)
+        monkeypatch.setattr(gitlab_cli, "_make_client",
+                            lambda args, config, host: linked_gl)
+        out = str(tmpdir.join("out"))
+        gitlab_cli.main(["track", "group/app", "--host", HOST])
+        gitlab_cli.main(["track", "group/infra", "--host", HOST])
+        gitlab_cli.main(["track", "group/broken", "--host", HOST])
+        capsys.readouterr()
+        rc = gitlab_cli.main(["sync", "--host", HOST, "-o", out])
+        captured = capsys.readouterr()
+        assert rc == 2   # the failed entry dominates the exit code
+        assert os.path.isfile(os.path.join(out, "rollup.report.html"))
+        assert "group/broken" in captured.err
+        with open(os.path.join(out, "rollup.json")) as f:
+            rollup = json.load(f)
+        assert any("group/broken" in d["message"]
+                   for d in rollup["diagnostics"])
+
+    def test_rollup_html_offline(self, monkeypatch, tmpdir, capsys, linked_gl):
+        """MANDATORY: the rollup page obeys the same no-network contract as
+        every report (same scanner as TestNoNetworkResources)."""
+        from tests.test_html_renderer import TestNoNetworkResources
+        self._env(monkeypatch, tmpdir)
+        _, out = self._sync(monkeypatch, tmpdir, linked_gl)
+        TestNoNetworkResources()._assert_no_network_refs(
+            os.path.join(out, "rollup.report.html"))

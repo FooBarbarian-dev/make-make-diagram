@@ -12,7 +12,12 @@ from typing import Any, Literal
 #   3 — what-if pass: Node.annotations["whatif"] (compiled rules program,
 #       artifacts, needs) and Report.annotations["whatif"] (scenario world,
 #       workflow program, globals) for GitLab reports.
-SCHEMA_VERSION = 3
+#   4 — cross-project linking pass: Node.annotations["trigger_info"] (typed
+#       trigger record: mode/project/ref/strategy/forward/unresolved),
+#       Node.annotations["cross_project_needs"] (typed needs:project
+#       records), Node.annotations["rollup_link"] and
+#       Report.annotations["rollup"] when a sync rollup resolved the node.
+SCHEMA_VERSION = 4
 
 
 @dataclass

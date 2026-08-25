@@ -26,13 +26,15 @@ def render_html(report: Report, output_path: str) -> None:
         with open(whatif_path, "r", encoding="utf-8") as f:
             whatif_js = f.read()
 
-    model_json = report.to_json()
-
     html = template.replace("/*DAGRE_PLACEHOLDER*/", dagre_js)
     html = html.replace("/*WHATIF_PLACEHOLDER*/", whatif_js)
-    html = html.replace("/*MODEL_JSON_PLACEHOLDER*/{}", model_json)
     html = html.replace("{{ROOT}}", _escape_html(report.root))
     html = html.replace("{{GENERATED_AT}}", _escape_html(report.generated_at))
+    # Model JSON is spliced last so payload text can never collide with a
+    # pending placeholder.
+    html = html.replace(
+        "/*MODEL_JSON_PLACEHOLDER*/{}", script_safe_json(report.to_json())
+    )
 
     os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
@@ -41,3 +43,14 @@ def render_html(report: Report, output_path: str) -> None:
 
 def _escape_html(s: str) -> str:
     return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+def script_safe_json(json_str: str) -> str:
+    """Make serialized JSON safe to inline inside a <script> block.
+
+    In serialized JSON, "<" can only occur inside string literals, where the
+    \u003c escape is equivalent — so this cannot change the parsed value,
+    only the bytes. It neutralizes </script>, <!-- and <script sequences
+    that would otherwise terminate or confuse the surrounding script element.
+    """
+    return json_str.replace("<", "\\u003c")

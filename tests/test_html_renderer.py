@@ -104,6 +104,49 @@ class TestHtmlGeneration:
         assert self._CATALOG_SNIPPET not in content
 
 
+class TestScriptSafeModelJson:
+    """Model content must never be able to break out of the inline
+    <script> block that carries it (e.g. a recipe containing </script>)."""
+
+    def _render(self, report, tmpdir):
+        path = os.path.join(tmpdir, "report.html")
+        render_html(report, path)
+        with open(path, encoding="utf-8") as f:
+            return path, f.read()
+
+    def _extract_model(self, content):
+        m = re.search(r"const REPORT = (.+?);\s*\n", content, re.DOTALL)
+        assert m is not None
+        return m.group(1)
+
+    def test_script_close_in_recipe_stays_inside_script(self, tmpdir):
+        report = Report(root="test", format="makefile")
+        from pipeview.model import Node
+        report.nodes.append(Node(
+            id="evil", name="evil", kind="target",
+            recipe=['echo "</script><script>alert(1)</script>"'],
+        ))
+        _, content = self._render(report, tmpdir)
+        blob = self._extract_model(content)
+        assert "</script" not in blob
+        assert "<!--" not in blob
+        data = json.loads(blob)
+        restored = Report.from_dict(data)
+        assert restored.nodes[0].recipe == report.nodes[0].recipe
+
+    def test_placeholder_in_content_does_not_resplice(self, tmpdir):
+        report = Report(root="test", format="makefile")
+        from pipeview.model import Node
+        report.nodes.append(Node(
+            id="tricky", name="tricky", kind="target",
+            recipe=["echo '{{ROOT}} /*MODEL_JSON_PLACEHOLDER*/{}'"],
+        ))
+        _, content = self._render(report, tmpdir)
+        data = json.loads(self._extract_model(content))
+        restored = Report.from_dict(data)
+        assert restored.nodes[0].recipe == report.nodes[0].recipe
+
+
 class TestNoNetworkResources:
     """MANDATORY: Generated HTML must never reference external resources."""
 
