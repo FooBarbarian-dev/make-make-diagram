@@ -116,6 +116,11 @@ def _annotate(report: Report, result: FetchResult) -> None:
         "strategy": result.strategy,
         "lint_valid": lint.get("valid"),
         "includes": lint.get("includes") or [],
+        # include:project provenance under the files strategy — the
+        # external_map keys are exact ("project:<path>@<ref>:<file>", ref
+        # empty when the include omitted it), unlike the slugified
+        # _external/ paths on disk.
+        "include_projects": _include_projects(result),
     }
 
     for severity, message in result.notes:
@@ -171,6 +176,27 @@ def _annotate(report: Report, result: FetchResult) -> None:
             report.diagnostics.append(Diagnostic(
                 severity="warning", message=f"GitLab CI Lint: {warn}",
             ))
+
+
+def _include_projects(result: FetchResult) -> list[dict]:
+    """Typed {project, ref, file} entries for every include:project the
+    files strategy fetched (empty under lint — see `includes` for those)."""
+    out = []
+    seen = set()
+    for key in result.external_map:
+        if not key.startswith("project:"):
+            continue
+        rest = key[len("project:"):]
+        # "<path>@<ref>:<file>" — project paths cannot contain "@" and git
+        # forbids ":" in ref names, so the first "@" and the first ":" after
+        # it split unambiguously (ref is empty when the include omitted it)
+        path, _, tail = rest.partition("@")
+        ref, sep, file = tail.partition(":")
+        entry = (path, ref or None, file)
+        if path and sep and file and entry not in seen:
+            seen.add(entry)
+            out.append({"project": path, "ref": ref or None, "file": file})
+    return out
 
 
 def _lint_include_displays(lint: dict) -> list[str]:
