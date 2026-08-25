@@ -28,6 +28,7 @@ from pipeview.gitlab.fetch import (
     fetch_config,
     include_keys,
     materialize,
+    template_api_keys,
 )
 from pipeview.gitlab.report import generate_report
 from pipeview.gitlab.tui import order_projects, order_refs, truncate, visible_window
@@ -106,6 +107,14 @@ class FakeGitLab:
             yield {"path": path, "type": "blob"}
 
     def get_ci_template(self, name):
+        self.calls.append(("get_ci_template", name))
+        # Mirror the real REST API: it serves ONLY the flattened "dropdown"
+        # keys — no slash, no .gitlab-ci.yml suffix. "Jobs/Build",
+        # "Security/SAST" and every suffixed spelling 404 on real GitLab
+        # (verified against gitlab.com), which is the whole reason the
+        # bundled-snapshot fallback exists.
+        if "/" in name or name.endswith((".yml", ".yaml")):
+            raise GitLabNotFound(f"404 template {name}", 404)
         if name not in self.templates:
             raise GitLabNotFound(f"404 template {name}", 404)
         return {"name": name, "content": self.templates[name]}
@@ -204,7 +213,8 @@ nested_job:
   stage: deploy
   script: [make nested]
 """)
-    gl.templates["Security/SAST"] = """\
+    # The API key for Security/SAST.gitlab-ci.yml is the flattened "SAST".
+    gl.templates["SAST"] = """\
 ## Static analysis
 sast:
   stage: test
@@ -382,6 +392,85 @@ job:
         project = gl.get_project("group/empty")
         with pytest.raises(GitLabError):
             fetch_config(gl, project, "main")
+
+
+# ---------------------------------------------------------------------------
+# Built-in templates: instance API keys + bundled-snapshot fallback
+# ---------------------------------------------------------------------------
+
+def _template_gl(*includes: str) -> FakeGitLab:
+    gl = FakeGitLab()
+    gl.add_project("group/app")
+    gl.lint_error = GitLabNotFound("404 lint", 404)
+    inc = "".join(f"  - template: {name}\n" for name in includes)
+    gl.add_file("group/app", "main", ".gitlab-ci.yml",
+                f"include:\n{inc}own_job:\n  script: [x]\n")
+    return gl
+
+
+class TestBuiltinTemplates:
+    def test_api_key_candidates(self):
+        # Category dirs (Pages/Verify/Security) are flattened by the API.
+        assert template_api_keys("Security/SAST.gitlab-ci.yml") == \
+            ["Security/SAST", "SAST", "Security/SAST.gitlab-ci.yml"]
+        assert template_api_keys("Verify/Accessibility.gitlab-ci.yml") == \
+            ["Verify/Accessibility", "Accessibility",
+             "Verify/Accessibility.gitlab-ci.yml"]
+        # Jobs/ is NOT a flattened category — no basename candidate.
+        assert template_api_keys("Jobs/Build.gitlab-ci.yml") == \
+            ["Jobs/Build", "Jobs/Build.gitlab-ci.yml"]
+        assert template_api_keys("Bash.gitlab-ci.yml") == \
+            ["Bash", "Bash.gitlab-ci.yml"]
+
+    def test_category_template_found_under_flattened_key(self):
+        gl = _template_gl("Verify/Accessibility.gitlab-ci.yml")
+        gl.templates["Accessibility"] = "a11y:\n  script: [scan]\n"
+        result = fetch_config(gl, gl.get_project("group/app"), "main")
+        rels = {f.rel_path for f in result.files}
+        assert "_external/templates/Verify/Accessibility.gitlab-ci.yml" in rels
+        # Served by the instance, so no bundled-fallback note.
+        assert not any("bundled" in msg for _, msg in result.notes)
+
+    def test_jobs_template_falls_back_to_bundled(self):
+        # The API cannot serve Jobs/* on any GitLab version; the bundled
+        # snapshot (real GitLab content shipped with pipeview) steps in.
+        gl = _template_gl("Jobs/Build.gitlab-ci.yml")
+        result = fetch_config(gl, gl.get_project("group/app"), "main")
+        files = {f.rel_path: f for f in result.files}
+        fetched = files.get("_external/templates/Jobs/Build.gitlab-ci.yml")
+        assert fetched is not None
+        assert "build:" in fetched.content
+        assert "bundled" in fetched.source
+        assert any(sev == "info" and "bundled" in msg
+                   for sev, msg in result.notes)
+
+    def test_bundled_template_includes_recurse(self, tmpdir):
+        # Security/SAST.gitlab-ci.yml (bundled) is a stub that includes
+        # Jobs/SAST.gitlab-ci.yml — the fallback must follow that chain.
+        gl = _template_gl("Security/SAST.gitlab-ci.yml")
+        report, _ = generate_report(gl, "group/app", outdir=str(tmpdir))
+        paths = {f.path for f in report.files}
+        assert os.path.join("_external", "templates",
+                            "Security", "SAST.gitlab-ci.yml") in paths
+        assert os.path.join("_external", "templates",
+                            "Jobs", "SAST.gitlab-ci.yml") in paths
+        assert not [f for f in report.files if f.status == "unresolved"]
+        assert any("bundled" in d.message for d in report.diagnostics)
+
+    def test_unknown_template_still_ghosts(self):
+        gl = _template_gl("No/Such-Template.gitlab-ci.yml")
+        result = fetch_config(gl, gl.get_project("group/app"), "main")
+        assert any(sev == "warning" and "Cannot fetch template" in msg
+                   for sev, msg in result.notes)
+
+    def test_bundled_fallback_can_be_disabled(self, tmpdir):
+        gl = _template_gl("Jobs/Build.gitlab-ci.yml")
+        report, _ = generate_report(gl, "group/app", outdir=str(tmpdir),
+                                    bundled_templates=False)
+        assert "[template:Jobs/Build.gitlab-ci.yml]" in \
+            {f.path for f in report.files if f.status == "unresolved"}
+        assert not any("bundled GitLab" in d.message.lower()
+                       for d in report.diagnostics)
 
 
 # ---------------------------------------------------------------------------

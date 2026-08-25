@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+**GitLab built-in templates resolve everywhere — bundled snapshot
+fallback** (see
+`docs/superpowers/specs/2026-08-25-gitlab-template-fallback-design.md`).
+`include:template` entries used to come out as ghost jobs whenever the
+template wasn't servable through GitLab's REST template API — which is
+most of them: the API only exposes the flattened "dropdown" keys
+(top-level names plus the basenames of `Pages/`/`Verify/`/`Security/`),
+so `Jobs/*` and `Workflows/*` 404 in every spelling on **every** GitLab
+version (verified against gitlab.com). Since `Security/SAST.gitlab-ci.yml`
+is itself just a stub that includes `Jobs/SAST.gitlab-ci.yml`, any real
+security/Auto-DevOps pipeline hit this.
+
+- **Bundled template snapshot**: pipeview now ships a verbatim, MIT-licensed
+  copy of GitLab's `lib/gitlab/ci/templates` tree
+  (`pipeview/data/gitlab_ci_templates/`, 133 templates pinned at GitLab
+  19.3.0, provenance in `_meta.json`), refreshed by the maintainer script
+  `scripts/update_gitlab_templates.py`.
+- **Remote fetch (`files` strategy)**: templates are requested from the
+  instance's API first — now using key spellings that can actually work,
+  including the category-flattened form (`Security/SAST.gitlab-ci.yml` →
+  `SAST`) — and fall back to the bundled copy with an info diagnostic
+  naming the snapshot version; nested `include:template` chains recurse.
+  Only a template unknown to both stays a ghost, and the warning says
+  which lookups failed.
+- **Offline runs too**: `pipeview <path>` resolves `include:template` from
+  the same snapshot — still zero network — showing template files as
+  `[template] Jobs/Build.gitlab-ci.yml` in the File Map with their jobs as
+  real nodes instead of ghosts.
+- `--no-bundled-templates` (main CLI and `pipeview gitlab`) restores the
+  previous ghost-node behavior.
+- The test fake now mirrors the real template API (404 for any slashed or
+  suffixed key) so this class of bug can't pass the suite again.
+
 **`pipeview gitlab` — fetch straight from a GitLab instance** (see
 `docs/superpowers/specs/2026-08-25-gitlab-remote-fetch-design.md`). A new
 subcommand — the only part of pipeview that touches a network — connects to

@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from pipeview import gitlab_templates
 from pipeview.model import (
     Diagnostic,
     Edge,
@@ -131,10 +132,11 @@ def parse_gitlab(
     repo_root: str | None = None,
     external_resolver=None,
     local_roots: list[str] | None = None,
+    bundled_templates: bool = True,
 ) -> Report:
     """Parse a GitLab CI file tree rooted at `path`.
 
-    The keyword arguments exist for the remote-fetch layer
+    Most keyword arguments exist for the remote-fetch layer
     (`pipeview.gitlab`), which materializes files GitLab served into a work
     directory; offline behavior is unchanged when they are omitted.
 
@@ -148,6 +150,10 @@ def parse_gitlab(
       projects materialized inside this tree — include:local inside a file
       under one of them resolves against that root, matching GitLab's
       nested cross-project include semantics.
+    - `bundled_templates`: resolve `include:template` entries nothing else
+      resolved from pipeview's bundled snapshot of GitLab's built-in
+      templates (`pipeview.gitlab_templates`) instead of ghosting them.
+      Still fully offline — the snapshot ships inside the package.
     """
     root_path = os.path.abspath(path)
     if os.path.isdir(root_path):
@@ -163,6 +169,7 @@ def parse_gitlab(
 
     state = _ParserState(root_path, repo_root=repo_root)
     state.external_resolver = external_resolver
+    state.bundled_templates = bundled_templates
     state.local_roots = [
         os.path.abspath(p).rstrip(os.sep) for p in (local_roots or [])
     ]
@@ -205,6 +212,11 @@ class _ParserState:
         # Remote-fetch hooks (see parse_gitlab docstring); inert by default.
         self.external_resolver = None
         self.local_roots: list[str] = []
+        self.bundled_templates = True
+        # Files parsed from OUTSIDE the repo tree (today: the bundled GitLab
+        # template snapshot) display under an alias, not a ../../ relpath:
+        # (abs dir, display prefix), consulted by rel().
+        self.path_aliases: list[tuple[str, str]] = []
         self.parsed_files: set[str] = set()
         self.include_stack: list[str] = []
         self.stages: list[str] | None = None   # declared `stages:` (root wins)
@@ -240,6 +252,17 @@ class _ParserState:
         if name not in self.variables:
             self.variables[name] = Variable(name=name)
         return self.variables[name]
+
+    def rel(self, path: str) -> str:
+        """Display/reference path of a parsed file: repo-relative, unless the
+        file lives under a registered alias (e.g. the bundled template
+        snapshot -> "[template] Jobs/Build.gitlab-ci.yml")."""
+        fp = os.path.abspath(path)
+        for prefix, display in self.path_aliases:
+            if fp == prefix or fp.startswith(prefix + os.sep):
+                sub = os.path.relpath(fp, prefix).replace(os.sep, "/")
+                return f"{display} {sub}"
+        return os.path.relpath(fp, self.repo_root)
 
     def local_root_for(self, filepath: str) -> str:
         """The repository root include:local resolves against for a file —
@@ -333,7 +356,7 @@ def _parse_file(filepath: str, state: _ParserState, namespace: str) -> None:
 
 
 def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> None:
-    rel_path = os.path.relpath(filepath, state.repo_root)
+    rel_path = state.rel(filepath)
     sf = SourceFile(path=rel_path, kind="gitlab_yaml", status="ok")
     is_root = filepath == os.path.abspath(state.root_path)
 
@@ -697,9 +720,9 @@ def _process_includes(
 
             for abs_path in matches:
                 abs_path = os.path.abspath(abs_path)
-                inc_rel = os.path.relpath(abs_path, state.repo_root)
+                inc_rel = state.rel(abs_path)
                 if abs_path in state.include_stack:
-                    cycle = [os.path.relpath(p, state.repo_root)
+                    cycle = [state.rel(p)
                              for p in state.include_stack[state.include_stack.index(abs_path):]]
                     state.diagnostics.append(Diagnostic(
                         severity="warning",
@@ -738,12 +761,34 @@ def _process_includes(
                     resolved = state.external_resolver(inc)
                 except Exception:
                     resolved = None
+            if not resolved and inc_type == "template" and state.bundled_templates:
+                # GitLab's built-in templates ship with the GitLab
+                # installation, so nothing else can materialize them —
+                # resolve from the snapshot pipeview bundles instead of
+                # ghosting every job they define.
+                bundled = gitlab_templates.template_path(str(inc["template"]))
+                if bundled is not None:
+                    alias = (os.path.abspath(gitlab_templates.bundled_root()),
+                             "[template]")
+                    if alias not in state.path_aliases:
+                        state.path_aliases.append(alias)
+                    state.diagnostics.append(Diagnostic(
+                        severity="info",
+                        message=(
+                            f"include:template {inc['template']} resolved from "
+                            f"pipeview's bundled {gitlab_templates.bundled_version()}"
+                            " — the GitLab instance running this pipeline may "
+                            "ship a different version"
+                        ),
+                        source=loc,
+                    ))
+                    resolved = [bundled]
             if resolved:
                 for abs_path in resolved:
                     abs_path = os.path.abspath(abs_path)
-                    ext_rel = os.path.relpath(abs_path, state.repo_root)
+                    ext_rel = state.rel(abs_path)
                     if abs_path in state.include_stack:
-                        cycle = [os.path.relpath(p, state.repo_root)
+                        cycle = [state.rel(p)
                                  for p in state.include_stack[
                                      state.include_stack.index(abs_path):]]
                         state.diagnostics.append(Diagnostic(
@@ -781,6 +826,9 @@ def _process_includes(
                 why = "the fetch layer could not retrieve it"
             else:
                 why = "pipeview never fetches remote content"
+            if inc_type == "template" and state.bundled_templates:
+                why += (", and it is not in pipeview's bundled "
+                        f"{gitlab_templates.bundled_version()}")
             state.diagnostics.append(Diagnostic(
                 severity="warning",
                 message=(
@@ -1546,7 +1594,7 @@ def _build_stage_structure(state: _ParserState) -> None:
     used_stages.discard(None)
 
     shown = [s for s in order if s in used_stages or (declared and s in declared)]
-    root_file = os.path.relpath(state.root_path, state.repo_root)
+    root_file = state.rel(state.root_path)
     for stage_name in shown:
         sid = f"stage:{stage_name}"
         if sid not in state.nodes:

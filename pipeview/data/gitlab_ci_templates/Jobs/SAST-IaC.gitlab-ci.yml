@@ -1,0 +1,56 @@
+# Read more about this feature here: https://docs.gitlab.com/ee/user/application_security/iac_scanning/
+#
+# Configure SAST with CI/CD variables (https://docs.gitlab.com/ee/ci/variables/).
+# List of available variables: https://docs.gitlab.com/ee/user/application_security/iac_scanning/
+
+variables:
+  # Setting this variable affects all Security templates
+  # (SAST, Dependency Scanning, ...)
+  SECURE_ANALYZERS_PREFIX: "$CI_TEMPLATE_REGISTRY_HOST/security-products"
+  #
+  SAST_IMAGE_SUFFIX: ""
+  SAST_EXCLUDED_PATHS: "spec, test, tests, tmp"
+
+iac-sast:
+  stage: test
+  artifacts:
+    access: 'developer'
+    reports:
+      sast: gl-sast-report.json
+    paths: [gl-sast-report.json]
+  rules:
+    - when: never
+  # `rules` must be overridden explicitly by each child job
+  # see https://gitlab.com/gitlab-org/gitlab/-/issues/218444
+  variables:
+    SEARCH_MAX_DEPTH: 4
+  allow_failure: true
+  script:
+    - /analyzer run
+
+kics-iac-sast:
+  extends: iac-sast
+  image:
+    name: "$SAST_ANALYZER_IMAGE"
+  variables:
+    SAST_ANALYZER_IMAGE_TAG: 6
+    SAST_ANALYZER_IMAGE: "$SECURE_ANALYZERS_PREFIX/kics:$SAST_ANALYZER_IMAGE_TAG$SAST_IMAGE_SUFFIX"
+  rules:
+    - if: $SAST_DISABLED == 'true' || $SAST_DISABLED == '1'
+      when: never
+    - if: $SAST_EXCLUDED_ANALYZERS =~ /kics/
+      when: never
+
+    # The following 3 blocks of rules define whether the job runs in a an *MR pipeline* or a *branch pipeline*
+    # when an MR exists. If the job has additional rules to observe they should be added in the blocks 1 and 3
+    # to cover both the *MR pipeline* and the *branch pipeline* workflows.
+
+    # 1. Run the job in an *MR* pipeline if MR pipelines for AST are enabled and there's an open merge request.
+    - if: $AST_ENABLE_MR_PIPELINES == "true" &&
+          $CI_PIPELINE_SOURCE == "merge_request_event"
+    # 2. Don't run the job in a *branch pipeline* if *MR pipelines* for AST are enabled and there's an open merge request.
+    - if: $AST_ENABLE_MR_PIPELINES == "true" &&
+          $CI_OPEN_MERGE_REQUESTS
+      when: never
+    # 3. Finally, run the job in a *branch pipeline* (When MR pipelines are disabled for AST, or it is enabled but no open MRs exist for the branch).
+    - if: $CI_COMMIT_BRANCH

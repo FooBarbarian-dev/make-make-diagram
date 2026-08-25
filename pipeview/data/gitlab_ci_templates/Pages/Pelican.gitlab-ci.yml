@@ -1,0 +1,18 @@
+# To contribute improvements to CI/CD templates, please follow the Development guide at:
+# https://docs.gitlab.com/development/cicd/templates/
+# This specific template is located at:
+# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Pages/Pelican.gitlab-ci.yml
+
+default:
+  # Full project: https://gitlab.com/pages/pelican
+  image: python:3.12-alpine
+
+pages:
+  script:
+    - apk add --update --no-cache make subversion
+    - pip install -r requirements.txt
+    - make publish
+  artifacts:
+    paths:
+      - public/
+  environment: production

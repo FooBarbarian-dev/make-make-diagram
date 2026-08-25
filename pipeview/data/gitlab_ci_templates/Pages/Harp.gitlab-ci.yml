@@ -1,0 +1,30 @@
+# To contribute improvements to CI/CD templates, please follow the Development guide at:
+# https://docs.gitlab.com/development/cicd/templates/
+# This specific template is located at:
+# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Pages/Harp.gitlab-ci.yml
+
+default:
+  # Full project: https://gitlab.com/pages/harp
+  image: node:16
+
+cache:
+  paths:
+    - node_modules
+
+test:
+  script:
+    - npm install -g harp less
+    - harp source public
+  rules:
+    - if: '$CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "merge_request_event"'
+
+pages:
+  script:
+    - npm install -g harp less
+    - harp source public
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  environment: production
