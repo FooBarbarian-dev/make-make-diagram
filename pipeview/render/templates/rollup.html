@@ -804,7 +804,7 @@ const ROLLUP = /*ROLLUP_JSON_PLACEHOLDER*/{};
       LINKS.forEach(link => {
         const src = 'p' + link.src.project;
         const dst = link.dst.project == null ? 'x:' + link.dst.path : 'p' + link.dst.project;
-        const key = src + ' ' + dst + ' ' + link.kind;
+        const key = src + ' ' + dst + ' ' + link.kind;
         if (!agg[key]) agg[key] = { src: src, dst: dst, kind: link.kind, links: [] };
         agg[key].links.push(link);
       });
