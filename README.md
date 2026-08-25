@@ -7,6 +7,11 @@ fully offline, interactive HTML reports that help people understand how the
 pipeline works: what builds what, what tasks can be run, where variables come
 from, and how files include each other.
 
+It can also connect to a GitLab instance (`pipeview gitlab`), browse the
+projects you can access from a terminal UI, and generate the same reports
+straight from what GitLab serves — cross-repository `include:`s resolved
+and all.
+
 ## Quickstart
 
 ```bash
@@ -81,9 +86,10 @@ Transfer the `dist/` directory to the target machine, then:
 pip install --no-index --find-links dist/ pipeview
 ```
 
-After install, the tool performs zero network access, ever. Generated reports
-are self-contained HTML files that work from `file://` — no CDN, no remote
-fonts, no fetches of any kind.
+After install, report generation performs zero network access, ever — only
+the explicit `pipeview gitlab` subcommand talks to a network, and only to
+the GitLab host you name. Generated reports are self-contained HTML files
+that work from `file://` — no CDN, no remote fonts, no fetches of any kind.
 
 ## HTML report views
 
@@ -127,6 +133,92 @@ The generated report is a single self-contained HTML file with four views
    documentation tooltips (what the variable is, an example value, and when
    GitLab sets it).
 
+## Fetching from GitLab (`pipeview gitlab`)
+
+Everything above works on local files. The `gitlab` subcommand — the **only**
+part of pipeview that performs network access — fetches CI configuration
+directly from a GitLab instance:
+
+```bash
+# One-time: create + store a read_api token (opens GitLab's prefilled form,
+# you paste the token back; stored 0600 in ~/.config/pipeview/gitlab.json)
+pipeview gitlab auth --host https://gitlab.example.com
+
+# Interactive project browser (curses TUI)
+pipeview gitlab
+
+# Headless equivalents
+pipeview gitlab projects --search api        # list what the token can see
+pipeview gitlab report group/app --ref main  # fetch + generate one report
+pipeview gitlab track group/app              # remember a project (default branch)
+pipeview gitlab track group/app@release/2.0  # …or pin any branch/tag
+pipeview gitlab sync -o reports/             # report on every tracked entry
+```
+
+Tracked entries are `group/app` (follows the project's default branch) or
+`group/app@ref` (pinned to a branch or tag; `--ref` works too). A project
+can be tracked at several refs at once; `sync` generates one report per
+entry, and `untrack group/app` sweeps every ref of the project while
+`untrack group/app@dev` removes just that one.
+
+In the browser: `↑/↓` move, `/` searches server-side, `enter` opens a
+project and then generates a report for the selected ref, `o` opens the
+generated HTML, `?` shows all keys. `t` tracks/untracks: in the project
+list it tracks the default branch (tracked projects sort first with a
+`●`); in the ref picker it pins the selected branch or tag, with a `●` on
+every tracked ref.
+
+Tokens are looked up in order: `--token`, `$PIPEVIEW_GITLAB_TOKEN`,
+`$GITLAB_TOKEN`, `$GITLAB_PRIVATE_TOKEN`, then the stored config. A first
+token cannot be created via the API (the API requires a token), so `auth`
+opens the prefilled personal-access-token form instead. Corporate TLS:
+`--ca-bundle` (or the usual `REQUESTS_CA_BUNDLE`/`CURL_CA_BUNDLE`).
+
+### How cross-repo includes are resolved
+
+Two strategies (`--strategy auto|lint|files`, default `auto`):
+
+- **`lint`** — one call to GitLab's project-scoped CI Lint API
+  (`GET /projects/:id/ci/lint`), whose `merged_yaml` response field is the
+  complete configuration with **every** `include:` — cross-project,
+  template, remote, and component — already expanded server-side, under
+  your own permissions. No repository traversal needed. GitLab's own
+  `errors`/`warnings` verdict lands in the report's diagnostics, and the
+  response's provenance metadata (which file came from which repo) lands in
+  the File Map.
+- **`files`** — fetches the root CI file and walks `include:` recursively
+  across repositories via the repository-files API (`include:project` files
+  come from their own repos, templates from the template API, and so on).
+  Used automatically when the lint endpoint is unavailable, or on request
+  when you want real per-file line numbers instead of the merged view.
+
+Fetched files are materialized under `<outdir>/fetched/<project>@<ref>/`
+(cross-repo files under `_external/`), then the ordinary offline pipeline
+runs — generated reports remain fully offline.
+
+### When something goes wrong
+
+`sync` and `report` print each entry's warning/error diagnostics to stderr
+— including GitLab's own CI Lint verdict ("jobs:deploy config contains
+unknown keys…"), fetch failures ("Cannot fetch group/lib@stable:ci/x.yml:
+GitLab API 404…"), and unresolved includes — so a failing tracked project
+tells you *what* failed, not just that it did.
+
+For more, turn on logging:
+
+```bash
+pipeview gitlab sync -v         # fetch steps and decisions, as they happen
+pipeview gitlab sync -vv        # + every HTTP request, with status and timing
+pipeview gitlab report group/app --log-file debug.log   # full detail to a file
+```
+
+`-v` shows which strategy was chosen and why, every file fetched (source,
+size, destination), ref resolutions, and all diagnostics including infos;
+`-vv` adds each API call. The browser (`pipeview gitlab -v`) writes the
+same log to `<outdir>/pipeview-gitlab.log` instead of the screen — curses
+owns the terminal — and the status bar points there. `--log-file` always
+captures debug-level detail regardless of `-v`.
+
 ## The `##` docstring convention
 
 Add a `##` comment above (or on the same line as) a target or job to document
@@ -159,9 +251,15 @@ CDN references, no remote fonts, no fetches of any kind. This is enforced by
 an automated test that scans every generated report for `http://` and
 `https://` resource references.
 
-The tool itself never makes network requests while generating a report.
-Unresolvable includes (GitLab `project:`, `remote:`, `template:`,
-`component:`) become diagnostics and ghost nodes, not download attempts.
+The tool never makes network requests while generating a report, and
+`pipeview <path>` never touches the network at all. Unresolvable includes
+(GitLab `project:`, `remote:`, `template:`, `component:`) become diagnostics
+and ghost nodes, not download attempts.
+
+The one deliberate exception is the explicit `pipeview gitlab` subcommand,
+which talks to exactly the GitLab host you point it at, materializes what it
+fetched to disk, and then runs the same offline pipeline — the reports it
+produces are as offline as everything else.
 
 ## Make enrichment caveat
 
@@ -179,6 +277,7 @@ silently skipped with an info diagnostic.
 
 ```
 pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--version]
+pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 ```
 
 | Flag | Default | Description |
@@ -209,6 +308,14 @@ pipeview/
     make_parser.py   # static GNU Make parser
     gitlab_parser.py # GitLab CI YAML parser
     enrich.py        # optional make -pqn enrichment pass
+  gitlab/            # `pipeview gitlab` — the only networked code
+    api.py           # stdlib GitLab REST client
+    auth.py          # token resolution + prefilled-URL creation flow
+    config.py        # ~/.config/pipeview/gitlab.json (hosts, tracked lists)
+    fetch.py         # lint & files fetch strategies
+    report.py        # fetched config -> the ordinary offline pipeline
+    tui.py           # curses project browser
+    cli.py           # subcommand parsing
   render/
     html.py          # single-file HTML report generator
     exports.py       # model.json, graph.dot, graph.mmd, graph.svg
