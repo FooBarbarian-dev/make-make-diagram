@@ -521,6 +521,42 @@ mark {
   border: 1.5px dashed var(--text-muted); border-radius: 3px;
   vertical-align: -1px; margin-right: 4px;
 }
+.legend-section {
+  font-size: var(--fs-0); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted);
+  margin: var(--sp-3) 0 2px;
+}
+.legend-body > .legend-section:first-child { margin-top: var(--sp-1); }
+.legend-item .legend-count { color: var(--text-muted); margin-left: auto; }
+.focus-row { display: flex; align-items: center; gap: var(--sp-2); min-height: 28px; }
+.focus-row label { color: var(--text-muted); }
+.focus-row select, .focus-row input {
+  min-height: 24px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: 400 var(--fs-1) var(--font-ui);
+  padding: 0 var(--sp-1);
+}
+.focus-row input { width: 52px; }
+
+/* collapsed namespace groups + expanded cluster outlines */
+.graph-node.kind-group rect { fill: var(--surface-sunken); stroke: var(--border-strong); stroke-width: 1.5; }
+.graph-node.kind-group text { font-weight: 600; }
+.graph-cluster rect {
+  fill: none;
+  stroke: var(--border-strong);
+  stroke-dasharray: 3 3;
+  stroke-width: 1;
+}
+.graph-cluster .cluster-label {
+  fill: var(--text-muted);
+  font: 600 10.5px var(--font-ui);
+  cursor: pointer;
+}
+.graph-cluster .cluster-label:hover { fill: var(--accent); }
 
 /* ============================================================
    Data tables (tasks, variables)
@@ -1503,6 +1539,16 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         + '</div></div>';
     }
 
+    // Resolved by a sync rollup: the reference points at another tracked
+    // project — offer the jump instead of a dead end.
+    const rollupLink = node.annotations && node.annotations.rollup_link;
+    if (rollupLink) {
+      html += '<div class="panel-section"><h3>Cross-project link</h3>'
+        + '<div class="value wrap-any">Resolved to <code>' + esc(rollupLink.entry) + '</code>'
+        + ' in the last sync — <a href="' + esc(rollupLink.rollup)
+        + '">open the rollup</a> to explore the linked pipelines.</div></div>';
+    }
+
     if (node.doc) {
       html += '<div class="panel-section"><h3>Description</h3>'
         + '<div class="value wrap-any">' + esc(node.doc) + '</div></div>';
@@ -1804,39 +1850,194 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     let rootG = null;
     let selectedId = null;
     let focusId = null;
-    const hiddenKinds = new Set();
+    const hiddenKinds = new Set();       // edge kinds
+    const hiddenNodeKinds = new Set();   // NODE_TOGGLES keys
+    const expandedGroups = new Set();    // group keys (collapsed by default)
+    let focusDir = 'deps';               // 'deps' | 'dependents' | 'both'
+    let focusDepth = null;               // null = unlimited
+    let lastEdges = [];                  // edges of the last layout (mapped)
     let laidOut = false;
 
-    const kindsPresent = Array.from(new Set(graphEdges.map(e => e.kind)));
+    /* Namespace groups: GitLab child pipelines (annotations.child_pipeline)
+       and recursive sub-makes (id "ns:name"). Collapsed to one expandable
+       node by default; expanding draws members inside a cluster outline. */
+    function groupKeyOf(n) {
+      if (n.annotations && n.annotations.child_pipeline) {
+        return n.annotations.child_pipeline;
+      }
+      if ((n.kind === 'target' || n.kind === 'pattern_rule')
+        && n.id !== n.name && n.id.endsWith(':' + n.name)) {
+        return n.id.slice(0, n.id.length - n.name.length - 1);
+      }
+      return null;
+    }
+    const nodeGroup = {};
+    const groupMembers = {};
+    REPORT.nodes.forEach(n => {
+      const k = groupKeyOf(n);
+      if (k) {
+        nodeGroup[n.id] = k;
+        (groupMembers[k] = groupMembers[k] || []).push(n.id);
+      }
+    });
+    const groupKeys = Object.keys(groupMembers).sort();
+    const groupLabel = k => (REPORT.format === 'gitlab_ci' ? 'child pipeline ' : 'sub-make ') + k;
+
+    const NODE_TOGGLES = [
+      { key: 'stage', label: 'stage lanes', test: n => n.kind === 'stage' },
+      { key: 'template', label: 'templates', test: n => (n.flags || []).indexOf('template') >= 0 },
+      { key: 'pattern_rule', label: 'pattern rules', test: n => n.kind === 'pattern_rule' },
+      { key: 'ghost', label: 'unresolved references', test: n => n.kind === 'ghost' }
+    ];
+    const nodeTogglesPresent = NODE_TOGGLES.filter(t => REPORT.nodes.some(t.test));
+    const nodeHidden = n => nodeTogglesPresent.some(
+      t => hiddenNodeKinds.has(t.key) && t.test(n));
+
+    // invokes edges target FILE paths (child configs, sub-makefiles) and
+    // normally live in the Files view — but a collapsed group node stands
+    // in for exactly that file, so the trigger/recursion edge can land on it.
+    function groupForPath(p) {
+      if (groupMembers[p]) return p;                       // gitlab child config
+      for (const k of groupKeys) {
+        if (p.indexOf(k + '/') === 0) return k;            // sub-make directory
+      }
+      return null;
+    }
+    const bridgedInvokes = fileEdges.some(
+      e => e.kind === 'invokes' && groupForPath(e.dst));
+
+    const kindsPresent = Array.from(new Set(
+      graphEdges.map(e => e.kind).concat(bridgedInvokes ? ['invokes'] : [])));
     noteEl.textContent = REPORT.nodes.length + ' node' + (REPORT.nodes.length === 1 ? '' : 's')
       + ' · ' + graphEdges.length + ' edge' + (graphEdges.length === 1 ? '' : 's');
 
-    // Legend doubles as the edge-kind filter — one list, one place.
+    // Legend doubles as the filter & view-options surface — one list, one place.
     const legendBody = document.getElementById('legend-body');
-    kindsPresent.forEach(kind => {
+    function legendSection(title) {
+      const el = document.createElement('div');
+      el.className = 'legend-section';
+      el.textContent = title;
+      legendBody.appendChild(el);
+    }
+    function legendCheckbox(labelHtml, checked, ariaLabel, onChange) {
       const label = document.createElement('label');
       label.className = 'legend-item';
       const cb = document.createElement('input');
       cb.type = 'checkbox';
-      cb.checked = true;
-      cb.setAttribute('aria-label', 'Show ' + (EDGE_LABELS[kind] || kind) + ' edges');
-      cb.addEventListener('change', () => {
-        if (cb.checked) hiddenKinds.delete(kind); else hiddenKinds.add(kind);
-        layout();
-      });
-      const dash = EDGE_DASH[kind] || '';
+      cb.checked = checked;
+      cb.setAttribute('aria-label', ariaLabel);
+      cb.addEventListener('change', () => onChange(cb.checked));
       label.appendChild(cb);
-      label.insertAdjacentHTML('beforeend',
+      label.insertAdjacentHTML('beforeend', labelHtml);
+      legendBody.appendChild(label);
+      return cb;
+    }
+    if (kindsPresent.length) legendSection('Edges');
+    kindsPresent.forEach(kind => {
+      const dash = EDGE_DASH[kind] || '';
+      legendCheckbox(
         '<svg width="28" height="8" aria-hidden="true"><line x1="1" y1="4" x2="27" y2="4" stroke="'
         + edgeVar(kind) + '" stroke-width="2"' + (dash ? ' stroke-dasharray="' + dash + '"' : '') + '/></svg>'
-        + '<span>' + esc(EDGE_LABELS[kind] || kind) + '</span>');
-      legendBody.appendChild(label);
+        + '<span>' + esc(EDGE_LABELS[kind] || kind) + '</span>',
+        true, 'Show ' + (EDGE_LABELS[kind] || kind) + ' edges',
+        checked => {
+          if (checked) hiddenKinds.delete(kind); else hiddenKinds.add(kind);
+          layout();
+        });
     });
+    if (nodeTogglesPresent.length) legendSection('Nodes');
+    const nodeToggleCbs = {};
+    nodeTogglesPresent.forEach(t => {
+      const count = REPORT.nodes.filter(t.test).length;
+      nodeToggleCbs[t.key] = legendCheckbox(
+        '<span>' + esc(t.label) + '</span><span class="legend-count">' + count + '</span>',
+        true, 'Show ' + t.label,
+        checked => {
+          if (checked) hiddenNodeKinds.delete(t.key); else hiddenNodeKinds.add(t.key);
+          layout();
+        });
+    });
+    const groupCbs = {};
+    if (groupKeys.length) legendSection('Groups');
+    groupKeys.forEach(k => {
+      groupCbs[k] = legendCheckbox(
+        '<span class="clip" title="' + esc(groupLabel(k)) + '">' + esc(k) + '</span>'
+        + '<span class="legend-count">' + groupMembers[k].length + '</span>',
+        false, 'Expand ' + groupLabel(k),
+        checked => {
+          if (checked) expandedGroups.add(k); else expandedGroups.delete(k);
+          layout();
+        });
+    });
+    (function () {
+      legendSection('Focus');
+      const row = document.createElement('div');
+      row.className = 'focus-row';
+      row.innerHTML =
+        '<label for="focus-dir">follow</label>'
+        + '<select id="focus-dir" aria-label="Focus direction">'
+        + '<option value="deps">dependencies</option>'
+        + '<option value="dependents">dependents</option>'
+        + '<option value="both">both</option>'
+        + '</select>'
+        + '<label for="focus-depth">depth</label>'
+        + '<input type="number" id="focus-depth" min="1" placeholder="∞" aria-label="Focus depth (empty = unlimited)">';
+      legendBody.appendChild(row);
+      row.querySelector('#focus-dir').addEventListener('change', e => {
+        focusDir = e.target.value;
+        applyStates();
+      });
+      row.querySelector('#focus-depth').addEventListener('input', e => {
+        const v = parseInt(e.target.value, 10);
+        focusDepth = (isFinite(v) && v >= 1) ? v : null;
+        applyStates();
+      });
+    })();
     if (REPORT.nodes.some(n => n.kind === 'ghost')) {
       legendBody.insertAdjacentHTML('beforeend',
         '<div class="legend-note"><span class="sample-ghost"></span>dashed = referenced but never defined</div>');
     }
     if (kindsPresent.length) document.getElementById('graph-legend').open = true;
+
+    /* The drawable model under the current view options: node-kind
+       toggles applied, collapsed groups folded to one node each, edges
+       re-mapped through the fold (deduplicated, self-loops dropped). */
+    function visibleModel() {
+      const mapped = {};
+      REPORT.nodes.forEach(n => {
+        if (nodeHidden(n)) return;
+        const k = nodeGroup[n.id];
+        mapped[n.id] = (k && !expandedGroups.has(k)) ? 'group:' + k : n.id;
+      });
+      const collapsed = [], clusters = [];
+      groupKeys.forEach(k => {
+        const members = groupMembers[k].filter(id => mapped[id] !== undefined);
+        if (!members.length) return;
+        (expandedGroups.has(k) ? clusters : collapsed).push({ key: k, members: members });
+      });
+      const edges = [];
+      const seen = {};
+      function addEdge(s, d, kind) {
+        if (s === undefined || d === undefined || s === d) return;
+        const key = s + ' ' + d + ' ' + kind;
+        if (seen[key]) { seen[key].n++; return; }
+        seen[key] = { src: s, dst: d, kind: kind, n: 1 };
+        edges.push(seen[key]);
+      }
+      graphEdges.forEach(e => {
+        if (!hiddenKinds.has(e.kind)) addEdge(mapped[e.src], mapped[e.dst], e.kind);
+      });
+      fileEdges.forEach(e => {
+        if (e.kind !== 'invokes' || hiddenKinds.has('invokes')) return;
+        const k = groupForPath(e.dst);
+        if (!k || expandedGroups.has(k)) return;
+        addEdge(mapped[e.src], 'group:' + k, 'invokes');
+      });
+      return {
+        nodes: REPORT.nodes.filter(n => mapped[n.id] === n.id),
+        collapsed: collapsed, clusters: clusters, edges: edges
+      };
+    }
 
     function layout() {
       if (typeof dagre === 'undefined' || !REPORT.nodes.length) {
@@ -1847,16 +2048,26 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       }
       emptyEl.hidden = true;
 
-      const g = new dagre.graphlib.Graph();
+      const vm = visibleModel();
+      lastEdges = vm.edges;
+      const g = new dagre.graphlib.Graph({ compound: true });
       g.setGraph({ rankdir: 'LR', nodesep: 28, ranksep: 72, marginx: 24, marginy: 24 });
       g.setDefaultEdgeLabel(() => ({}));
 
-      REPORT.nodes.forEach(n => {
+      vm.nodes.forEach(n => {
         const label = midTrunc(n.name, 26);
         g.setNode(n.id, { label: label, width: Math.max(96, label.length * 7 + 26), height: 34 });
       });
-      const visEdges = graphEdges.filter(e => !hiddenKinds.has(e.kind));
-      visEdges.forEach(e => g.setEdge(e.src, e.dst, { kind: e.kind }));
+      vm.collapsed.forEach(grp => {
+        const label = '▸ ' + midTrunc(grp.key, 22) + ' · ' + grp.members.length;
+        g.setNode('group:' + grp.key,
+          { label: label, width: Math.max(120, label.length * 7 + 26), height: 38 });
+      });
+      vm.clusters.forEach(grp => {
+        g.setNode('group:' + grp.key, {});
+        grp.members.forEach(id => g.setParent(id, 'group:' + grp.key));
+      });
+      vm.edges.forEach(e => g.setEdge(e.src, e.dst, { kind: e.kind, n: e.n }));
 
       dagre.layout(g);
       const gr = g.graph();
@@ -1871,6 +2082,22 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       });
       defs += '</defs>';
 
+      // Expanded groups first: cluster outlines sit behind edges and nodes.
+      let clustersSvg = '<g class="clusters">';
+      vm.clusters.forEach(grp => {
+        const lo = g.node('group:' + grp.key);
+        if (!lo) return;
+        const x = lo.x - lo.width / 2, y = lo.y - lo.height / 2;
+        clustersSvg += '<g class="graph-cluster" data-group="' + esc(grp.key) + '">'
+          + '<rect x="' + (x - 8) + '" y="' + (y - 18) + '" width="' + (lo.width + 16)
+          + '" height="' + (lo.height + 26) + '" rx="8"/>'
+          + '<text class="cluster-label" x="' + (x - 2) + '" y="' + (y - 6) + '" tabindex="0" role="button"'
+          + ' aria-label="Collapse ' + esc(groupLabel(grp.key)) + '">▾ ' + esc(midTrunc(grp.key, 34))
+          + '<title>Collapse ' + esc(groupLabel(grp.key)) + '</title></text>'
+          + '</g>';
+      });
+      clustersSvg += '</g>';
+
       let edgesSvg = '<g class="edges">';
       g.edges().forEach(e => {
         const edge = g.edge(e);
@@ -1880,38 +2107,62 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         let d = 'M' + pts[0].x + ',' + pts[0].y;
         for (let i = 1; i < pts.length; i++) d += ' L' + pts[i].x + ',' + pts[i].y;
         const dash = EDGE_DASH[kind] || '';
+        const mult = edge.n > 1 ? ' ×' + edge.n : '';
         edgesSvg += '<path class="graph-edge" d="' + d + '" stroke="' + edgeVar(kind) + '"'
           + (dash ? ' stroke-dasharray="' + dash + '"' : '')
           + ' marker-end="url(#arrow-' + kind + ')" data-src="' + esc(e.v) + '" data-dst="' + esc(e.w) + '">'
-          + '<title>' + esc(e.v) + ' → ' + esc(e.w) + ' (' + esc(EDGE_LABELS[kind] || kind) + ')</title></path>';
+          + '<title>' + esc(e.v) + ' → ' + esc(e.w) + ' (' + esc(EDGE_LABELS[kind] || kind) + mult + ')</title></path>';
       });
       edgesSvg += '</g>';
 
       let nodesSvg = '<g class="nodes">';
       g.nodes().forEach(nid => {
         const lo = g.node(nid);
-        const node = nodeMap[nid];
-        if (!node || !lo) return;
+        if (!lo) return;
         nodePos[nid] = { x: lo.x, y: lo.y };
-        const x = lo.x - lo.width / 2, y = lo.y - lo.height / 2;
-        const rx = node.kind === 'stage' ? lo.height / 2 : 5;
-        const cls = 'graph-node kind-' + node.kind + (isTask(node) ? ' is-task' : '');
-        nodesSvg += '<g class="' + cls + '" data-id="' + esc(nid) + '" tabindex="-1">'
-          + '<title>' + esc(node.name) + ' (' + esc(KIND_LABELS[node.kind] || node.kind) + ')</title>'
-          + '<rect x="' + x + '" y="' + y + '" width="' + lo.width + '" height="' + lo.height + '" rx="' + rx + '"/>'
-          + '<text x="' + lo.x + '" y="' + (lo.y + 4) + '" text-anchor="middle">' + esc(lo.label) + '</text>'
-          + '</g>';
+        const node = nodeMap[nid];
+        if (node) {
+          const x = lo.x - lo.width / 2, y = lo.y - lo.height / 2;
+          const rx = node.kind === 'stage' ? lo.height / 2 : 5;
+          const cls = 'graph-node kind-' + node.kind + (isTask(node) ? ' is-task' : '');
+          nodesSvg += '<g class="' + cls + '" data-id="' + esc(nid) + '" tabindex="-1">'
+            + '<title>' + esc(node.name) + ' (' + esc(KIND_LABELS[node.kind] || node.kind) + ')</title>'
+            + '<rect x="' + x + '" y="' + y + '" width="' + lo.width + '" height="' + lo.height + '" rx="' + rx + '"/>'
+            + '<text x="' + lo.x + '" y="' + (lo.y + 4) + '" text-anchor="middle">' + esc(lo.label) + '</text>'
+            + '</g>';
+        } else if (nid.indexOf('group:') === 0 && lo.label) {
+          const x = lo.x - lo.width / 2, y = lo.y - lo.height / 2;
+          const key = nid.slice(6);
+          nodesSvg += '<g class="graph-node kind-group" data-group="' + esc(key) + '" tabindex="-1">'
+            + '<title>' + esc(groupLabel(key)) + ' — click to expand</title>'
+            + '<rect x="' + x + '" y="' + y + '" width="' + lo.width + '" height="' + lo.height + '" rx="7"/>'
+            + '<text x="' + lo.x + '" y="' + (lo.y + 4) + '" text-anchor="middle">' + esc(lo.label) + '</text>'
+            + '</g>';
+        }
       });
       nodesSvg += '</g>';
 
-      svg.innerHTML = '<g id="graph-root">' + defs + edgesSvg + nodesSvg + '</g>';
+      svg.innerHTML = '<g id="graph-root">' + defs + clustersSvg + edgesSvg + nodesSvg + '</g>';
       rootG = document.getElementById('graph-root');
 
-      svg.querySelectorAll('.graph-node').forEach(el => {
+      svg.querySelectorAll('.graph-node[data-id]').forEach(el => {
         el.addEventListener('click', ev => {
           ev.stopPropagation();
           setSelected(el.dataset.id, { focus: true });
           showNodeDetail(el.dataset.id, { keepGraphSelection: true });
+        });
+      });
+      svg.querySelectorAll('.graph-node[data-group]').forEach(el => {
+        el.addEventListener('click', ev => {
+          ev.stopPropagation();
+          setGroupExpanded(el.dataset.group, true);
+        });
+      });
+      svg.querySelectorAll('.cluster-label').forEach(el => {
+        const collapse = () => setGroupExpanded(el.parentNode.dataset.group, false);
+        el.addEventListener('click', ev => { ev.stopPropagation(); collapse(); });
+        el.addEventListener('keydown', ev => {
+          if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); collapse(); }
         });
       });
 
@@ -1919,6 +2170,12 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       laidOut = true;
       applyStates();
       applyTransform();
+    }
+
+    function setGroupExpanded(key, expanded) {
+      if (expanded) expandedGroups.add(key); else expandedGroups.delete(key);
+      if (groupCbs[key]) groupCbs[key].checked = expanded;
+      layout();
     }
 
     function applyTransform() {
@@ -1961,7 +2218,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     let panning = false, sx = 0, sy = 0;
     container.addEventListener('pointerdown', e => {
       if (e.target.closest('.graph-node') || e.target.closest('.graph-controls')
-        || e.target.closest('.graph-legend')) return;
+        || e.target.closest('.graph-legend') || e.target.closest('.cluster-label')) return;
       panning = true;
       sx = e.clientX - tx; sy = e.clientY - ty;
       container.setPointerCapture(e.pointerId);
@@ -2004,14 +2261,25 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }
 
     function reachableFrom(startId) {
+      // Over the edges as drawn (grouping applied), honoring the focus
+      // direction and hop-depth controls. Defaults (dependencies, no
+      // limit) match the original click-to-focus behavior.
       const seen = new Set();
-      const queue = [startId];
-      const visEdges = graphEdges.filter(e => !hiddenKinds.has(e.kind));
+      const queue = [{ id: startId, d: 0 }];
+      const maxDepth = focusDepth == null ? Infinity : focusDepth;
       while (queue.length) {
         const cur = queue.shift();
-        if (seen.has(cur)) continue;
-        seen.add(cur);
-        visEdges.forEach(e => { if (e.src === cur) queue.push(e.dst); });
+        if (seen.has(cur.id)) continue;
+        seen.add(cur.id);
+        if (cur.d >= maxDepth) continue;
+        lastEdges.forEach(e => {
+          if ((focusDir === 'deps' || focusDir === 'both') && e.src === cur.id) {
+            queue.push({ id: e.dst, d: cur.d + 1 });
+          }
+          if ((focusDir === 'dependents' || focusDir === 'both') && e.dst === cur.id) {
+            queue.push({ id: e.src, d: cur.d + 1 });
+          }
+        });
       }
       return seen;
     }
@@ -2019,8 +2287,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     function applyStates() {
       const focusSet = focusId ? reachableFrom(focusId) : null;
       svg.querySelectorAll('.graph-node').forEach(el => {
-        el.classList.toggle('selected', el.dataset.id === selectedId);
-        el.classList.toggle('dimmed', !!focusSet && !focusSet.has(el.dataset.id));
+        const drawnId = el.dataset.id !== undefined
+          ? el.dataset.id : 'group:' + el.dataset.group;
+        el.classList.toggle('selected', drawnId === selectedId);
+        el.classList.toggle('dimmed', !!focusSet && !focusSet.has(drawnId));
       });
       svg.querySelectorAll('.graph-edge').forEach(el => {
         el.classList.toggle('dimmed',
@@ -2040,8 +2310,28 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       applyStates();
     }
 
-    // Pan/zoom a node into view — selection is never off-canvas.
+    // Pan/zoom a node into view — selection is never off-canvas. A node
+    // folded into a collapsed group or hidden by a node toggle is brought
+    // back first (the matching legend control re-syncs).
     function revealNode(id) {
+      const node = nodeMap[id];
+      if (node) {
+        let relaid = false;
+        const k = nodeGroup[id];
+        if (k && !expandedGroups.has(k)) {
+          expandedGroups.add(k);
+          if (groupCbs[k]) groupCbs[k].checked = true;
+          relaid = true;
+        }
+        nodeTogglesPresent.forEach(t => {
+          if (hiddenNodeKinds.has(t.key) && t.test(node)) {
+            hiddenNodeKinds.delete(t.key);
+            if (nodeToggleCbs[t.key]) nodeToggleCbs[t.key].checked = true;
+            relaid = true;
+          }
+        });
+        if (relaid && laidOut) layout();
+      }
       const run = () => {
         const pos = nodePos[id];
         if (!pos) return;
