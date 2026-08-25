@@ -45,6 +45,8 @@ CASES = [
      "configA": {"scenario": "push_branch", "branch": "main"}},
     {"name": "matrix_listing", "fixture": "whatif_matrix",
      "configA": {"scenario": "push_branch", "branch": "main"}},
+    {"name": "stage_order", "fixture": "whatif_stageorder",
+     "configA": {"scenario": "push_branch", "branch": "main"}},
 ]
 
 
@@ -141,6 +143,15 @@ class TestTextSummary:
         line = next(ln for ln in summary.splitlines() if "build" in ln and "[build]" in ln)
         assert "×2" in line
 
+    def test_jobs_are_listed_in_stage_order_not_yaml_order(self, run):
+        # the fixture defines deploy_prod first — GitLab still shows
+        # build → test → deploy, and so must the listing
+        summary = run["stage_order"]["summaryA"]
+        lines = summary.splitlines()
+        order = [lines.index(next(ln for ln in lines if name in ln))
+                 for name in ("build_it", "unit_tests", "deploy_prod")]
+        assert order == sorted(order)
+
 
 class TestDiffEvents:
     def test_branch_vs_tag_counts(self, run):
@@ -189,3 +200,19 @@ class TestTextDiff:
         assert any(ln.startswith("~ lint_everything") and "2 pipelines → 1 pipeline" in ln
                    for ln in lines)
         assert any(ln.startswith("= build_all") for ln in lines)
+
+    def test_pipeline_status_section_when_pairing_is_noteworthy(self, run):
+        # branch → tag renames the non-MR pipeline and drops the MR one:
+        # the pasted text must say so, not just count removed jobs
+        lines = run["dup_branch_vs_tag"]["textDiff"].splitlines()
+        assert "  pipelines:" in lines
+        assert any("Branch pipeline → Tag pipeline" in ln for ln in lines)
+        assert any("Merge request pipeline — baseline only" in ln for ln in lines)
+
+    def test_no_pipeline_section_when_pairing_is_boring(self, run):
+        # open-MR vs closed-MR: the branch pipeline matches itself with no
+        # status flags; only the MR pipeline line is noteworthy — the
+        # section appears, naming it, and the identical pair stays quiet
+        lines = run["dup_mr_closed"]["textDiff"].splitlines()
+        assert any("Merge request pipeline — baseline only" in ln for ln in lines)
+        assert not any("Branch pipeline →" in ln for ln in lines)

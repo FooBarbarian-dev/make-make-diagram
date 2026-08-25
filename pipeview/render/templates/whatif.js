@@ -1392,7 +1392,22 @@ var PipeviewWhatIf = (function () {
       names[n.id] = w ? w.name : n.name;
       stages[n.id] = w ? w.stage : '';
     });
-    return { names: names, stages: stages };
+    return { names: names, stages: stages,
+             stageOrder: (((report.annotations || {}).whatif) || {}).stages || [] };
+  }
+
+  // Listings read like GitLab presents pipelines: stage order first, YAML
+  // definition order within a stage. Unknown stages sort last, stably.
+  function stageSorted(ids, meta) {
+    var pos = {};
+    ids.forEach(function (id, i) { pos[id] = i; });
+    var rank = function (id) {
+      var i = meta.stageOrder.indexOf(meta.stages[id]);
+      return i < 0 ? meta.stageOrder.length : i;
+    };
+    return ids.slice().sort(function (x, y) {
+      return (rank(x) - rank(y)) || (pos[x] - pos[y]);
+    });
   }
 
   function padTo(s, width) {
@@ -1432,7 +1447,8 @@ var PipeviewWhatIf = (function () {
         head += ' — creation uncertain: ' + (cand.reason || 'depends');
       }
       lines.push(head);
-      var ids = cand.jobOrder.filter(function (id) { return mightRun(cand.jobs[id]); });
+      var ids = stageSorted(
+        cand.jobOrder.filter(function (id) { return mightRun(cand.jobs[id]); }), meta);
       if (!ids.length) {
         lines.push(pad + '  (no jobs would run)');
       } else {
@@ -1575,6 +1591,45 @@ var PipeviewWhatIf = (function () {
     return '  [' + eff.pipes.join(', ') + ']';
   }
 
+  // One line per candidate pair when anything about the PIPELINES (not the
+  // jobs) differs: one-sided pairs, differing labels, or a creation problem.
+  // "4 removed" is misleading if the real story is "the tag pipeline would
+  // fail creation" — the pasted text must carry that.
+  function pipelineStatusLines(diff) {
+    var status = function (cand, side) {
+      if (!cand) return null;
+      if (cand.creationFails) return side + ': creation FAILS';
+      if (cand.created === false) {
+        return side + ': not created (' + (cand.reason || 'suppressed') + ')';
+      }
+      if (cand.created === null) {
+        return side + ': creation uncertain';
+      }
+      return null;
+    };
+    var lines = [];
+    var noteworthy = false;
+    diff.pairs.forEach(function (p) {
+      var name;
+      if (p.a && p.b) {
+        name = p.a.label === p.b.label ? p.b.label
+          : p.a.label + ' → ' + p.b.label;
+        if (p.a.label !== p.b.label) noteworthy = true;
+      } else if (p.b) {
+        name = p.b.label + ' — current only';
+        noteworthy = true;
+      } else {
+        name = p.a.label + ' — baseline only';
+        noteworthy = true;
+      }
+      var flags = [status(p.a, 'baseline'), status(p.b, 'current')]
+        .filter(function (f) { return f; });
+      if (flags.length) noteworthy = true;
+      lines.push('    ' + name + (flags.length ? ' — ' + flags.join('; ') : ''));
+    });
+    return noteworthy ? ['  pipelines:'].concat(lines) : [];
+  }
+
   // The copy/paste delta: +/-/~/= per job, event-level.
   function textDiff(report, diff, labelA, labelB) {
     var meta = jobMeta(report);
@@ -1585,13 +1640,14 @@ var PipeviewWhatIf = (function () {
       '  current:  ' + labelB,
       '  ' + c.added + ' added, ' + c.removed + ' removed, '
         + c.changed + ' changed, ' + c.same + ' unchanged'
-    ];
+    ].concat(pipelineStatusLines(diff));
     var nameW = 0;
     diff.order.forEach(function (id) {
       nameW = Math.max(nameW, Math.min((meta.names[id] || id).length, 40));
     });
+    var order = stageSorted(diff.order, meta);
     ['added', 'removed', 'changed', 'same'].forEach(function (kind) {
-      var block = diff.order.filter(function (id) { return diff.jobs[id].delta === kind; });
+      var block = order.filter(function (id) { return diff.jobs[id].delta === kind; });
       if (!block.length) return;
       lines.push('');
       block.forEach(function (id) {

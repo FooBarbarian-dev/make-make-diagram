@@ -804,7 +804,8 @@ td .btn.copy-btn { min-height: var(--hit); }
 .wi-node.d-added rect { stroke: var(--ok); stroke-width: 2.5; stroke-dasharray: none; }
 .wi-node.d-removed { opacity: 0.55; }
 .wi-node.d-removed rect { stroke: var(--error); stroke-dasharray: 5 3; }
-.wi-node.d-removed text { text-decoration: line-through; }
+/* strike the job name only — the "removed · was runs" explainer must stay legible */
+.wi-node.d-removed text:not(.wi-state-label) { text-decoration: line-through; }
 .wi-node.d-changed rect { stroke: var(--warn); stroke-width: 2.5; stroke-dasharray: none; }
 .wi-text { margin-bottom: var(--sp-3); font-size: var(--fs-0); }
 .wi-text summary { cursor: pointer; color: var(--text-muted); min-height: 24px; user-select: none; }
@@ -817,6 +818,7 @@ td .btn.copy-btn { min-height: var(--hit); }
   user-select: text; cursor: text;
 }
 #wi-pin-baseline.wi-pinned { border-color: var(--accent); color: var(--accent); }
+.legend-item:has(input:disabled) { opacity: 0.45; cursor: not-allowed; }
 .wi-edge { fill: none; stroke: var(--edge-needs); stroke-width: 1.4; }
 .wi-edge.kind-stage_order { stroke: var(--edge-stage-order); stroke-dasharray: 4 4; opacity: 0.6; }
 
@@ -994,7 +996,7 @@ kbd {
           data-tip="The simulation shows what GitLab would PROBABLY do. Unknowns are shown as 'depends', never guessed. Assumed world: branches main and dev exist and are protected; other branches are unprotected.">
           probable behavior — hover for assumptions</span>
         <button class="btn" id="wi-copy-text"
-          data-tip="Copy the plain-text job listing (or the delta when a baseline is pinned)">Copy text</button>
+          data-tip="Copy the plain-text job listing (or the delta when a baseline is pinned)">Copy job list</button>
         <button class="btn" id="wi-pin-baseline"
           data-tip="Freeze the current scenario as a baseline, then change any knob — the scenario preset included — to see what the change adds, removes, or alters">Pin as baseline</button>
         <label class="legend-item" style="min-height:0">
@@ -3376,6 +3378,19 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     }
     wiLastResult = result;
     wiDupSet = new Set(result.duplicates.map(d => d.job));
+    // mode-dependent chrome: the copy button says what it copies, and the
+    // skipped-jobs toggle only applies to the normal per-pipeline graphs
+    wiCopyBtn.textContent = wiCopyLabel();
+    wiShowSkippedEl.disabled = !!wiBaseline;
+    const skipLabel = wiShowSkippedEl.closest('label');
+    if (skipLabel) {
+      if (wiBaseline) {
+        skipLabel.dataset.tip = 'Not used while comparing — delta graphs always '
+          + 'show the union of jobs that would run on either side';
+      } else {
+        delete skipLabel.dataset.tip;
+      }
+    }
     if (wiBaseline) { renderWiDelta(result, cfg); return; }
     const fatal = result.fatal || [];
     wiFatalActive = fatal.length > 0;
@@ -3502,13 +3517,33 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         '<b>Invalid configuration — GitLab refuses to create ANY pipeline:</b><br>'
         + result.fatal.map(f => esc(f.message)).join('<br>')));
     }
+    // pipeline-level status is the headline when it explains the counts —
+    // "4 removed" misleads if the truth is "the tag pipeline fails creation"
+    const pipeNotes = [];
+    diff.pairs.forEach(p => {
+      const note = (cnd, side) => {
+        if (!cnd) return;
+        if (cnd.creationFails) {
+          pipeNotes.push(esc(cnd.label) + ' — ' + side
+            + ': creation fails, so its jobs count as not running');
+        } else if (cnd.created === false) {
+          pipeNotes.push(esc(cnd.label) + ' — ' + side + ': not created ('
+            + esc(cnd.reason || 'suppressed') + ')');
+        } else if (cnd.created === null) {
+          pipeNotes.push(esc(cnd.label) + ' — ' + side + ': whether it is created depends');
+        }
+      };
+      note(p.a, 'baseline');
+      note(p.b, 'current');
+    });
     strip.push(wiDiag('info', '<b>Comparing against the pinned baseline.</b><br>'
       + 'baseline: ' + esc(wiBaseline.label) + '<br>'
       + 'current: ' + esc(curLabel) + '<br>'
       + (identical
           ? '<b>no differences</b> — both configurations run the same jobs the same way'
           : c.added + ' added, ' + c.removed + ' removed, ' + c.changed
-            + ' changed, ' + c.same + ' unchanged')));
+            + ' changed, ' + c.same + ' unchanged')
+      + (pipeNotes.length ? '<br>' + pipeNotes.join('<br>') : '')));
 
     wiResults.innerHTML = legend
       + '<div class="wi-banner-strip">' + strip.join('') + '</div>'
@@ -3521,16 +3556,16 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
 
   function renderWiDeltaPair(pair) {
     const cand = pair.b || pair.a;
-    let title = esc(cand.label);
-    let chips = '<span class="chip">' + esc(cand.source) + '</span>'
-      + '<span class="chip" style="font-family:var(--font-mono)">' + esc(cand.ref) + '</span>';
-    if (pair.a && pair.b
-        && (pair.a.label !== pair.b.label || pair.a.ref !== pair.b.ref)) {
-      title = esc(pair.a.label) + ' → ' + esc(pair.b.label);
-      chips = '<span class="chip">' + esc(pair.a.source) + ' → ' + esc(pair.b.source) + '</span>'
-        + '<span class="chip" style="font-family:var(--font-mono)">'
-        + esc(pair.a.ref) + ' → ' + esc(pair.b.ref) + '</span>';
-    }
+    // arrow forms only where the value actually differs — "push → push" is noise
+    const arrow = (a, b) => (pair.a && pair.b && a !== b) ? a + ' → ' + b
+      : (pair.b ? b : a);
+    const title = pair.a && pair.b && pair.a.label !== pair.b.label
+      ? esc(pair.a.label) + ' → ' + esc(pair.b.label)
+      : esc(cand.label);
+    let chips = '<span class="chip">'
+      + esc(arrow(pair.a && pair.a.source, pair.b && pair.b.source)) + '</span>'
+      + '<span class="chip" style="font-family:var(--font-mono)">'
+      + esc(arrow(pair.a && pair.a.ref, pair.b && pair.b.ref)) + '</span>';
     if (!pair.a) chips += '<span class="chip chip-ok">pipeline added</span>';
     else if (!pair.b) chips += '<span class="chip chip-error">pipeline removed</span>';
     const sideChip = (cnd, side) => {
@@ -3815,13 +3850,17 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     wiPinBtn.classList.toggle('wi-pinned', !!wiBaseline);
   }
 
+  function wiCopyLabel() {
+    return wiBaseline ? 'Copy delta' : 'Copy job list';
+  }
+
   if (whatifAvailable) {
     wiShowSkippedEl.addEventListener('change', renderWiResults);
     wiCopyBtn.addEventListener('click', () => {
       const done = ok => {
         wiCopyBtn.textContent = ok ? 'Copied ✓' : 'Select + Ctrl+C';
         if (!ok) wiSelectText();
-        setTimeout(() => { wiCopyBtn.textContent = 'Copy text'; }, 1800);
+        setTimeout(() => { wiCopyBtn.textContent = wiCopyLabel(); }, 1800);
       };
       if (navigator.clipboard && navigator.clipboard.writeText) {
         navigator.clipboard.writeText(wiCopyText)

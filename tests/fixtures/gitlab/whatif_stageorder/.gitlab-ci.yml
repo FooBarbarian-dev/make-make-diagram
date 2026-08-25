@@ -1,0 +1,23 @@
+# YAML definition order deliberately disagrees with stage order: listings
+# must present jobs the way GitLab presents pipelines — by stage.
+
+stages:
+  - build
+  - test
+  - deploy
+
+deploy_prod:
+  stage: deploy
+  script:
+    - ./deploy.sh
+  when: manual
+
+unit_tests:
+  stage: test
+  script:
+    - make test
+
+build_it:
+  stage: build
+  script:
+    - make build

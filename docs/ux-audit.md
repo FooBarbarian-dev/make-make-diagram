@@ -99,6 +99,21 @@ Severity scale: **P0** broken/data loss · **P1** materially hurts use ·
 |---|----------|-------|----------|--------------|--------|
 | 40 | P2 | Title Case labels ("Dependency Graph", "Task Catalog", "Event Timeline"); tab names are jargon-adjacent; nudge text terse ("no description — add a ## comment"). | throughout | Sentence case everywhere; tabs: Graph / Tasks / Variables / Files; nudge reworded as guidance; buttons say what they do ("Copy command"). | Fixed |
 
+### What-If text listing & trigger delta (post-ship review)
+
+Self-review of the plain-text listing + pin-a-baseline delta from a
+CI-practitioner and UX standpoint, done against the shipped feature with
+the same headless-Chromium walkthrough as Phase 3.
+
+| # | Severity | Issue | Location | Proposed fix | Status |
+|---|----------|-------|----------|--------------|--------|
+| 41 | P1 | Text listing printed jobs in YAML definition order, so `deploy` could appear above `build` — GitLab never presents a pipeline out of stage order, and a pasted listing that does reads as wrong. | `textSummary` in whatif.js | Stage-sort every listing (stage order first, YAML order within a stage; unknown stages last, stable); same ordering inside each `+/-/~/=` block of the text diff. Fixture `whatif_stageorder` pins it. | Fixed |
+| 42 | P1 | The copyable text diff omitted pipeline-level status: branch→tag where the tag pipeline fails creation read as "4 removed" with no why. The UI chips said it; the shareable text — the artifact people actually paste into issues — did not. | `textDiff` in whatif.js | A `pipelines:` section after the counts, listing pair matching (`Branch pipeline → Tag pipeline`, `Merge request pipeline — baseline only`) and creation status (`current: creation FAILS`); emitted only when a pair is noteworthy so boring diffs stay clean. Same note added to the on-screen delta banner. | Fixed |
+| 43 | P2 | Removed delta nodes struck through their entire text, including the "removed · was runs" explainer — the one line telling you what you lost was the least legible thing on the node. | `.wi-node.d-removed` CSS | Strike the job name only; the state sub-label stays plain. | Fixed |
+| 44 | P2 | Pair headers rendered arrow chips even for identical values ("push → push") whenever any other field differed. | `renderWiDeltaPair` | Arrow form per chip only when that value differs; otherwise the single value. | Fixed |
+| 45 | P2 | "show skipped jobs" stayed enabled in delta mode but did nothing there (delta graphs always draw the might-run union) — a live-looking dead control. | What-If toolbar | Disabled while a baseline is pinned, dimmed via `:has()`, tooltip explains why; re-enabled on unpin. | Fixed |
+| 46 | P3 | "Copy text" didn't say what it copies, and the report's microcopy rule (#40) is that buttons say what they do. | What-If toolbar | Contextual label: "Copy job list" normally, "Copy delta" while pinned; the "Copied ✓" flash restores the contextual label. | Fixed |
+
 ## Design plan (Phase 3)
 
 **Direction.** A dense engineering instrument in the profiler/IDE lineage.
