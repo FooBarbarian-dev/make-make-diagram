@@ -196,6 +196,32 @@ Fetched files are materialized under `<outdir>/fetched/<project>@<ref>/`
 (cross-repo files under `_external/`), then the ordinary offline pipeline
 runs — generated reports remain fully offline.
 
+Same-name jobs defined in several files merge exactly as GitLab merges
+them: includes first (later includes beat earlier ones), each file's own
+content on top of what it includes, the root file winning overall —
+hashes like `variables:` merge key by key, while `script:`, `rules:` and
+other arrays or scalars are replaced whole. So a local job that only adds
+`rules:` to a template job keeps the template's script, and the report
+says where each merged job came from (a `merged_from` annotation plus an
+info diagnostic naming both definition sites).
+
+### Built-in `include:template` files
+
+GitLab's built-in templates (`Jobs/Build.gitlab-ci.yml`,
+`Security/SAST.gitlab-ci.yml`, …) ship inside the GitLab installation, and
+its REST template API can only serve a fraction of them: it exposes the
+flattened "dropdown" keys (top-level names plus the basenames of `Pages/`,
+`Verify/` and `Security/`), so `Jobs/*`, `Workflows/*` and every
+category-qualified spelling 404 on **every** GitLab version. pipeview asks
+the instance first using the key spellings that can work, then falls back
+to a bundled snapshot of the real template tree
+(`pipeview/data/gitlab_ci_templates`, MIT-licensed, pinned to a GitLab
+release recorded in its `_meta.json`) — with an info diagnostic naming the
+snapshot version, since your instance's own copy may differ. The same
+snapshot resolves `include:template` in fully-offline `pipeview <path>`
+runs. `--no-bundled-templates` (both CLIs) restores the old
+ghost-node behavior.
+
 ### When something goes wrong
 
 `sync` and `report` print each entry's warning/error diagnostics to stderr
@@ -253,8 +279,11 @@ an automated test that scans every generated report for `http://` and
 
 The tool never makes network requests while generating a report, and
 `pipeview <path>` never touches the network at all. Unresolvable includes
-(GitLab `project:`, `remote:`, `template:`, `component:`) become diagnostics
-and ghost nodes, not download attempts.
+(GitLab `project:`, `remote:`, `component:`) become diagnostics and ghost
+nodes, not download attempts. `include:template` entries are the one kind
+that resolves without a network: GitLab's built-in templates are bundled
+with pipeview (see above), read from disk, and clearly labeled
+`[template]` in the report — disable with `--no-bundled-templates`.
 
 The one deliberate exception is the explicit `pipeview gitlab` subcommand,
 which talks to exactly the GitLab host you point it at, materializes what it

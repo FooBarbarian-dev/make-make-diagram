@@ -68,6 +68,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--no-bundled-templates",
+        action="store_true",
+        help=(
+            "Leave GitLab include:template entries unresolved instead of "
+            "reading pipeview's bundled snapshot of GitLab's built-in "
+            "templates (still offline either way)"
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"pipeview {pipeview.__version__}",
@@ -89,7 +98,8 @@ def main(argv: list[str] | None = None) -> int:
     max_severity = None
 
     for root_path, root_kind in roots:
-        report = _parse_root(root_path, root_kind)
+        report = _parse_root(root_path, root_kind,
+                             bundled_templates=not args.no_bundled_templates)
         report.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         report.tool_version = pipeview.__version__
 
@@ -160,11 +170,11 @@ def _classify_file(path: str) -> str | None:
     return None
 
 
-def _parse_root(path: str, kind: str) -> Report:
+def _parse_root(path: str, kind: str, bundled_templates: bool = True) -> Report:
     if kind == "makefile":
         return parse_makefile(path)
     elif kind == "gitlab_yaml":
-        return parse_gitlab(path)
+        return parse_gitlab(path, bundled_templates=bundled_templates)
     else:
         return Report(
             root=path,

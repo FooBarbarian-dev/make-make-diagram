@@ -27,6 +27,7 @@ from typing import Callable
 
 import yaml
 
+from pipeview import gitlab_templates
 from pipeview.gitlab.api import (
     GitLabError,
     GitLabForbidden,
@@ -114,6 +115,32 @@ def include_keys(inc: dict) -> list[str]:
     return []
 
 
+# Template subdirectories whose files the REST template API serves under the
+# bare basename ("Security/SAST.gitlab-ci.yml" -> key "SAST"). Everything
+# else in a subdirectory (Jobs/*, Workflows/*, …) the API cannot serve at
+# all, under any spelling — verified against gitlab.com; that is what the
+# bundled-snapshot fallback exists for.
+_FLATTENED_TEMPLATE_DIRS = ("Pages", "Verify", "Security")
+
+
+def template_api_keys(name: str) -> list[str]:
+    """API key candidates for `include:template` name, most specific first:
+    the suffix-stripped name, the category-flattened basename where the API
+    flattens it, then the raw name (harmless, and what older pipeview sent)."""
+    stem = name
+    for suffix in (".gitlab-ci.yml", ".yml"):
+        if stem.endswith(suffix):
+            stem = stem[: -len(suffix)]
+            break
+    candidates = [stem]
+    first, _, rest = stem.partition("/")
+    if rest and first in _FLATTENED_TEMPLATE_DIRS and "/" not in rest:
+        candidates.append(rest)
+    candidates.append(name)
+    seen: set[str] = set()
+    return [c for c in candidates if not (c in seen or seen.add(c))]
+
+
 _WILDCARD_CHARS = set("*?[")
 
 
@@ -174,10 +201,14 @@ class FetchResult:
 # Strategy driver
 # ---------------------------------------------------------------------------
 
-def fetch_config(client, project: dict, ref: str, strategy: str = "auto") -> FetchResult:
+def fetch_config(client, project: dict, ref: str, strategy: str = "auto",
+                 bundled_templates: bool = True) -> FetchResult:
     """Fetch the CI configuration of `project` at `ref`.
 
     strategy: "auto" (lint, falling back to files), "lint", or "files".
+    bundled_templates: let the files strategy fall back to pipeview's
+    bundled snapshot of GitLab's built-in templates when the instance's
+    template API cannot serve one (it cannot serve most of them).
     """
     if strategy not in ("auto", "lint", "files"):
         raise ValueError(f"Unknown strategy: {strategy}")
@@ -233,7 +264,8 @@ def fetch_config(client, project: dict, ref: str, strategy: str = "auto") -> Fet
             f"{detail} — falling back to file-by-file fetching",
         )
 
-    fetcher = _FilesFetcher(client, project, ref, notes)
+    fetcher = _FilesFetcher(client, project, ref, notes,
+                            bundled_templates=bundled_templates)
     return fetcher.run(lint)
 
 
@@ -267,11 +299,12 @@ def _result_from_lint(client, project: dict, ref: str, lint: dict,
 
 class _FilesFetcher:
     def __init__(self, client, project: dict, ref: str,
-                 notes: list[tuple[str, str]]):
+                 notes: list[tuple[str, str]], bundled_templates: bool = True):
         self.client = client
         self.project = project
         self.ref = ref
         self.notes = notes
+        self.bundled_templates = bundled_templates
         self.main_path = project.get("path_with_namespace") or str(project.get("id"))
         self.files: dict[str, FetchedFile] = {}
         self.external_map: dict[str, str] = {}
@@ -502,24 +535,49 @@ class _FilesFetcher:
         self.seen_keys.add(key)
         if self._full():
             return
-        # The template API keys omit the .gitlab-ci.yml suffix
-        # ("Jobs/Deploy.gitlab-ci.yml" -> "Jobs/Deploy").
-        api_key = name
-        for suffix in (".gitlab-ci.yml", ".yml"):
-            if api_key.endswith(suffix):
-                api_key = api_key[: -len(suffix)]
-                break
+        # The instance API first — its copy matches the instance's GitLab
+        # version and covers custom instance templates.
         content: str | None = None
-        for candidate in (api_key, name):
+        source = f"template:{name}"
+        for candidate in template_api_keys(name):
             try:
                 tpl = self.client.get_ci_template(candidate)
                 content = tpl.get("content") if isinstance(tpl, dict) else None
                 if content:
+                    log.info("Template %s served by the instance API (key %r)",
+                             name, candidate)
                     break
             except GitLabError:
                 continue
+        if not content and self.bundled_templates:
+            # The API cannot serve most subdirectory templates (Jobs/*,
+            # Workflows/*) on ANY GitLab version — fall back to the snapshot
+            # pipeview ships.
+            bundled = gitlab_templates.template_path(name)
+            if bundled is not None:
+                try:
+                    with open(bundled, encoding="utf-8") as f:
+                        content = f.read()
+                except OSError as e:   # a broken install shouldn't kill the fetch
+                    log.warning("Cannot read bundled template %s: %s", bundled, e)
+                    content = None
+            if content:
+                source = (f"template:{name} (pipeview's bundled "
+                          f"{gitlab_templates.bundled_version()})")
+                self._note("info", (
+                    f"Template {name} is not served by the instance's template "
+                    f"API — using pipeview's bundled copy "
+                    f"({gitlab_templates.bundled_version()}); the instance's "
+                    "own version may differ"
+                ))
         if not content:
-            self._note("warning", f"Cannot fetch template {name} (from {src})")
+            detail = (f" and not in pipeview's bundled "
+                      f"{gitlab_templates.bundled_version()}"
+                      if self.bundled_templates else "")
+            self._note("warning", (
+                f"Cannot fetch template {name} (from {src}) — not served by "
+                f"the instance's template API{detail}"
+            ))
             return
         dest = self._dest(f"{EXTERNAL_DIR}/templates", name)
         if dest is None:
@@ -528,7 +586,7 @@ class _FilesFetcher:
         if not dest.endswith((".yml", ".yaml")):
             dest += ".yml"
         log.info("Fetched template %s (%d bytes) -> %s", name, len(content), dest)
-        self.files[dest] = FetchedFile(dest, content, "template", f"template:{name}")
+        self.files[dest] = FetchedFile(dest, content, "template", source)
         self.external_map[key] = dest
         self._walk(content, None, None, prefix=f"{EXTERNAL_DIR}/templates",
                    allow_local=False, src=f"template:{name}")

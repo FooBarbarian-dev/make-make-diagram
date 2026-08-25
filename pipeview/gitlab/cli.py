@@ -165,6 +165,16 @@ def _build_parser() -> argparse.ArgumentParser:
             "per-file line numbers); 'auto' tries lint, falls back to files"
         ),
     )
+    parser.add_argument(
+        "--no-bundled-templates", action="store_true",
+        help=(
+            "Never substitute pipeview's bundled snapshot of GitLab's "
+            "built-in templates for include:template entries the instance's "
+            "template API cannot serve (most subdirectory templates — "
+            "Jobs/*, Workflows/* — which the API cannot serve on any "
+            "GitLab version)"
+        ),
+    )
     parser.add_argument("--search", help="projects: server-side search filter")
     parser.add_argument("--ca-bundle", help="Custom CA bundle for TLS verification")
     parser.add_argument(
@@ -269,11 +279,16 @@ def _cmd_auth(args, config: GitLabConfig) -> int:
 
 
 def _cmd_browse(args, config: GitLabConfig, host: str, client) -> int:
+    import functools
+
+    from pipeview.gitlab.report import generate_report
     from pipeview.gitlab.tui import run_tui
     formats = {f.strip() for f in args.format.split(",") if f.strip()}
+    generate = functools.partial(
+        generate_report, bundled_templates=not args.no_bundled_templates)
     return run_tui(client, config, host, outdir=args.output,
                    formats=formats, strategy=args.strategy,
-                   log_path=args.log_file)
+                   generate=generate, log_path=args.log_file)
 
 
 def _cmd_projects(args, client) -> int:
@@ -306,7 +321,8 @@ def _cmd_report(args, client) -> int:
     formats = {f.strip() for f in args.format.split(",") if f.strip()}
     report, written = generate_report(
         client, project, ref=ref, outdir=args.output,
-        formats=formats, strategy=args.strategy)
+        formats=formats, strategy=args.strategy,
+        bundled_templates=not args.no_bundled_templates)
     for path in written:
         print(f"Report generated: {path}")
     _print_diagnostics(report)
@@ -366,7 +382,8 @@ def _cmd_sync(args, config: GitLabConfig, host: str, client) -> int:
         try:
             report, written = generate_report(
                 client, path, ref=ref, outdir=args.output,
-                formats=formats, strategy=args.strategy)
+                formats=formats, strategy=args.strategy,
+                bundled_templates=not args.no_bundled_templates)
         except GitLabError as e:
             print(f"{entry}: FAILED — {e}", file=sys.stderr)
             if args.verbose:

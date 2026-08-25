@@ -1,0 +1,55 @@
+# You can copy and paste this template into a new `.gitlab-ci.yml` file.
+# You should not add this template to an existing `.gitlab-ci.yml` file by using the `include:` keyword.
+#
+# To contribute improvements to CI/CD templates, please follow the Development guide at:
+# https://docs.gitlab.com/development/cicd/templates/
+# This specific template is located at:
+# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Pages/Hugo.gitlab-ci.yml
+
+---
+#
+# Before using this .gitlab-ci.yml:
+#
+# - This example uses the latest Docker image from https://docker.hugomods.com/docs/tags/#exts,
+#   but you might want to use an exact version to avoid any broken pipelines.
+#   All available Hugo versions are listed under https://hub.docker.com/r/hugomods/hugo/tags.
+# - Read about the difference between the various images
+#   https://docker.hugomods.com/docs/tags/.
+#   If you don't know what to use, better use the extended version.
+# - To change the theme, see
+#   https://gitlab.com/pages/hugo/-/blob/main/README.md#use-a-custom-theme.
+#
+variables:
+  HUGO_ENV: production
+  ## Use this Git strategy if you're using a theme that's imported as a Git submodule
+  GIT_SUBMODULE_STRATEGY: recursive
+  ## Uncomment the following if you're using a theme that's imported as a Go submodule
+  # THEME_URL: "github.com/adityatelange/hugo-PaperMod"
+
+default:
+  image: hugomods/hugo:exts
+  before_script:
+    - hugo version
+    - apk add --no-cache go curl bash nodejs
+    ## Uncomment the following if you use PostCSS. See https://gohugo.io/hugo-pipes/postcss/
+    # - npm install postcss postcss-cli autoprefixer
+    ## Uncomment the following if you're using a theme as a Go module
+    # - hugo mod get -u $THEME_URL
+
+# Use everywhere except on the default branch
+test:          # builds and tests your site
+  script:
+    - hugo
+  rules:
+    - if: $CI_COMMIT_BRANCH != $CI_DEFAULT_BRANCH
+
+pages:         # a user-defined job that builds your pages and saves them to the specified path.
+  script:
+    - hugo
+  pages: true  # specifies that this is a Pages job
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  environment: production

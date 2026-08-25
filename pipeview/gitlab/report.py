@@ -36,6 +36,7 @@ def generate_report(
     outdir: str = "./pipeview-out",
     formats=DEFAULT_FORMATS,
     strategy: str = "auto",
+    bundled_templates: bool = True,
 ) -> tuple[Report, list[str]]:
     """Fetch, parse, and render one project's pipeline report.
 
@@ -46,7 +47,8 @@ def generate_report(
              project_path, ref or "<default branch>", strategy, outdir)
     project = client.get_project(project_path)
     ref = ref or project.get("default_branch") or "main"
-    result = fetch_config(client, project, ref, strategy=strategy)
+    result = fetch_config(client, project, ref, strategy=strategy,
+                          bundled_templates=bundled_templates)
 
     proj_full = project.get("path_with_namespace") or str(project_path)
     slug = report_slug(proj_full, ref)
@@ -60,6 +62,7 @@ def generate_report(
         repo_root=workdir,
         external_resolver=resolver,
         local_roots=local_roots,
+        bundled_templates=bundled_templates,
     )
     _annotate(report, result)
     counts = Counter(d.severity for d in report.diagnostics)

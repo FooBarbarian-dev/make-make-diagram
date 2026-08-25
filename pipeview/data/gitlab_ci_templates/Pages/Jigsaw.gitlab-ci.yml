@@ -1,0 +1,42 @@
+# To contribute improvements to CI/CD templates, please follow the Development guide at:
+# https://docs.gitlab.com/development/cicd/templates/
+# This specific template is located at:
+# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Pages/Jigsaw.gitlab-ci.yml
+
+# Jigsaw is a simple static sites generator with Laravel's Blade.
+#
+# Full project: https://github.com/tightenco/jigsaw
+
+default:
+  image: php:7.4
+
+  # These folders are cached between builds
+  cache:
+    paths:
+      - vendor/
+
+  before_script:
+    # Install Node 16
+    - curl -fsSL https://deb.nodesource.com/setup_16.x | bash -
+    # Update packages
+    - apt-get update -yqq
+    # Install dependencies
+    - apt-get install libzip-dev git nodejs unzip -yqq
+    # Install php extensions
+    - docker-php-ext-install zip
+    # Install Composer and project dependencies
+    - curl -sS https://getcomposer.org/installer | php
+    - mv composer.phar /usr/local/bin/composer
+    - composer install
+
+pages:
+  script:
+    - composer require tightenco/jigsaw
+    - ./vendor/bin/jigsaw build
+    - mv build_local/ public/
+  artifacts:
+    paths:
+      - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+  environment: production

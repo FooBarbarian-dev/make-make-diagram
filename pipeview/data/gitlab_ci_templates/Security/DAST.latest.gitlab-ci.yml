@@ -1,0 +1,99 @@
+# To contribute improvements to CI/CD templates, please follow the Development guide at:
+# https://docs.gitlab.com/development/cicd/templates/
+# This specific template is located at:
+# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Security/DAST.latest.gitlab-ci.yml
+
+# To use this template, add the following to your .gitlab-ci.yml file:
+#
+# include:
+#   template: DAST.latest.gitlab-ci.yml
+#
+# You also need to add a `dast` stage to your `stages:` configuration. A sample configuration for DAST:
+#
+# stages:
+#   - build
+#   - test
+#   - deploy
+#   - dast
+#
+# Read more about this feature here: https://docs.gitlab.com/ee/user/application_security/dast/
+#
+# Configure DAST with CI/CD variables (https://docs.gitlab.com/ee/ci/variables/).
+# List of available variables: https://docs.gitlab.com/user/application_security/dast/browser/configuration/variables/
+
+variables:
+  DAST_VERSION: 6
+  # Setting these variables affect all Security templates
+  # (SAST, Dependency Scanning, ...)
+  SECURE_ANALYZERS_PREFIX: "$CI_TEMPLATE_REGISTRY_HOST/security-products"
+  AST_ENABLE_MR_PIPELINES: "true"
+  #
+  DAST_IMAGE_SUFFIX: ""
+
+dast:
+  stage: dast
+  image:
+    name: "$SECURE_ANALYZERS_PREFIX/dast:$DAST_VERSION$DAST_IMAGE_SUFFIX"
+  allow_failure: true
+  script:
+    - if [[ -f "environment_url.txt" ]]; then DAST_WEBSITE="${DAST_WEBSITE:-$(cat environment_url.txt)}"; export DAST_WEBSITE; fi
+    - /analyze
+  artifacts:
+    access: 'developer'
+    when: always
+    reports:
+      dast: gl-dast-report.json
+    paths:
+      - gl-dast-*.*
+  rules:
+    - if: $DAST_DISABLED == 'true' || $DAST_DISABLED == '1'
+      when: never
+    - if: $DAST_DISABLED_FOR_DEFAULT_BRANCH == 'true' &&
+          $CI_DEFAULT_BRANCH == $CI_COMMIT_REF_NAME
+      when: never
+    - if: $DAST_DISABLED_FOR_DEFAULT_BRANCH == '1' &&
+          $CI_DEFAULT_BRANCH == $CI_COMMIT_REF_NAME
+      when: never
+    - if: $CI_DEFAULT_BRANCH != $CI_COMMIT_REF_NAME &&
+          $REVIEW_DISABLED == 'true'
+      when: never
+    - if: $CI_DEFAULT_BRANCH != $CI_COMMIT_REF_NAME &&
+          $REVIEW_DISABLED == '1'
+      when: never
+
+    # The following 3 blocks of rules define whether the job runs in a an *MR pipeline* or a *branch pipeline*
+    # when an MR exists. If the job has additional rules to observe they should be added in the blocks 1 and 3
+    # to cover both the *MR pipeline* and the *branch pipeline* workflows.
+
+    # 1. Run the job in an *MR pipeline* if MR pipelines for AST are enabled and there's an open merge request.
+    ## When FIPS mode is enabled, use the FIPS compatible image
+    - if: $AST_ENABLE_MR_PIPELINES == "true" &&
+          $CI_PIPELINE_SOURCE == "merge_request_event" &&
+          $CI_GITLAB_FIPS_MODE == "true" &&
+          $GITLAB_FEATURES =~ /\bdast\b/
+      variables:
+        DAST_IMAGE_SUFFIX: "-fips"
+    ## When FIPS mode is not enabled, use the regular image
+    - if: $AST_ENABLE_MR_PIPELINES == "true" &&
+          $CI_PIPELINE_SOURCE == "merge_request_event" &&
+          $GITLAB_FEATURES =~ /\bdast\b/
+
+    # 2. Don't run the job in a *branch pipeline* if *MR pipelines* for AST are enabled and there's an open merge request.
+    - if: $AST_ENABLE_MR_PIPELINES == "true" &&
+          $CI_OPEN_MERGE_REQUESTS
+      when: never
+
+    # 3. Finally, run the job in a *branch pipeline* (When MR pipelines are disabled for AST, or it is enabled but no open MRs exist for the branch).
+    ## When FIPS mode is enabled, use the FIPS compatible image
+    - if: $CI_COMMIT_BRANCH &&
+          $CI_GITLAB_FIPS_MODE == "true" &&
+          $GITLAB_FEATURES =~ /\bdast\b/
+      variables:
+        DAST_IMAGE_SUFFIX: "-fips"
+    ## When FIPS mode is not enabled, use the regular image
+    - if: $CI_COMMIT_BRANCH &&
+          $GITLAB_FEATURES =~ /\bdast\b/
+  after_script:
+    # For DAST 4 compatibility, remove any debug.log files because they might contain secrets.
+    - rm -f /zap/wrk/**/debug.log
+    - cp -r /zap/wrk dast_artifacts

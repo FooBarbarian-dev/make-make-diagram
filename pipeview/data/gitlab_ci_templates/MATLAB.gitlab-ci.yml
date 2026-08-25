@@ -1,0 +1,131 @@
+# To contribute improvements to CI/CD templates, please follow the Development guide at:
+# https://docs.gitlab.com/development/cicd/templates/
+# This specific template is located at:
+# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/MATLAB.gitlab-ci.yml
+
+# Use this template to build and test your MATLAB project as part of your CI/CD pipeline. The template includes four jobs:
+# - `command`: Run MATLAB scripts, functions, and statements.
+# - `test`: Run tests authored using the MATLAB unit testing framework or Simulink Test.
+# - `test_artifacts`: Run MATLAB and Simulink tests, and generate test and coverage artifacts.
+# - `build`: Run a build using the MATLAB build tool.
+#
+# The jobs in the template use the `matlab -batch` syntax to start MATLAB. The `-batch` option is supported
+# in MATLAB R2019a and later.
+#
+# You can copy and paste one or more jobs in this template into your `.gitlab-ci.yml` file.
+# You should not add this template to an existing `.gitlab-ci.yml` file by using the `include:` keyword.
+
+# Your runner must use the Docker executor to run MATLAB within a container. The [MATLAB Container on Docker Hub][1]
+# lets you run your build using MATLAB R2020b or a later release. If your build requires additional toolboxes, use a
+# custom MATLAB container instead. For more information on how to create and use a custom MATLAB container,
+# see [Create a Custom MATLAB Container][2].
+#
+# [1] https://www.mathworks.com/help/cloudcenter/ug/matlab-container-on-docker-hub.html
+# [2] https://www.mathworks.com/help/cloudcenter/ug/create-a-custom-matlab-container.html
+
+# The jobs in this template incorporate the contents of a hidden `.matlab_defaults` job. You need to
+# configure this job before running the `command`, `test`, `test_artifacts`, and `build` jobs. To configure the job:
+# - Specify the name of the MATLAB container image you want to use.
+# - Set the `MLM_LICENSE_FILE` environment variable using the port number and DNS address for your network license manager.
+#
+.matlab_defaults:
+  image:
+    name: mathworks/matlab:latest  # Replace the value with the name of the MATLAB container image you want to use
+    entrypoint: [""]
+  variables:
+    MLM_LICENSE_FILE: 27000@MyLicenseServer  # Replace the value with the port number and DNS address for your network license manager
+
+# The `command` job runs MATLAB scripts, functions, and statements. To use the job in your pipeline,
+# substitute `mycommand` with the code you want to run.
+#
+command:
+  extends: .matlab_defaults
+  script: matlab -batch "mycommand"
+
+# If you specify more than one script, function, or statement, use a comma or semicolon to separate them.
+# For example, to run `myscript.m` in a folder named `myfolder` located in the root of the repository,
+# you can specify `"mycommand"` like this:
+#
+# "addpath('myfolder'), myscript"
+#
+# MATLAB exits with exit code 0 if the specified script, function, or statement executes successfully without
+# error. Otherwise, MATLAB terminates with a nonzero exit code, which causes the job to fail. To have the
+# job fail in certain conditions, use the [`assert`][3] or [`error`][4] function.
+#
+# [3] https://www.mathworks.com/help/matlab/ref/assert.html
+# [4] https://www.mathworks.com/help/matlab/ref/error.html
+
+# The `test` job runs the MATLAB and Simulink tests in your project. It calls the [`runtests`][5] function
+# to run the tests and then the [`assertSuccess`][6] method to fail the job if any of the tests fail.
+#
+test:
+  extends: .matlab_defaults
+  script: matlab -batch "results = runtests('IncludeSubfolders',true), assertSuccess(results);"
+
+# By default, the job includes any files in your [MATLAB project][7] that have a `Test` label. If your repository
+# does not have a MATLAB project, then the job includes all tests in the root of your repository or in any of
+# its subfolders.
+#
+# [5] https://www.mathworks.com/help/matlab/ref/runtests.html
+# [6] https://www.mathworks.com/help/matlab/ref/matlab.unittest.testresult.assertsuccess.html
+# [7] https://www.mathworks.com/help/matlab/projects.html
+
+# The `test_artifacts` job runs your tests and additionally generates test and coverage artifacts.
+# It uses the plugin classes in the [`matlab.unittest.plugins`][8] package to produce test results
+# in JUnit-style XML format and code coverage results in Cobertura XML format. Like the `test` job,
+# this job runs all the tests in your project and fails the build if any of the tests fail.
+#
+test_artifacts:
+  extends: .matlab_defaults
+  script: |
+    cat <<- 'BLOCK' > runAllTests.m
+          import matlab.unittest.TestRunner
+          import matlab.unittest.Verbosity
+          import matlab.unittest.plugins.CodeCoveragePlugin
+          import matlab.unittest.plugins.XMLPlugin
+          import matlab.unittest.plugins.codecoverage.CoberturaFormat
+          suite = testsuite(pwd,'IncludeSubfolders',true);
+          [~,~] = mkdir('artifacts')
+          runner = TestRunner.withTextOutput('OutputDetail',Verbosity.Detailed);
+          runner.addPlugin(XMLPlugin.producingJUnitFormat('artifacts/results.xml'))
+          % Replace `pwd` with the location of the folder containing source code
+          runner.addPlugin(CodeCoveragePlugin.forFolder(pwd,'IncludingSubfolders',true, ...
+          'Producing',CoberturaFormat('artifacts/cobertura.xml')))
+          results = runner.run(suite)
+          assertSuccess(results);
+    BLOCK
+    matlab -batch runAllTests
+  artifacts:
+    reports:
+      junit: "./artifacts/results.xml"
+      coverage_report:
+        coverage_format: cobertura
+        path: "./artifacts/cobertura.xml"
+    paths:
+      - "./artifacts"
+
+# You can modify the contents of the `test_artifacts` job depending on your goals. For more
+# information on how to customize the test runner and generate various test and coverage artifacts,
+# see [Generate Artifacts Using MATLAB Unit Test Plugins][9].
+#
+# [8] https://www.mathworks.com/help/matlab/ref/matlab.unittest.plugins-package.html
+# [9] https://www.mathworks.com/help/matlab/matlab_prog/generate-artifacts-using-matlab-unit-test-plugins.html
+
+# Starting in R2022b, the `build` job runs a build using the MATLAB build tool. You can use this job to run the
+# tasks specified in a file named `buildfile.m` in the root of your repository.
+#
+build:
+  extends: .matlab_defaults
+  script: matlab -batch "buildtool"
+
+# The job executes the [`buildtool`][10] command to run a build using the default tasks in `buildfile.m`
+# as well as all the tasks on which they depend. To run specific tasks instead, specify them as a space-separated
+# list in the job. For example, to run the tasks named `task1` and `task2` and their dependencies, substitute
+# `"buildtool"` with `"buildtool task1 task2"`.
+#
+# MATLAB exits with exit code 0 if the build runs successfully. Otherwise, MATLAB terminates with a nonzero
+# exit code, which causes the job to fail. For more information about the MATLAB build tool,
+# see [Create and Run Tasks Using Build Tool][11].
+#
+# [10] https://www.mathworks.com/help/matlab/ref/buildtool.html
+# [11] https://www.mathworks.com/help/matlab/matlab_prog/create-and-run-tasks-using-build-tool.html

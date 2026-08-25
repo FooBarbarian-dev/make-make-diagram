@@ -1,0 +1,9 @@
+{
+  "source": "https://gitlab.com/gitlab-org/gitlab",
+  "ref": "v19.3.0-ee",
+  "gitlab_version": "19.3.0",
+  "path": "lib/gitlab/ci/templates",
+  "template_count": 133,
+  "fetched_at": "2026-08-25T15:42:40Z",
+  "license": "MIT Expat (see LICENSE in this directory)"
+}

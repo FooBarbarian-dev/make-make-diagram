@@ -7,6 +7,7 @@ from typing import Any
 
 import yaml
 
+from pipeview import gitlab_templates
 from pipeview.model import (
     Diagnostic,
     Edge,
@@ -131,10 +132,11 @@ def parse_gitlab(
     repo_root: str | None = None,
     external_resolver=None,
     local_roots: list[str] | None = None,
+    bundled_templates: bool = True,
 ) -> Report:
     """Parse a GitLab CI file tree rooted at `path`.
 
-    The keyword arguments exist for the remote-fetch layer
+    Most keyword arguments exist for the remote-fetch layer
     (`pipeview.gitlab`), which materializes files GitLab served into a work
     directory; offline behavior is unchanged when they are omitted.
 
@@ -148,6 +150,10 @@ def parse_gitlab(
       projects materialized inside this tree — include:local inside a file
       under one of them resolves against that root, matching GitLab's
       nested cross-project include semantics.
+    - `bundled_templates`: resolve `include:template` entries nothing else
+      resolved from pipeview's bundled snapshot of GitLab's built-in
+      templates (`pipeview.gitlab_templates`) instead of ghosting them.
+      Still fully offline — the snapshot ships inside the package.
     """
     root_path = os.path.abspath(path)
     if os.path.isdir(root_path):
@@ -163,11 +169,14 @@ def parse_gitlab(
 
     state = _ParserState(root_path, repo_root=repo_root)
     state.external_resolver = external_resolver
+    state.bundled_templates = bundled_templates
     state.local_roots = [
         os.path.abspath(p).rstrip(os.sep) for p in (local_roots or [])
     ]
     _parse_file(root_path, state, namespace="")
     _prefetch_child_pipelines(state)
+    if state.workflow_merged:
+        _process_workflow(state.workflow_merged, state)
     _build_jobs(state)
     _resolve_pending_var_refs(state)
     _build_stage_structure(state)
@@ -205,6 +214,11 @@ class _ParserState:
         # Remote-fetch hooks (see parse_gitlab docstring); inert by default.
         self.external_resolver = None
         self.local_roots: list[str] = []
+        self.bundled_templates = True
+        # Files parsed from OUTSIDE the repo tree (today: the bundled GitLab
+        # template snapshot) display under an alias, not a ../../ relpath:
+        # (abs dir, display prefix), consulted by rel().
+        self.path_aliases: list[tuple[str, str]] = []
         self.parsed_files: set[str] = set()
         self.include_stack: list[str] = []
         self.stages: list[str] | None = None   # declared `stages:` (root wins)
@@ -213,6 +227,10 @@ class _ParserState:
         self.workflow_rules: list[str] = []
         self.workflow_raw: list = []   # raw workflow:rules entries for the what-if compiler
         self.workflow_name: str | None = None
+        # main-pipeline workflow: accumulated across files in merge order
+        # (GitLab deep-merges it per key like any other top-level hash);
+        # processed once when parsing completes
+        self.workflow_merged: dict[str, Any] = {}
         # child-pipeline namespace → its raw workflow:rules (children
         # evaluate their own workflow, independent of the parent's)
         self.child_workflows: dict[str, list] = {}
@@ -220,12 +238,13 @@ class _ParserState:
         # (compiled into a per-job gate by the what-if compiler)
         self.include_gates: dict[str, list] = {}
         self.child_workflow_entry: set[str] = set()   # namespaces whose ENTRY file set it
-        self.workflow_root = False            # the root file defined workflow:
-        self.workflow_root_has_rules = False  # ... with a rules: list
         # raw (pre-extends) job configs, insertion-ordered; name → config
         self.job_configs: dict[str, dict[str, Any]] = {}
         # name → (rel_path, line, doc, namespace)
         self.job_meta: dict[str, tuple[str, int, str | None, str]] = {}
+        # jobs defined in several files (GitLab deep-merges them):
+        # name → ["file:line", …] in merge order, later entries winning
+        self.job_merged_sources: dict[str, list[str]] = {}
         # rel_path → (top_lines, nested_lines, raw_scalar_map) from one
         # compose pass per file (replaces per-key full-file regex rescans)
         self.file_maps: dict[str, tuple[dict, dict, dict]] = {}
@@ -240,6 +259,17 @@ class _ParserState:
         if name not in self.variables:
             self.variables[name] = Variable(name=name)
         return self.variables[name]
+
+    def rel(self, path: str) -> str:
+        """Display/reference path of a parsed file: repo-relative, unless the
+        file lives under a registered alias (e.g. the bundled template
+        snapshot -> "[template] Jobs/Build.gitlab-ci.yml")."""
+        fp = os.path.abspath(path)
+        for prefix, display in self.path_aliases:
+            if fp == prefix or fp.startswith(prefix + os.sep):
+                sub = os.path.relpath(fp, prefix).replace(os.sep, "/")
+                return f"{display} {sub}"
+        return os.path.relpath(fp, self.repo_root)
 
     def local_root_for(self, filepath: str) -> str:
         """The repository root include:local resolves against for a file —
@@ -333,7 +363,7 @@ def _parse_file(filepath: str, state: _ParserState, namespace: str) -> None:
 
 
 def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> None:
-    rel_path = os.path.relpath(filepath, state.repo_root)
+    rel_path = state.rel(filepath)
     sf = SourceFile(path=rel_path, kind="gitlab_yaml", status="ok")
     is_root = filepath == os.path.abspath(state.root_path)
 
@@ -436,7 +466,21 @@ def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> Non
 
     data = {_key_str(k): v for k, v in data.items()}
 
-    if "stages" in data and isinstance(data["stages"], list) and state.stages is None:
+    # Includes FIRST, wherever the `include:` key sits in the file: GitLab
+    # merges included files before the including file's own content, so
+    # everything this file defines takes precedence over what it includes
+    # (Gitlab::Ci::Config::External::Processor — external files deep-merge
+    # in include order, then the file's own values deep-merge on top).
+    if "include" in data:
+        _process_includes(
+            data["include"], rel_path, filepath,
+            top_lines.get("include", 1), state, namespace,
+        )
+
+    if "stages" in data and isinstance(data["stages"], list) and not namespace:
+        # Arrays replace whole in GitLab's deep merge, so the last file in
+        # merge order wins — and this file is later than everything it
+        # includes. Child-pipeline files never touch the parent's stages.
         state.stages = [_scalar_str(s) for s in data["stages"]]
 
     if "variables" in data and isinstance(data["variables"], dict):
@@ -448,33 +492,33 @@ def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> Non
             if namespace else None,
         )
 
-    if "default" in data and isinstance(data["default"], dict) and not state.global_defaults:
-        state.global_defaults = data["default"]
+    if "default" in data and isinstance(data["default"], dict) and not namespace:
+        # Hashes deep-merge key by key across files; this file wins.
+        state.global_defaults = _deep_merge(state.global_defaults, data["default"])
 
     for legacy_key in _LEGACY_DEFAULT_KEYS:
-        if legacy_key in data and legacy_key not in state.legacy_defaults:
-            state.legacy_defaults[legacy_key] = data[legacy_key]
-            state.diagnostics.append(
-                Diagnostic(
-                    severity="info",
-                    message=(
-                        f"Top-level '{legacy_key}:' is a deprecated global "
-                        "default — prefer 'default:'"
-                    ),
-                    source=SourceLocation(
-                        file=rel_path, line=top_lines.get(legacy_key, 1)
-                    ),
+        if legacy_key in data and not namespace:
+            first_sighting = legacy_key not in state.legacy_defaults
+            state.legacy_defaults[legacy_key] = _deep_merge(
+                state.legacy_defaults.get(legacy_key), data[legacy_key])
+            if first_sighting:
+                state.diagnostics.append(
+                    Diagnostic(
+                        severity="info",
+                        message=(
+                            f"Top-level '{legacy_key}:' is a deprecated global "
+                            "default — prefer 'default:'"
+                        ),
+                        source=SourceLocation(
+                            file=rel_path, line=top_lines.get(legacy_key, 1)
+                        ),
+                    )
                 )
-            )
 
     if "workflow" in data and isinstance(data["workflow"], dict):
         wf = data["workflow"]
         wf_rules = wf.get("rules")
-        if is_root:
-            _process_workflow(wf, state)
-            state.workflow_root = True
-            state.workflow_root_has_rules = isinstance(wf_rules, list) and bool(wf_rules)
-        elif namespace:
+        if namespace:
             # child pipeline: its own workflow gates it — from the entry
             # file (wins) or any file the child includes (last include wins,
             # mirroring GitLab's include merge)
@@ -486,23 +530,12 @@ def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> Non
                     state.child_workflow_entry.add(ns_key)
                 elif ns_key not in state.child_workflow_entry:
                     state.child_workflows[ns_key] = wf_rules
-        elif not state.workflow_root_has_rules:
-            # include-supplied workflow: GitLab deep-merges includes (last
-            # include wins) and the main file overrides per key — so include
-            # rules apply unless the root defined rules; a root name-only
-            # workflow keeps its name
-            keep_name = state.workflow_name if state.workflow_root else None
-            state.workflow_rules = []
-            state.workflow_raw = []
-            _process_workflow(wf, state)
-            if keep_name is not None:
-                state.workflow_name = keep_name
-
-    if "include" in data:
-        _process_includes(
-            data["include"], rel_path, filepath,
-            top_lines.get("include", 1), state, namespace,
-        )
+        else:
+            # Main pipeline: workflow: deep-merges per key across files like
+            # everything else — an include can supply rules while the root
+            # supplies only name. Files arrive here in merge order (includes
+            # first, root last), so accumulate and process once at the end.
+            state.workflow_merged = _deep_merge(state.workflow_merged, wf)
 
     for key, value in data.items():
         if key in _GITLAB_KEYWORDS:
@@ -527,6 +560,34 @@ def _parse_file_inner(filepath: str, state: _ParserState, namespace: str) -> Non
         config = {_key_str(k): v for k, v in value.items()}
         if merge_lines & _mapping_line_range(nested_lines, key):
             config["__merged_via_anchor__"] = True
+        prev = state.job_configs.get(job_id)
+        if prev is not None:
+            # Same job name in another file: GitLab deep-merges the
+            # definitions in merge order — hashes (variables:, …) merge key
+            # by key, arrays and scalars (script:, rules:, …) are replaced
+            # whole. This file is later in merge order, so it wins. This is
+            # how a local job customizes an included/template job without
+            # restating its script.
+            prev_file, prev_line, prev_doc, _ = state.job_meta[job_id]
+            sources = state.job_merged_sources.setdefault(
+                job_id, [f"{prev_file}:{prev_line}"])
+            sources.append(f"{rel_path}:{line_no}")
+            config = _deep_merge(prev, config)
+            doc = doc or prev_doc
+            state.diagnostics.append(
+                Diagnostic(
+                    severity="info",
+                    message=(
+                        f"Job '{key}' is also defined in {prev_file}:"
+                        f"{prev_line} — GitLab deep-merges the two, this "
+                        "definition taking precedence (hashes merge key by "
+                        "key; script, rules and other arrays or scalars are "
+                        "replaced whole)"
+                    ),
+                    source=SourceLocation(file=rel_path, line=line_no),
+                    related_node=job_id,
+                )
+            )
         state.job_configs[job_id] = config
         state.job_meta[job_id] = (rel_path, line_no, doc, namespace)
 
@@ -697,9 +758,9 @@ def _process_includes(
 
             for abs_path in matches:
                 abs_path = os.path.abspath(abs_path)
-                inc_rel = os.path.relpath(abs_path, state.repo_root)
+                inc_rel = state.rel(abs_path)
                 if abs_path in state.include_stack:
-                    cycle = [os.path.relpath(p, state.repo_root)
+                    cycle = [state.rel(p)
                              for p in state.include_stack[state.include_stack.index(abs_path):]]
                     state.diagnostics.append(Diagnostic(
                         severity="warning",
@@ -738,12 +799,34 @@ def _process_includes(
                     resolved = state.external_resolver(inc)
                 except Exception:
                     resolved = None
+            if not resolved and inc_type == "template" and state.bundled_templates:
+                # GitLab's built-in templates ship with the GitLab
+                # installation, so nothing else can materialize them —
+                # resolve from the snapshot pipeview bundles instead of
+                # ghosting every job they define.
+                bundled = gitlab_templates.template_path(str(inc["template"]))
+                if bundled is not None:
+                    alias = (os.path.abspath(gitlab_templates.bundled_root()),
+                             "[template]")
+                    if alias not in state.path_aliases:
+                        state.path_aliases.append(alias)
+                    state.diagnostics.append(Diagnostic(
+                        severity="info",
+                        message=(
+                            f"include:template {inc['template']} resolved from "
+                            f"pipeview's bundled {gitlab_templates.bundled_version()}"
+                            " — the GitLab instance running this pipeline may "
+                            "ship a different version"
+                        ),
+                        source=loc,
+                    ))
+                    resolved = [bundled]
             if resolved:
                 for abs_path in resolved:
                     abs_path = os.path.abspath(abs_path)
-                    ext_rel = os.path.relpath(abs_path, state.repo_root)
+                    ext_rel = state.rel(abs_path)
                     if abs_path in state.include_stack:
-                        cycle = [os.path.relpath(p, state.repo_root)
+                        cycle = [state.rel(p)
                                  for p in state.include_stack[
                                      state.include_stack.index(abs_path):]]
                         state.diagnostics.append(Diagnostic(
@@ -781,6 +864,9 @@ def _process_includes(
                 why = "the fetch layer could not retrieve it"
             else:
                 why = "pipeview never fetches remote content"
+            if inc_type == "template" and state.bundled_templates:
+                why += (", and it is not in pipeview's bundled "
+                        f"{gitlab_templates.bundled_version()}")
             state.diagnostics.append(Diagnostic(
                 severity="warning",
                 message=(
@@ -1298,6 +1384,11 @@ def _build_jobs(state: _ParserState) -> None:
         if "except" in flat:
             annotations["except"] = flat["except"]
 
+        if job_id in state.job_merged_sources:
+            # Defined in several files; GitLab deep-merged them (later
+            # entries take precedence).
+            annotations["merged_from"] = list(state.job_merged_sources[job_id])
+
         if (
             not is_template
             and not any(k in flat for k in ("script", "run", "trigger"))
@@ -1546,7 +1637,7 @@ def _build_stage_structure(state: _ParserState) -> None:
     used_stages.discard(None)
 
     shown = [s for s in order if s in used_stages or (declared and s in declared)]
-    root_file = os.path.relpath(state.root_path, state.repo_root)
+    root_file = state.rel(state.root_path)
     for stage_name in shown:
         sid = f"stage:{stage_name}"
         if sid not in state.nodes:
