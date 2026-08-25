@@ -196,6 +196,15 @@ Fetched files are materialized under `<outdir>/fetched/<project>@<ref>/`
 (cross-repo files under `_external/`), then the ordinary offline pipeline
 runs — generated reports remain fully offline.
 
+Same-name jobs defined in several files merge exactly as GitLab merges
+them: includes first (later includes beat earlier ones), each file's own
+content on top of what it includes, the root file winning overall —
+hashes like `variables:` merge key by key, while `script:`, `rules:` and
+other arrays or scalars are replaced whole. So a local job that only adds
+`rules:` to a template job keeps the template's script, and the report
+says where each merged job came from (a `merged_from` annotation plus an
+info diagnostic naming both definition sites).
+
 ### Built-in `include:template` files
 
 GitLab's built-in templates (`Jobs/Build.gitlab-ci.yml`,

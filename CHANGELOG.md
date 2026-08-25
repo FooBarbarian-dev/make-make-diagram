@@ -2,6 +2,39 @@
 
 ## Unreleased
 
+**Same-name jobs now merge across files the way GitLab merges them**
+(see `docs/superpowers/specs/2026-08-25-gitlab-job-merge-semantics-design.md`).
+A local job that customizes a job an included file defines — the standard
+"override a template job's `rules:`" pattern — used to *replace* the
+included definition wholesale, so the job lost its script and the report
+warned "has no script, run, or trigger" about jobs that run fine.
+Verified against GitLab's own source
+(`Gitlab::Ci::Config::External::Processor`, `Extendable::Entry` at
+v19.3.0) and fixed to match:
+
+- **Deep merge in merge order**: definitions of the same job name merge
+  per key — hashes (`variables:`, …) merge recursively, arrays and
+  scalars (`script:`, `rules:`, `stage:`, …) are replaced whole — with
+  includes merged first (later includes beating earlier, nested includes
+  depth-first) and each file's own content beating what it includes; the
+  root file always wins. The position of the `include:` key inside a file
+  no longer affects precedence (it never does in GitLab).
+- **Merges are visible**: an info diagnostic names both definition sites
+  ("Job 'build' is also defined in [template] Jobs/Build.gitlab-ci.yml:4
+  — GitLab deep-merges the two, this definition taking precedence…") and
+  merged jobs carry a `merged_from` annotation listing every source in
+  merge order.
+- **Top-level keys follow the same rules now**: `stages:` is taken from
+  the last file in merge order that defines it (previously first-wins),
+  `default:` and the deprecated top-level defaults deep-merge per key
+  across files, and `workflow:` accumulates per key — an include can
+  supply `rules:` while the root supplies only `name:` (previously a
+  later `workflow:` mention wiped included rules).
+- `extends` was already GitLab-exact (later parents override earlier,
+  child on top) and now operates on the correctly merged job table;
+  covered by new tests including root files overriding hidden jobs that
+  includes define.
+
 **GitLab built-in templates resolve everywhere — bundled snapshot
 fallback** (see
 `docs/superpowers/specs/2026-08-25-gitlab-template-fallback-design.md`).

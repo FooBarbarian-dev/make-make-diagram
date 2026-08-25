@@ -457,6 +457,26 @@ class TestBuiltinTemplates:
         assert not [f for f in report.files if f.status == "unresolved"]
         assert any("bundled" in d.message for d in report.diagnostics)
 
+    def test_local_override_of_fetched_template_job(self, tmpdir):
+        # Root customizes a job the template defines (no script of its
+        # own) — the fetched flow must deep-merge them like GitLab does.
+        gl = FakeGitLab()
+        gl.add_project("group/app")
+        gl.lint_error = GitLabNotFound("404 lint", 404)
+        gl.add_file("group/app", "main", ".gitlab-ci.yml", """\
+include:
+  - template: Jobs/Build.gitlab-ci.yml
+build:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "main"'
+""")
+        report, _ = generate_report(gl, "group/app", outdir=str(tmpdir))
+        assert not [d for d in report.diagnostics
+                    if "has no script" in d.message]
+        build = next(n for n in report.nodes if n.id == "build")
+        assert build.kind == "job" and build.recipe
+        assert any("deep-merges" in d.message for d in report.diagnostics)
+
     def test_unknown_template_still_ghosts(self):
         gl = _template_gl("No/Such-Template.gitlab-ci.yml")
         result = fetch_config(gl, gl.get_project("group/app"), "main")

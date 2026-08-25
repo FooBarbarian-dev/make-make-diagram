@@ -88,6 +88,32 @@ class TestOfflineParsing:
         assert any("never fetches remote content" in d.message
                    for d in report.diagnostics)
 
+    def test_local_override_of_template_job_keeps_script(self, tmpdir):
+        # The real-world shape this feature exists for: customize a job a
+        # GitLab template defines (rules only, no script) — GitLab
+        # deep-merges the two definitions, so the template's script must
+        # survive and the job must not be flagged as unrunnable.
+        ci = tmpdir.join(".gitlab-ci.yml")
+        ci.write(
+            "include:\n"
+            "  - template: Jobs/Build.gitlab-ci.yml\n"
+            "build:\n"
+            "  rules:\n"
+            "    - if: '$CI_COMMIT_BRANCH == \"main\"'\n"
+        )
+        report = parse_gitlab(str(ci))
+        assert not [d for d in report.diagnostics
+                    if "has no script" in d.message]
+        build = report.node_by_id("build")
+        assert build is not None and build.kind == "job"
+        assert build.recipe   # the template's script
+        merged_from = build.annotations.get("merged_from")
+        assert merged_from is not None and len(merged_from) == 2
+        assert merged_from[0].startswith("[template] Jobs/Build.gitlab-ci.yml:")
+        assert merged_from[1] == ".gitlab-ci.yml:3"
+        assert any(d.severity == "info" and "deep-merges" in d.message
+                   for d in report.diagnostics)
+
     def test_unknown_template_diagnostic_names_the_snapshot(self, tmpdir):
         root = self._write_root(tmpdir, "No/Such.gitlab-ci.yml")
         report = parse_gitlab(root)
