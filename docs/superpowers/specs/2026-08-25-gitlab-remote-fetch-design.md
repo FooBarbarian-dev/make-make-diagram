@@ -207,6 +207,14 @@ exit codes. `api.py`'s URL/param encoding is tested by monkeypatching
 
 ## As-built notes
 
+- Tracking became per-ref after user feedback: a tracked entry is either
+  `group/app` (follows the default branch) or `group/app@ref` (pinned).
+  Project paths cannot contain `@`, so the first `@` splits path from ref
+  unambiguously even for refs containing `/` or `@`. `sync` generates one
+  report per entry; TUI `t` tracks the default branch from the project
+  list and pins the selected ref from the ref picker; bare `untrack`
+  sweeps every ref of a project.
+
 - The lint strategy sends `content_ref` and `sha` together (and
   `dry_run_ref` + `ref` when dry-running); verified harmless on modern
   Grape which ignores undeclared params.

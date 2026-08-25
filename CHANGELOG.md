@@ -14,6 +14,14 @@ ordinary offline reports from what GitLab serves, cross-repository
   (default branch, branches, tags), report generation and open-in-browser
   (`o`). Every TUI action has a headless twin: `projects`, `report`,
   `track`/`untrack`/`tracked`, `sync` (reports for all tracked projects).
+- **Tracking is per-ref, not default-branch-only**: entries are
+  `group/app` (follows the default branch) or `group/app@ref` (pinned to
+  any branch/tag — `track group/app@dev` or `--ref dev`; `report` accepts
+  the same inline form). A project can be tracked at several refs; `sync`
+  generates one report per entry; in the TUI, `t` in the project list
+  tracks the default branch while `t` in the ref picker pins the selected
+  ref (tracked refs carry a `●`). `untrack group/app` sweeps all refs,
+  `untrack group/app@dev` removes one.
 - **Two fetch strategies** (`--strategy auto|lint|files`). Primary: the
   project-scoped CI Lint API (`GET /projects/:id/ci/lint`), whose
   `merged_yaml` is the complete configuration with every include —

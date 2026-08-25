@@ -476,6 +476,35 @@ class TestConfig:
         assert cfg.untrack(HOST, "g/a") is False
         assert cfg.tracked(HOST) == ["g/b"]
 
+    def test_track_with_ref(self, tmpdir):
+        cfg = GitLabConfig(str(tmpdir.join("gitlab.json")))
+        assert cfg.track(HOST, "g/a", "dev") is True
+        assert cfg.track(HOST, "g/a", "dev") is False
+        cfg.track(HOST, "g/a")           # same project, default branch
+        cfg.track(HOST, "g/a", "v1.0")   # same project, a tag
+        assert cfg.tracked(HOST) == ["g/a", "g/a@dev", "g/a@v1.0"]
+        # exact-entry membership vs any-ref membership
+        assert cfg.is_tracked(HOST, "g/a", "dev")
+        assert not cfg.is_tracked(HOST, "g/a", "other")
+        assert cfg.is_tracked_any(HOST, "g/a")
+        assert not cfg.is_tracked_any(HOST, "g/b")
+        # exact untrack leaves the other entries alone
+        assert cfg.untrack(HOST, "g/a", "dev") is True
+        assert cfg.tracked(HOST) == ["g/a", "g/a@v1.0"]
+        # untrack_all sweeps the rest
+        assert cfg.untrack_all(HOST, "g/a") == 2
+        assert cfg.tracked(HOST) == []
+
+    def test_entry_parse_roundtrip(self):
+        assert GitLabConfig.parse_entry("g/a") == ("g/a", None)
+        assert GitLabConfig.parse_entry("g/a@dev") == ("g/a", "dev")
+        # refs may contain '/' and even '@'; the FIRST '@' splits
+        assert GitLabConfig.parse_entry("g/a@feature/x@y") == ("g/a", "feature/x@y")
+        assert GitLabConfig.make_entry("g/a", None) == "g/a"
+        assert GitLabConfig.make_entry("g/a", "feature/x") == "g/a@feature/x"
+        entry = GitLabConfig.make_entry("g/a", "feature/x@y")
+        assert GitLabConfig.parse_entry(entry) == ("g/a", "feature/x@y")
+
     def test_normalize_host(self):
         assert GitLabConfig.normalize_host("gitlab.example.com/") == \
             "https://gitlab.example.com"
@@ -514,6 +543,12 @@ class TestTuiHelpers:
         ordered = order_projects(projects, ["c/c"])
         assert ordered[0]["path_with_namespace"] == "c/c"
         assert [p["path_with_namespace"] for p in ordered[1:]] == ["a/a", "b/b"]
+
+    def test_order_projects_ref_entries_count_as_tracked(self):
+        projects = [{"path_with_namespace": p} for p in ("a/a", "b/b", "c/c")]
+        ordered = order_projects(projects, ["b/b@dev", "c/c@v1.0"])
+        assert [p["path_with_namespace"] for p in ordered] == \
+            ["b/b", "c/c", "a/a"]
 
     def test_truncate(self):
         assert truncate("hello", 10) == "hello"
@@ -554,6 +589,32 @@ class TestGitLabCli:
         assert "group/app" in capsys.readouterr().out
         assert gitlab_cli.main(["untrack", "group/app", "--host", HOST]) == 0
 
+    def test_track_specific_branch(self, monkeypatch, tmpdir, capsys):
+        self._env(monkeypatch, tmpdir)
+        # inline @ref and --ref both work
+        assert gitlab_cli.main(["track", "group/app@dev", "--host", HOST]) == 0
+        assert gitlab_cli.main(
+            ["track", "group/app", "--ref", "v1.0", "--host", HOST]) == 0
+        assert gitlab_cli.main(["tracked", "--host", HOST]) == 0
+        out = capsys.readouterr().out
+        assert "group/app@dev" in out and "group/app@v1.0" in out
+        # exact untrack removes only that entry
+        assert gitlab_cli.main(["untrack", "group/app@dev", "--host", HOST]) == 0
+        capsys.readouterr()
+        assert gitlab_cli.main(["tracked", "--host", HOST]) == 0
+        out = capsys.readouterr().out
+        assert "group/app@dev" not in out and "group/app@v1.0" in out
+
+    def test_bare_untrack_sweeps_ref_entries(self, monkeypatch, tmpdir, capsys):
+        self._env(monkeypatch, tmpdir)
+        gitlab_cli.main(["track", "group/app@dev", "--host", HOST])
+        gitlab_cli.main(["track", "group/app@v1.0", "--host", HOST])
+        capsys.readouterr()
+        assert gitlab_cli.main(["untrack", "group/app", "--host", HOST]) == 0
+        assert "2 ref entries" in capsys.readouterr().out
+        assert gitlab_cli.main(["tracked", "--host", HOST]) == 0
+        assert "No tracked projects" in capsys.readouterr().out
+
     def test_no_host_is_actionable(self, monkeypatch, tmpdir, capsys):
         self._env(monkeypatch, tmpdir)
         rc = gitlab_cli.main(["projects"])
@@ -590,3 +651,28 @@ class TestGitLabCli:
         rc = gitlab_cli.main(["sync", "--host", HOST, "-o", out])
         assert rc == 0
         assert os.path.isfile(os.path.join(out, "group-app@main.report.html"))
+
+    def test_sync_uses_each_entrys_ref(self, monkeypatch, tmpdir, capsys, lint_gl):
+        self._env(monkeypatch, tmpdir)
+        monkeypatch.setattr(gitlab_cli, "_make_client",
+                            lambda args, config, host: lint_gl)
+        out = str(tmpdir.join("out"))
+        gitlab_cli.main(["track", "group/app@dev", "--host", HOST])
+        gitlab_cli.main(["track", "group/app", "--host", HOST])
+        capsys.readouterr()
+        rc = gitlab_cli.main(["sync", "--host", HOST, "-o", out])
+        assert rc == 0
+        # bare entry -> default branch; pinned entry -> its own ref
+        assert os.path.isfile(os.path.join(out, "group-app@main.report.html"))
+        assert os.path.isfile(os.path.join(out, "group-app@dev.report.html"))
+        assert ("ci_lint", "group/app", "dev") in lint_gl.calls
+
+    def test_report_inline_ref(self, monkeypatch, tmpdir, capsys, lint_gl):
+        self._env(monkeypatch, tmpdir)
+        monkeypatch.setattr(gitlab_cli, "_make_client",
+                            lambda args, config, host: lint_gl)
+        out = str(tmpdir.join("out"))
+        rc = gitlab_cli.main(["report", "group/app@dev", "--host", HOST,
+                              "-o", out])
+        assert rc == 0
+        assert os.path.isfile(os.path.join(out, "group-app@dev.report.html"))

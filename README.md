@@ -150,14 +150,23 @@ pipeview gitlab
 # Headless equivalents
 pipeview gitlab projects --search api        # list what the token can see
 pipeview gitlab report group/app --ref main  # fetch + generate one report
-pipeview gitlab track group/app              # remember a project…
-pipeview gitlab sync -o reports/             # …and report on all tracked ones
+pipeview gitlab track group/app              # remember a project (default branch)
+pipeview gitlab track group/app@release/2.0  # …or pin any branch/tag
+pipeview gitlab sync -o reports/             # report on every tracked entry
 ```
 
-In the browser: `↑/↓` move, `/` searches server-side, `t` tracks/untracks a
-project (tracked ones sort first with a `●`), `enter` opens a project and
-then generates a report for the selected ref, `o` opens the generated HTML,
-`?` shows all keys.
+Tracked entries are `group/app` (follows the project's default branch) or
+`group/app@ref` (pinned to a branch or tag; `--ref` works too). A project
+can be tracked at several refs at once; `sync` generates one report per
+entry, and `untrack group/app` sweeps every ref of the project while
+`untrack group/app@dev` removes just that one.
+
+In the browser: `↑/↓` move, `/` searches server-side, `enter` opens a
+project and then generates a report for the selected ref, `o` opens the
+generated HTML, `?` shows all keys. `t` tracks/untracks: in the project
+list it tracks the default branch (tracked projects sort first with a
+`●`); in the ref picker it pins the selected branch or tag, with a `●` on
+every tracked ref.
 
 Tokens are looked up in order: `--token`, `$PIPEVIEW_GITLAB_TOKEN`,
 `$GITLAB_TOKEN`, `$GITLAB_PRIVATE_TOKEN`, then the stored config. A first

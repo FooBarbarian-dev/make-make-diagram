@@ -85,7 +85,9 @@ def _build_parser() -> argparse.ArgumentParser:
             "  pipeview gitlab                       Interactive project browser\n"
             "  pipeview gitlab projects --search api\n"
             "  pipeview gitlab report group/app --ref main -o report\n"
-            "  pipeview gitlab track group/app && pipeview gitlab sync\n"
+            "  pipeview gitlab track group/app        Track (default branch)\n"
+            "  pipeview gitlab track group/app@dev    Track a specific branch\n"
+            "  pipeview gitlab sync                   Reports for all tracked\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -97,7 +99,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "project", nargs="?",
-        help="Project path (group/app) for report/track/untrack",
+        help=(
+            "Project path for report/track/untrack: group/app, or "
+            "group/app@ref to name a branch/tag (equivalent to --ref)"
+        ),
     )
     parser.add_argument("--host", help="GitLab base URL, e.g. https://gitlab.example.com")
     parser.add_argument("--token", help="API token (else env vars / stored config)")
@@ -130,6 +135,16 @@ def _build_parser() -> argparse.ArgumentParser:
         help="HTTP timeout in seconds (default: 30)",
     )
     return parser
+
+
+def _split_project_ref(args) -> tuple[str | None, str | None]:
+    """(project, ref) from the positional arg. `group/app@ref` names a ref
+    inline (project paths cannot contain '@'); an explicit --ref wins."""
+    project = args.project
+    ref = None
+    if project and "@" in project:
+        project, ref = GitLabConfig.parse_entry(project)
+    return project, (args.ref or ref)
 
 
 def _resolve_host(args, config: GitLabConfig) -> str | None:
@@ -228,14 +243,15 @@ def _cmd_projects(args, client) -> int:
 
 
 def _cmd_report(args, client) -> int:
-    if not args.project:
-        print("Usage: pipeview gitlab report <group/project> [--ref R]",
+    project, ref = _split_project_ref(args)
+    if not project:
+        print("Usage: pipeview gitlab report <group/project>[@ref] [--ref R]",
               file=sys.stderr)
         return 2
     from pipeview.gitlab.report import generate_report
     formats = {f.strip() for f in args.format.split(",") if f.strip()}
     report, written = generate_report(
-        client, args.project, ref=args.ref, outdir=args.output,
+        client, project, ref=ref, outdir=args.output,
         formats=formats, strategy=args.strategy)
     for path in written:
         print(f"Report generated: {path}")
@@ -244,16 +260,26 @@ def _cmd_report(args, client) -> int:
 
 
 def _cmd_track(args, config: GitLabConfig, host: str, add: bool) -> int:
-    if not args.project:
+    project, ref = _split_project_ref(args)
+    if not project:
         verb = "track" if add else "untrack"
-        print(f"Usage: pipeview gitlab {verb} <group/project>", file=sys.stderr)
+        print(f"Usage: pipeview gitlab {verb} <group/project>[@ref] [--ref R]",
+              file=sys.stderr)
         return 2
+    entry = GitLabConfig.make_entry(project, ref)
     if add:
-        changed = config.track(host, args.project)
-        print(f"{'Tracking' if changed else 'Already tracking'} {args.project}")
+        changed = config.track(host, project, ref)
+        what = f"{entry}" + ("" if ref else " (default branch)")
+        print(f"{'Tracking' if changed else 'Already tracking'} {what}")
     else:
-        changed = config.untrack(host, args.project)
-        print(f"{'Untracked' if changed else 'Was not tracking'} {args.project}")
+        if config.untrack(host, project, ref):
+            print(f"Untracked {entry}")
+        elif ref is None and (removed := config.untrack_all(host, project)):
+            # Bare untrack with only ref-pinned entries stored: remove them all.
+            plural = "y" if removed == 1 else "ies"
+            print(f"Untracked {project} ({removed} ref entr{plural})")
+        else:
+            print(f"Was not tracking {entry}")
     config.save()
     return 0
 
@@ -262,7 +288,7 @@ def _cmd_tracked(config: GitLabConfig, host: str) -> int:
     tracked = config.tracked(host)
     if not tracked:
         print(f"No tracked projects for {host} — "
-              "`pipeview gitlab track group/app` or press t in the browser")
+              "`pipeview gitlab track group/app[@ref]` or press t in the browser")
         return 0
     for path in tracked:
         print(path)
@@ -276,22 +302,26 @@ def _cmd_sync(args, config: GitLabConfig, host: str, client) -> int:
         print(f"No tracked projects for {host} — nothing to sync",
               file=sys.stderr)
         return 0
+    if args.ref:
+        print("Note: --ref is ignored by sync — each tracked entry carries "
+              "its own ref (track group/app@ref to pin one)", file=sys.stderr)
     formats = {f.strip() for f in args.format.split(",") if f.strip()}
     worst = 0
-    for path in tracked:
+    for entry in tracked:
+        path, ref = GitLabConfig.parse_entry(entry)
         try:
             report, written = generate_report(
-                client, path, ref=args.ref, outdir=args.output,
+                client, path, ref=ref, outdir=args.output,
                 formats=formats, strategy=args.strategy)
         except GitLabError as e:
-            print(f"{path}: FAILED — {e}", file=sys.stderr)
+            print(f"{entry}: FAILED — {e}", file=sys.stderr)
             worst = max(worst, 2)
             continue
         sev = report.max_severity()
         marker = f" [{sev}]" if sev in ("warning", "error") else ""
         html = next((p for p in written if p.endswith(".html")),
                     written[0] if written else "?")
-        print(f"{path}: {html}{marker}")
+        print(f"{entry}: {html}{marker}")
         if sev in ("warning", "error"):
             worst = max(worst, 1)
     return worst

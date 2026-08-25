@@ -82,26 +82,60 @@ class GitLabConfig:
         self.host_entry(host)["token"] = token
 
     # -- tracked projects ---------------------------------------------------
+    #
+    # Entries are strings: "group/app" (follows the project's default branch)
+    # or "group/app@ref" (pinned to a branch/tag/SHA). Project paths cannot
+    # contain "@", so the first "@" always separates path from ref — the ref
+    # itself may contain "@" or "/".
+
+    @staticmethod
+    def parse_entry(entry: str) -> tuple[str, str | None]:
+        if "@" in entry:
+            project, ref = entry.split("@", 1)
+            return project, (ref or None)
+        return entry, None
+
+    @staticmethod
+    def make_entry(project_path: str, ref: str | None = None) -> str:
+        return f"{project_path}@{ref}" if ref else project_path
 
     def tracked(self, host: str) -> list[str]:
         entry = self.data["hosts"].get(self.normalize_host(host))
         return list(entry.get("tracked", [])) if entry else []
 
-    def track(self, host: str, project_path: str) -> bool:
+    def track(self, host: str, project_path: str, ref: str | None = None) -> bool:
         """Returns True if newly added."""
+        entry = self.make_entry(project_path, ref)
         lst = self.host_entry(host).setdefault("tracked", [])
-        if project_path in lst:
+        if entry in lst:
             return False
-        lst.append(project_path)
+        lst.append(entry)
         lst.sort()
         return True
 
-    def untrack(self, host: str, project_path: str) -> bool:
+    def untrack(self, host: str, project_path: str, ref: str | None = None) -> bool:
+        """Remove one exact entry (project, or project@ref)."""
+        entry = self.make_entry(project_path, ref)
         lst = self.host_entry(host).setdefault("tracked", [])
-        if project_path not in lst:
+        if entry not in lst:
             return False
-        lst.remove(project_path)
+        lst.remove(entry)
         return True
 
-    def is_tracked(self, host: str, project_path: str) -> bool:
-        return project_path in self.tracked(host)
+    def untrack_all(self, host: str, project_path: str) -> int:
+        """Remove every entry for the project, any ref. Returns the count."""
+        lst = self.host_entry(host).setdefault("tracked", [])
+        doomed = [e for e in lst if self.parse_entry(e)[0] == project_path]
+        for e in doomed:
+            lst.remove(e)
+        return len(doomed)
+
+    def is_tracked(self, host: str, project_path: str,
+                   ref: str | None = None) -> bool:
+        """Exact-entry membership (project, or project@ref)."""
+        return self.make_entry(project_path, ref) in self.tracked(host)
+
+    def is_tracked_any(self, host: str, project_path: str) -> bool:
+        """Is the project tracked at any ref (or at its default branch)?"""
+        return any(self.parse_entry(e)[0] == project_path
+                   for e in self.tracked(host))

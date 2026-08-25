@@ -31,8 +31,9 @@ def visible_window(cursor: int, count: int, height: int) -> tuple[int, int]:
 
 
 def order_projects(projects: list[dict], tracked: list[str]) -> list[dict]:
-    """Tracked projects first (stable within each group)."""
-    tracked_set = set(tracked)
+    """Tracked projects first (stable within each group). Entries may be
+    "group/app" or "group/app@ref" — either counts as tracked."""
+    tracked_set = {GitLabConfig.parse_entry(e)[0] for e in tracked}
     is_tracked = [p for p in projects
                   if p.get("path_with_namespace") in tracked_set]
     rest = [p for p in projects
@@ -76,7 +77,7 @@ _HELP = [
     "  ↑/k ↓/j     move        PgUp/PgDn  page",
     "  enter       open project / generate report",
     "  /           search projects (server-side)",
-    "  t           track/untrack project",
+    "  t           track/untrack (list: project; ref view: pin that ref)",
     "  o           open last generated report in browser",
     "  n           load next page of results",
     "  b/esc       back        r  refresh",
@@ -194,15 +195,35 @@ class _App:
         name = os.path.basename(self.last_report) if self.last_report else "?"
         self.status = f"generated {name}{verdict} — o opens it"
 
-    def _toggle_track(self, project_path: str | None) -> None:
+    def _toggle_track_project(self, project_path: str | None) -> None:
+        """List view: bare-entry toggle. Untracking removes every ref."""
         if not project_path:
             return
-        if self.config.is_tracked(self.host, project_path):
-            self.config.untrack(self.host, project_path)
-            self.status = f"untracked {project_path}"
+        if self.config.is_tracked_any(self.host, project_path):
+            removed = self.config.untrack_all(self.host, project_path)
+            refs = " (all refs)" if removed > 1 else ""
+            self.status = f"untracked {project_path}{refs}"
         else:
             self.config.track(self.host, project_path)
-            self.status = f"tracking {project_path}"
+            self.status = f"tracking {project_path} (default branch)"
+        self.config.save()
+
+    def _toggle_track_ref(self) -> None:
+        """Project view: toggle the exact entry for the selected ref.
+        The default branch tracks as a bare entry (follows the default);
+        any other ref pins project@ref."""
+        if not self.current or not self.refs:
+            return
+        project_path = self.current.get("path_with_namespace")
+        kind, name = self.refs[self.ref_cursor]
+        ref = None if kind == "default" else name
+        entry = GitLabConfig.make_entry(project_path, ref)
+        if self.config.is_tracked(self.host, project_path, ref):
+            self.config.untrack(self.host, project_path, ref)
+            self.status = f"untracked {entry}"
+        else:
+            self.config.track(self.host, project_path, ref)
+            self.status = f"tracking {entry}"
         self.config.save()
 
     # -- curses loop --------------------------------------------------------
@@ -250,7 +271,7 @@ class _App:
         elif key == ord("/"):
             self._prompt_search()
         elif key == ord("t") and count:
-            self._toggle_track(ordered[self.cursor].get("path_with_namespace"))
+            self._toggle_track_project(ordered[self.cursor].get("path_with_namespace"))
         elif key == ord("o") and self.last_report:
             open_report(self.last_report)
         elif key == ord("?"):
@@ -274,7 +295,7 @@ class _App:
         elif key == ord("o") and self.last_report:
             open_report(self.last_report)
         elif key == ord("t") and self.current:
-            self._toggle_track(self.current.get("path_with_namespace"))
+            self._toggle_track_ref()
         elif key == ord("?"):
             self.help_visible = True
 
@@ -351,7 +372,7 @@ class _App:
         for row, idx in enumerate(range(start, min(end, len(ordered)))):
             p = ordered[idx]
             path = p.get("path_with_namespace") or "?"
-            mark = "●" if self.config.is_tracked(self.host, path) else " "
+            mark = "●" if self.config.is_tracked_any(self.host, path) else " "
             activity = (p.get("last_activity_at") or "")[:10]
             line = f"{mark} {path:40}  {activity}"
             attr = curses.A_REVERSE if idx == self.cursor else 0
@@ -370,7 +391,9 @@ class _App:
             kind, name = self.refs[idx]
             label = {"default": "default branch", "branch": "branch",
                      "tag": "tag"}[kind]
+            ref = None if kind == "default" else name
+            mark = "●" if self.config.is_tracked(self.host, path, ref) else " "
             attr = curses.A_REVERSE if idx == self.ref_cursor else 0
-            self._addstr(2 + row, 0, f"  {name:40}  {label}", attr)
+            self._addstr(2 + row, 0, f"{mark} {name:40}  {label}", attr)
         if not self.refs:
             self._addstr(3, 2, "no refs found (empty repository?)")
