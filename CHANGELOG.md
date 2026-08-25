@@ -2,6 +2,50 @@
 
 ## Unreleased
 
+**`pipeview gitlab` — fetch straight from a GitLab instance** (see
+`docs/superpowers/specs/2026-08-25-gitlab-remote-fetch-design.md`). A new
+subcommand — the only part of pipeview that touches a network — connects to
+a GitLab host, browses the projects your token can see, and generates the
+ordinary offline reports from what GitLab serves, cross-repository
+`include:`s resolved.
+
+- **Curses TUI** (`pipeview gitlab`): project list with server-side search
+  (`/`), track/untrack (`t`, tracked projects sort first), ref picker
+  (default branch, branches, tags), report generation and open-in-browser
+  (`o`). Every TUI action has a headless twin: `projects`, `report`,
+  `track`/`untrack`/`tracked`, `sync` (reports for all tracked projects).
+- **Two fetch strategies** (`--strategy auto|lint|files`). Primary: the
+  project-scoped CI Lint API (`GET /projects/:id/ci/lint`), whose
+  `merged_yaml` is the complete configuration with every include —
+  cross-project, template, remote, component — expanded server-side in one
+  call; GitLab's own errors/warnings become report diagnostics and its
+  include-provenance metadata lands in the File Map. Fallback (older
+  instances, restricted tokens, or on request for real per-file line
+  numbers): recursive `include:` traversal across repositories via the
+  files API, honoring custom `ci_config_path` (including the
+  `file@group/project` form), wildcard local includes, nested
+  cross-project `include:local`, templates, remote URLs, and best-effort
+  CI/CD components.
+- **Token handling**: resolution chain `--token` →
+  `$PIPEVIEW_GITLAB_TOKEN` → `$GITLAB_TOKEN` → `$GITLAB_PRIVATE_TOKEN` →
+  stored config; `pipeview gitlab auth` opens GitLab's prefilled
+  personal-access-token form (`read_api` scope), verifies the pasted token
+  against `/user`, and stores it 0600 in
+  `~/.config/pipeview/gitlab.json` (which also carries the per-host
+  tracked-projects list). TLS verifies by default; `--ca-bundle` for
+  corporate CAs.
+- **Parser hooks, offline-inert**: `parse_gitlab` gains optional
+  `repo_root`, `external_resolver`, and `local_roots` keywords so the
+  fetch layer can materialize cross-repo files and have them parsed as
+  real files (no ghosts) with GitLab's nested-include semantics; offline
+  behavior is unchanged when they're omitted. Reports gain one additive
+  annotation, `annotations["gitlab_remote"]` (host, project, ref,
+  strategy, lint verdict, include provenance) — schema stays v3.
+- Zero new dependencies (stdlib urllib + curses); generated reports remain
+  fully offline — fetched files are materialized under
+  `<outdir>/fetched/<project>@<ref>/` first, then the ordinary offline
+  pipeline runs.
+
 Report UI: **tooltips never run off-screen**. Every `data-tip` hover
 (variable docs, chips, toolbar buttons) now renders into one shared
 `position: fixed` element that JS clamps to the viewport, replacing the

@@ -17,6 +17,16 @@ _MAKEFILE_NAMES = {"Makefile", "makefile", "GNUmakefile"}
 
 
 def main(argv: list[str] | None = None) -> int:
+    if argv is None:
+        argv = sys.argv[1:]
+
+    # `pipeview gitlab …` routes to the remote subcommand — the only part of
+    # pipeview that performs network access. A local directory literally
+    # named "gitlab" is still reachable as `pipeview ./gitlab`.
+    if argv and argv[0] == "gitlab":
+        from pipeview.gitlab.cli import main as gitlab_main
+        return gitlab_main(argv[1:])
+
     parser = argparse.ArgumentParser(
         prog="pipeview",
         description=(
@@ -30,6 +40,8 @@ def main(argv: list[str] | None = None) -> int:
             "  pipeview .gitlab-ci.yml -o report  Analyze GitLab CI, output to report/\n"
             "  pipeview src/ --no-enrich          Skip make -pqn enrichment pass\n"
             "  pipeview Makefile --format html,svg Export as HTML and SVG\n"
+            "  pipeview gitlab                    Browse a GitLab instance (see\n"
+            "                                     pipeview gitlab --help)\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )

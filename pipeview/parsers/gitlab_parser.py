@@ -125,7 +125,30 @@ def _scalar_str(value: Any) -> str:
     return str(value)
 
 
-def parse_gitlab(path: str) -> Report:
+def parse_gitlab(
+    path: str,
+    *,
+    repo_root: str | None = None,
+    external_resolver=None,
+    local_roots: list[str] | None = None,
+) -> Report:
+    """Parse a GitLab CI file tree rooted at `path`.
+
+    The keyword arguments exist for the remote-fetch layer
+    (`pipeview.gitlab`), which materializes files GitLab served into a work
+    directory; offline behavior is unchanged when they are omitted.
+
+    - `repo_root`: directory include:local paths resolve against (GitLab
+      resolves them against the repository root, which is not the config
+      file's directory when `ci_config_path` is customized).
+    - `external_resolver`: callable(include_dict) -> list of local paths for
+      a non-local include (project/template/remote/component) that has been
+      materialized on disk, or None to leave it unresolved (ghosts).
+    - `local_roots`: directories that are repository roots of *other*
+      projects materialized inside this tree — include:local inside a file
+      under one of them resolves against that root, matching GitLab's
+      nested cross-project include semantics.
+    """
     root_path = os.path.abspath(path)
     if os.path.isdir(root_path):
         root_path = os.path.join(root_path, ".gitlab-ci.yml")
@@ -138,7 +161,11 @@ def parse_gitlab(path: str) -> Report:
                 ],
             )
 
-    state = _ParserState(root_path)
+    state = _ParserState(root_path, repo_root=repo_root)
+    state.external_resolver = external_resolver
+    state.local_roots = [
+        os.path.abspath(p).rstrip(os.sep) for p in (local_roots or [])
+    ]
     _parse_file(root_path, state, namespace="")
     _prefetch_child_pipelines(state)
     _build_jobs(state)
@@ -167,14 +194,17 @@ def parse_gitlab(path: str) -> Report:
 
 
 class _ParserState:
-    def __init__(self, root_path: str):
+    def __init__(self, root_path: str, repo_root: str | None = None):
         self.nodes: dict[str, Node] = {}
         self.edges: list[Edge] = []
         self.variables: dict[str, Variable] = {}
         self.files: list[SourceFile] = []
         self.diagnostics: list[Diagnostic] = []
         self.root_path = root_path
-        self.repo_root = os.path.dirname(root_path)
+        self.repo_root = os.path.abspath(repo_root) if repo_root else os.path.dirname(root_path)
+        # Remote-fetch hooks (see parse_gitlab docstring); inert by default.
+        self.external_resolver = None
+        self.local_roots: list[str] = []
         self.parsed_files: set[str] = set()
         self.include_stack: list[str] = []
         self.stages: list[str] | None = None   # declared `stages:` (root wins)
@@ -210,6 +240,16 @@ class _ParserState:
         if name not in self.variables:
             self.variables[name] = Variable(name=name)
         return self.variables[name]
+
+    def local_root_for(self, filepath: str) -> str:
+        """The repository root include:local resolves against for a file —
+        a materialized foreign project's root when the file sits inside one,
+        else this report's repo root."""
+        fp = os.path.abspath(filepath)
+        for root in self.local_roots:
+            if fp == root or fp.startswith(root + os.sep):
+                return root
+        return self.repo_root
 
 
 # ---------------------------------------------------------------------------
@@ -642,7 +682,7 @@ def _process_includes(
 
         if "local" in inc:
             local_path = str(inc["local"])
-            pattern = os.path.join(state.repo_root, local_path.lstrip("/"))
+            pattern = os.path.join(state.local_root_for(filepath), local_path.lstrip("/"))
             if any(ch in local_path for ch in "*?["):
                 matches = sorted(_glob.glob(pattern))
                 if not matches:
@@ -689,18 +729,63 @@ def _process_includes(
                 (k for k in ("project", "remote", "template", "component") if k in inc),
                 "unknown",
             )
+
+            # The remote-fetch layer may have materialized this include on
+            # disk; its resolver maps the include entry to those local paths.
+            resolved: list[str] | None = None
+            if state.external_resolver is not None and inc_type != "unknown":
+                try:
+                    resolved = state.external_resolver(inc)
+                except Exception:
+                    resolved = None
+            if resolved:
+                for abs_path in resolved:
+                    abs_path = os.path.abspath(abs_path)
+                    ext_rel = os.path.relpath(abs_path, state.repo_root)
+                    if abs_path in state.include_stack:
+                        cycle = [os.path.relpath(p, state.repo_root)
+                                 for p in state.include_stack[
+                                     state.include_stack.index(abs_path):]]
+                        state.diagnostics.append(Diagnostic(
+                            severity="warning",
+                            message=(
+                                "Include cycle: " + " → ".join(cycle + [ext_rel])
+                                + " — GitLab rejects circular includes"
+                            ),
+                            source=loc,
+                        ))
+                        continue
+                    if os.path.isfile(abs_path):
+                        if inc_rules:
+                            state.include_gates[ext_rel.replace(os.sep, "/")] = inc_rules
+                        _parse_file(abs_path, state, namespace)
+                        state.edges.append(Edge(src=rel_path, dst=ext_rel, kind="includes"))
+                    else:
+                        state.files.append(
+                            SourceFile(path=ext_rel, kind="gitlab_yaml", status="error")
+                        )
+                        state.diagnostics.append(Diagnostic(
+                            severity="warning",
+                            message=f"Fetched include missing on disk: {ext_rel}",
+                            source=loc,
+                        ))
+                continue
+
             inc_ref = str(inc.get(inc_type, inc))
             display = f"[{inc_type}:{inc_ref}]"
             state.unresolved_includes.append(display)
             state.files.append(
                 SourceFile(path=display, kind="gitlab_yaml", status="unresolved")
             )
+            if state.external_resolver is not None:
+                why = "the fetch layer could not retrieve it"
+            else:
+                why = "pipeview never fetches remote content"
             state.diagnostics.append(Diagnostic(
                 severity="warning",
                 message=(
-                    f"Cannot resolve {inc_type} include: {inc_ref} — pipeview "
-                    "never fetches remote content; jobs it defines appear as "
-                    "ghosts where referenced"
+                    f"Cannot resolve {inc_type} include: {inc_ref} — {why}; "
+                    "jobs it defines appear as ghosts where referenced"
                 ),
                 source=loc,
             ))
