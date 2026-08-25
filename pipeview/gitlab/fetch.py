@@ -18,6 +18,7 @@ directory; from there the ordinary offline parser takes over.
 from __future__ import annotations
 
 import hashlib
+import logging
 import os
 import posixpath
 import re
@@ -31,6 +32,8 @@ from pipeview.gitlab.api import (
     GitLabForbidden,
     GitLabNotFound,
 )
+
+log = logging.getLogger(__name__)
 
 # GitLab's own documented ceiling is 150 includes per pipeline.
 MAX_FILES = 150
@@ -183,26 +186,38 @@ def fetch_config(client, project: dict, ref: str, strategy: str = "auto") -> Fet
     project_id = project.get("path_with_namespace") or project.get("id")
     lint: dict | None = None
 
+    def _add_note(severity: str, message: str) -> None:
+        (log.warning if severity in ("warning", "error") else log.info)("%s", message)
+        notes.append((severity, message))
+
+    log.info("Fetching CI config of %s@%s (strategy=%s)", project_id, ref, strategy)
     if strategy in ("auto", "lint"):
         try:
+            log.info("Asking the CI Lint API for the merged configuration")
             lint = client.ci_lint(project_id, ref)
         except (GitLabNotFound, GitLabForbidden) as e:
             if strategy == "lint":
                 raise GitLabError(f"CI Lint endpoint unavailable: {e}") from None
-            notes.append((
+            _add_note(
                 "info",
                 f"CI Lint endpoint unavailable ({e}) — falling back to "
                 "file-by-file fetching",
-            ))
+            )
         except GitLabError as e:
             if strategy == "lint":
                 raise
-            notes.append((
+            _add_note(
                 "warning",
                 f"CI Lint call failed ({e}) — falling back to file-by-file fetching",
-            ))
+            )
 
     if lint is not None and lint.get("merged_yaml"):
+        log.info(
+            "CI Lint returned the merged configuration (%d bytes, valid=%s, "
+            "%d include(s) recorded)",
+            len(lint["merged_yaml"]), lint.get("valid"),
+            len(lint.get("includes") or []),
+        )
         return _result_from_lint(client, project, ref, lint, notes)
 
     if strategy == "lint":
@@ -212,11 +227,11 @@ def fetch_config(client, project: dict, ref: str, strategy: str = "auto") -> Fet
     if lint is not None:
         errs = (lint.get("errors") or [])[:3]
         detail = f" (GitLab says: {'; '.join(str(e) for e in errs)})" if errs else ""
-        notes.append((
+        _add_note(
             "info",
             "CI Lint returned no merged configuration"
             f"{detail} — falling back to file-by-file fetching",
-        ))
+        )
 
     fetcher = _FilesFetcher(client, project, ref, notes)
     return fetcher.run(lint)
@@ -269,6 +284,9 @@ class _FilesFetcher:
     # -- plumbing -----------------------------------------------------------
 
     def _note(self, severity: str, message: str) -> None:
+        # Notes end up as report diagnostics; mirror them into the log so
+        # -v shows them the moment they happen, with the fetch context.
+        (log.warning if severity in ("warning", "error") else log.info)("%s", message)
         self.notes.append((severity, message))
 
     def _full(self) -> bool:
@@ -398,6 +416,7 @@ class _FilesFetcher:
         except GitLabError as e:
             self._note("warning", f"Cannot fetch {src}: {e}")
             return False
+        log.info("Fetched %s (%s, %d bytes) -> %s", src, origin, len(content), dest)
         self.files[dest] = FetchedFile(dest, content, origin, src)
         if key:
             self.external_map[key] = dest
@@ -508,6 +527,7 @@ class _FilesFetcher:
             return
         if not dest.endswith((".yml", ".yaml")):
             dest += ".yml"
+        log.info("Fetched template %s (%d bytes) -> %s", name, len(content), dest)
         self.files[dest] = FetchedFile(dest, content, "template", f"template:{name}")
         self.external_map[key] = dest
         self._walk(content, None, None, prefix=f"{EXTERNAL_DIR}/templates",
@@ -531,6 +551,7 @@ class _FilesFetcher:
         if not base.endswith((".yml", ".yaml")):
             base += ".yml"
         dest = f"{EXTERNAL_DIR}/remote/{digest}-{base}"
+        log.info("Fetched remote include %s (%d bytes) -> %s", url, len(content), dest)
         self.files[dest] = FetchedFile(dest, content, "remote", url)
         self.external_map[key] = dest
         self._walk(content, None, None, prefix=f"{EXTERNAL_DIR}/remote",
@@ -606,8 +627,11 @@ def materialize(result: FetchResult, workdir: str
     """Write the fetched files under `workdir`. Returns
     (root_abs_path, external_resolver_or_None, local_roots_abs)."""
     workdir = os.path.abspath(workdir)
+    log.info("Materializing %d fetched file(s) under %s", len(result.files), workdir)
     for ff in result.files:
         path = os.path.join(workdir, *ff.rel_path.split("/"))
+        log.debug("write %s (%d bytes, origin=%s, source=%s)",
+                  ff.rel_path, len(ff.content), ff.origin, ff.source)
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             f.write(ff.content)

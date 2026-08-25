@@ -207,6 +207,14 @@ exit codes. `api.py`'s URL/param encoding is tested by monkeypatching
 
 ## As-built notes
 
+- Verbose logging came from user feedback ("a tracked project reports an
+  error but I have no idea what the problem is"): stdlib `logging` under
+  the `pipeview.gitlab.*` namespace — `-v` = fetch steps/decisions, `-vv`
+  = every HTTP request with timing, `--log-file` = full debug to a file.
+  `sync` prints each entry's warning/error diagnostics inline (info too
+  with `-v`) rather than a bare `[error]` marker; fetch-layer notes are
+  mirrored into the log as they happen; browse mode logs to
+  `<outdir>/pipeview-gitlab.log` because curses owns the terminal.
 - Tracking became per-ref after user feedback: a tracked entry is either
   `group/app` (follows the default branch) or `group/app@ref` (pinned).
   Project paths cannot contain `@`, so the first `@` splits path from ref

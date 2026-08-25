@@ -87,7 +87,8 @@ _HELP = [
 
 def run_tui(client, config: GitLabConfig, host: str, *,
             outdir: str = "./pipeview-out", formats=("html", "json"),
-            strategy: str = "auto", generate=None) -> int:
+            strategy: str = "auto", generate=None,
+            log_path: str | None = None) -> int:
     """Entry point. `generate` is injectable for tests; defaults to
     pipeview.gitlab.report.generate_report."""
     try:
@@ -106,14 +107,14 @@ def run_tui(client, config: GitLabConfig, host: str, *,
         from pipeview.gitlab.report import generate_report as generate
 
     app = _App(client, config, host, outdir=outdir, formats=formats,
-               strategy=strategy, generate=generate)
+               strategy=strategy, generate=generate, log_path=log_path)
     import curses as _curses
     return _curses.wrapper(app.run)
 
 
 class _App:
     def __init__(self, client, config, host, *, outdir, formats, strategy,
-                 generate):
+                 generate, log_path=None):
         self.client = client
         self.config = config
         self.host = host
@@ -121,6 +122,7 @@ class _App:
         self.formats = formats
         self.strategy = strategy
         self.generate = generate
+        self.log_path = log_path
 
         self.projects: list[dict] = []
         self.next_page: int | None = 1
@@ -153,7 +155,8 @@ class _App:
         shown = len(self.projects)
         more = " (n: more)" if nxt else ""
         what = f" matching {self.search!r}" if self.search else ""
-        self.status = f"{shown} project(s){what}{more}"
+        log_note = f" · log: {self.log_path}" if self.log_path else ""
+        self.status = f"{shown} project(s){what}{more}{log_note}"
 
     def _open_project(self, proj: dict) -> None:
         path = proj.get("path_with_namespace")
@@ -186,12 +189,17 @@ class _App:
                 self.client, path, ref=ref, outdir=self.outdir,
                 formats=self.formats, strategy=self.strategy)
         except GitLabError as e:
-            self.status = str(e)
+            hint = f" — see {self.log_path}" if self.log_path else ""
+            self.status = f"{e}{hint}"
             return
         html = next((p for p in written if p.endswith(".html")), None)
         self.last_report = html or (written[0] if written else None)
         sev = report.max_severity()
-        verdict = f", diagnostics: {sev}" if sev else ""
+        verdict = ""
+        if sev in ("warning", "error"):
+            n = sum(1 for d in report.diagnostics if d.severity == sev)
+            verdict = (f", {n} {sev}(s) — details in the report's File Map"
+                       + (f" and {self.log_path}" if self.log_path else ""))
         name = os.path.basename(self.last_report) if self.last_report else "?"
         self.status = f"generated {name}{verdict} — o opens it"
 

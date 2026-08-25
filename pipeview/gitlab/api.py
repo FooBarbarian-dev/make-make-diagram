@@ -9,12 +9,16 @@ module's opener so TLS options apply uniformly.
 from __future__ import annotations
 
 import json
+import logging
 import os
 import ssl
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from typing import Any, Iterator
+
+log = logging.getLogger(__name__)
 
 USER_AGENT = "pipeview-gitlab"
 
@@ -102,6 +106,8 @@ class GitLabClient:
                 url += ("&" if "?" in url else "?") + urllib.parse.urlencode(clean)
 
         req = urllib.request.Request(url, headers=self._headers())
+        log.debug("GET %s", url)
+        started = time.monotonic()
         try:
             with urllib.request.urlopen(req, timeout=self.timeout, context=self._ssl) as resp:
                 body = resp.read().decode("utf-8", errors="replace")
@@ -115,12 +121,21 @@ class GitLabClient:
                     detail = json.dumps(detail)
             except Exception:
                 pass
+            log.debug("GET %s -> HTTP %d in %.0f ms%s", url, e.code,
+                      (time.monotonic() - started) * 1000,
+                      f": {detail}" if detail else "")
             msg = f"GitLab API {e.code} for {url.split('?')[0]}"
             if detail:
                 msg += f": {detail}"
             raise _error_for(e.code, msg) from None
         except urllib.error.URLError as e:
+            log.debug("GET %s -> unreachable: %s", url, e.reason)
             raise GitLabError(f"Cannot reach {self.base_url}: {e.reason}") from None
+
+        log.debug("GET %s -> %d bytes in %.0f ms%s", url, len(body),
+                  (time.monotonic() - started) * 1000,
+                  f" (next page: {headers['x-next-page']})"
+                  if headers.get("x-next-page") else "")
 
         if raw:
             return body, headers

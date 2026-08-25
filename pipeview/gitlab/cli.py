@@ -12,14 +12,18 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
+import traceback
 
 from pipeview.gitlab import auth as auth_mod
 from pipeview.gitlab.api import GitLabClient, GitLabError
 from pipeview.gitlab.config import GitLabConfig
 
 _HOST_ENV_VARS = ("PIPEVIEW_GITLAB_HOST", "GITLAB_HOST", "CI_SERVER_URL")
+
+_SEV_ORDER = {"info": 0, "warning": 1, "error": 2}
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -28,6 +32,7 @@ def main(argv: list[str] | None = None) -> int:
     config = GitLabConfig(os.environ.get("PIPEVIEW_GITLAB_CONFIG") or None)
 
     command = args.command or "browse"
+    args.log_file = _setup_logging(args, command)
     try:
         if command == "auth":
             return _cmd_auth(args, config)
@@ -62,6 +67,11 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_sync(args, config, host, client)
     except GitLabError as e:
         print(f"Error: {e}", file=sys.stderr)
+        if args.verbose:
+            traceback.print_exc(file=sys.stderr)
+        elif not args.log_file:
+            print("(re-run with -v for request logs, -vv for full detail)",
+                  file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print()
@@ -69,6 +79,37 @@ def main(argv: list[str] | None = None) -> int:
 
     parser.error(f"unknown command {command!r}")
     return 2
+
+
+def _setup_logging(args, command: str) -> str | None:
+    """Configure the pipeview logger tree per -v/--log-file. Returns the
+    effective log-file path (browse defaults to one — curses owns the
+    terminal, so stderr logging would corrupt the screen)."""
+    log_file = args.log_file
+    if command == "browse" and args.verbose and not log_file:
+        log_file = os.path.join(args.output, "pipeview-gitlab.log")
+
+    logger = logging.getLogger("pipeview")
+    logger.handlers.clear()
+    if not args.verbose and not log_file:
+        return None
+    logger.setLevel(logging.DEBUG)
+    fmt = logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%H:%M:%S")
+
+    if args.verbose and command != "browse":
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setLevel(logging.INFO if args.verbose == 1 else logging.DEBUG)
+        handler.setFormatter(fmt)
+        logger.addHandler(handler)
+
+    if log_file:
+        os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)   # a file can afford full detail
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
+    return log_file
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -133,6 +174,18 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--timeout", type=float, default=30.0,
         help="HTTP timeout in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help=(
+            "Log what is happening: -v shows fetch steps and decisions, "
+            "-vv also every HTTP request with timing. With browse, logs go "
+            "to <output>/pipeview-gitlab.log (curses owns the terminal)"
+        ),
+    )
+    parser.add_argument(
+        "--log-file",
+        help="Also write a full debug-level log to this file",
     )
     return parser
 
@@ -219,7 +272,8 @@ def _cmd_browse(args, config: GitLabConfig, host: str, client) -> int:
     from pipeview.gitlab.tui import run_tui
     formats = {f.strip() for f in args.format.split(",") if f.strip()}
     return run_tui(client, config, host, outdir=args.output,
-                   formats=formats, strategy=args.strategy)
+                   formats=formats, strategy=args.strategy,
+                   log_path=args.log_file)
 
 
 def _cmd_projects(args, client) -> int:
@@ -315,6 +369,8 @@ def _cmd_sync(args, config: GitLabConfig, host: str, client) -> int:
                 formats=formats, strategy=args.strategy)
         except GitLabError as e:
             print(f"{entry}: FAILED — {e}", file=sys.stderr)
+            if args.verbose:
+                traceback.print_exc(file=sys.stderr)
             worst = max(worst, 2)
             continue
         sev = report.max_severity()
@@ -322,12 +378,23 @@ def _cmd_sync(args, config: GitLabConfig, host: str, client) -> int:
         html = next((p for p in written if p.endswith(".html")),
                     written[0] if written else "?")
         print(f"{entry}: {html}{marker}")
+        # A bare [error] marker helps nobody: print what is actually wrong
+        # (info-level diagnostics too when -v).
+        _print_diagnostics(
+            report,
+            min_severity="info" if args.verbose else "warning",
+            indent="    ",
+        )
         if sev in ("warning", "error"):
             worst = max(worst, 1)
     return worst
 
 
-def _print_diagnostics(report) -> None:
+def _print_diagnostics(report, min_severity: str = "info",
+                       indent: str = "  ") -> None:
+    floor = _SEV_ORDER.get(min_severity, 0)
     for d in report.diagnostics:
+        if _SEV_ORDER.get(d.severity, 0) < floor:
+            continue
         loc = f" ({d.source.file}:{d.source.line})" if d.source else ""
-        print(f"  {d.severity}: {d.message}{loc}", file=sys.stderr)
+        print(f"{indent}{d.severity}: {d.message}{loc}", file=sys.stderr)

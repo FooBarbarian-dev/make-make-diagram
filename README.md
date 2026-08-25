@@ -196,6 +196,29 @@ Fetched files are materialized under `<outdir>/fetched/<project>@<ref>/`
 (cross-repo files under `_external/`), then the ordinary offline pipeline
 runs — generated reports remain fully offline.
 
+### When something goes wrong
+
+`sync` and `report` print each entry's warning/error diagnostics to stderr
+— including GitLab's own CI Lint verdict ("jobs:deploy config contains
+unknown keys…"), fetch failures ("Cannot fetch group/lib@stable:ci/x.yml:
+GitLab API 404…"), and unresolved includes — so a failing tracked project
+tells you *what* failed, not just that it did.
+
+For more, turn on logging:
+
+```bash
+pipeview gitlab sync -v         # fetch steps and decisions, as they happen
+pipeview gitlab sync -vv        # + every HTTP request, with status and timing
+pipeview gitlab report group/app --log-file debug.log   # full detail to a file
+```
+
+`-v` shows which strategy was chosen and why, every file fetched (source,
+size, destination), ref resolutions, and all diagnostics including infos;
+`-vv` adds each API call. The browser (`pipeview gitlab -v`) writes the
+same log to `<outdir>/pipeview-gitlab.log` instead of the screen — curses
+owns the terminal — and the status bar points there. `--log-file` always
+captures debug-level detail regardless of `-v`.
+
 ## The `##` docstring convention
 
 Add a `##` comment above (or on the same line as) a target or job to document

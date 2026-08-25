@@ -7,7 +7,9 @@ generated reports keep the offline guarantee.
 
 from __future__ import annotations
 
+import logging
 import os
+from collections import Counter
 from datetime import datetime, timezone
 
 import pipeview
@@ -16,6 +18,8 @@ from pipeview.model import Diagnostic, Report, SourceFile
 from pipeview.parsers.gitlab_parser import parse_gitlab
 from pipeview.render.exports import export_dot, export_json, export_mermaid, export_svg
 from pipeview.render.html import render_html
+
+log = logging.getLogger(__name__)
 
 DEFAULT_FORMATS = ("html", "json")
 
@@ -38,6 +42,8 @@ def generate_report(
     Returns (report, written_paths). The fetched files stay under
     `<outdir>/fetched/<slug>/` for inspection and re-runs.
     """
+    log.info("Generating report for %s (ref=%s, strategy=%s, outdir=%s)",
+             project_path, ref or "<default branch>", strategy, outdir)
     project = client.get_project(project_path)
     ref = ref or project.get("default_branch") or "main"
     result = fetch_config(client, project, ref, strategy=strategy)
@@ -48,6 +54,7 @@ def generate_report(
     workdir = os.path.join(outdir, "fetched", slug)
 
     root_abs, resolver, local_roots = materialize(result, workdir)
+    log.info("Parsing %s", root_abs)
     report = parse_gitlab(
         root_abs,
         repo_root=workdir,
@@ -55,6 +62,13 @@ def generate_report(
         local_roots=local_roots,
     )
     _annotate(report, result)
+    counts = Counter(d.severity for d in report.diagnostics)
+    log.info("Parsed: %d node(s), %d edge(s), %d file(s); diagnostics: %s",
+             len(report.nodes), len(report.edges), len(report.files),
+             dict(counts) or "none")
+    for d in report.diagnostics:
+        loc = f" ({d.source.file}:{d.source.line})" if d.source else ""
+        log.debug("diagnostic [%s] %s%s", d.severity, d.message, loc)
     report.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     report.tool_version = pipeview.__version__
 
@@ -81,6 +95,8 @@ def generate_report(
         p = os.path.join(outdir, f"{slug}.graph.svg")
         export_svg(report, p)
         written.append(p)
+    for p in written:
+        log.info("Wrote %s", p)
     return report, written
 
 

@@ -49,6 +49,16 @@ ordinary offline reports from what GitLab serves, cross-repository
   behavior is unchanged when they're omitted. Reports gain one additive
   annotation, `annotations["gitlab_remote"]` (host, project, ref,
   strategy, lint verdict, include provenance) — schema stays v3.
+- **Verbose logging and real error reporting**: `-v` logs fetch steps and
+  decisions (strategy chosen and why, every file fetched with source and
+  destination, ref resolutions), `-vv` adds each HTTP request with status
+  and timing, `--log-file` captures full debug detail to a file; in the
+  TUI, `-v` logs to `<outdir>/pipeview-gitlab.log` (curses owns the
+  terminal) and the status bar points there. `sync` now prints each
+  entry's warning/error diagnostics to stderr — GitLab's CI Lint verdict,
+  fetch failures, unresolved includes — instead of a bare `[error]`
+  marker; API errors carry the server's own explanation; top-level errors
+  hint at `-v`, which also prints tracebacks.
 - Zero new dependencies (stdlib urllib + curses); generated reports remain
   fully offline — fetched files are materialized under
   `<outdir>/fetched/<project>@<ref>/` first, then the ordinary offline

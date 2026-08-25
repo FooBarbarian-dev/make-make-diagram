@@ -5,15 +5,23 @@ Everything runs against FakeGitLab — no test ever touches a network.
 
 from __future__ import annotations
 
+import io
 import json
+import logging
 import os
 import stat
+import urllib.error
 
 import pytest
 
 from pipeview.gitlab import auth as auth_mod
 from pipeview.gitlab import cli as gitlab_cli
-from pipeview.gitlab.api import GitLabError, GitLabForbidden, GitLabNotFound
+from pipeview.gitlab.api import (
+    GitLabClient,
+    GitLabError,
+    GitLabForbidden,
+    GitLabNotFound,
+)
 from pipeview.gitlab.config import GitLabConfig
 from pipeview.gitlab.fetch import (
     _wildcard_regex,
@@ -421,6 +429,59 @@ class TestFetchHelpers:
 
 
 # ---------------------------------------------------------------------------
+# Logging + error reporting
+# ---------------------------------------------------------------------------
+
+class _FakeResponse:
+    def __init__(self, body: bytes, headers: dict | None = None):
+        self._body = body
+        self.headers = headers or {}
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+
+class TestLoggingAndErrors:
+    def test_api_error_includes_server_detail(self, monkeypatch):
+        def fake_urlopen(req, timeout=None, context=None):
+            raise urllib.error.HTTPError(
+                req.full_url, 403, "Forbidden", None,
+                io.BytesIO(b'{"message": "403 Forbidden - insufficient_scope"}'))
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        client = GitLabClient(HOST, "token")
+        with pytest.raises(GitLabForbidden) as exc:
+            client.current_user()
+        # The server's own explanation must survive into the message.
+        assert "insufficient_scope" in str(exc.value)
+        assert "403" in str(exc.value)
+
+    def test_api_debug_logs_requests(self, monkeypatch, caplog):
+        def fake_urlopen(req, timeout=None, context=None):
+            return _FakeResponse(b'{"username": "tester"}')
+        monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+        caplog.set_level(logging.DEBUG, logger="pipeview.gitlab.api")
+        client = GitLabClient(HOST, "token")
+        assert client.current_user()["username"] == "tester"
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any(m.startswith("GET ") and "api/v4/user" in m for m in msgs)
+        assert any("bytes" in m for m in msgs)   # the response log with timing
+
+    def test_fetch_logs_decisions_and_files(self, files_gl, caplog):
+        caplog.set_level(logging.INFO, logger="pipeview.gitlab")
+        project = files_gl.get_project("group/app")
+        fetch_config(files_gl, project, "main")
+        msgs = [r.getMessage() for r in caplog.records]
+        assert any("falling back" in m for m in msgs)
+        assert any("Fetched group/lib@stable:ci/shared.yml" in m for m in msgs)
+
+
+# ---------------------------------------------------------------------------
 # auth + config
 # ---------------------------------------------------------------------------
 
@@ -666,6 +727,52 @@ class TestGitLabCli:
         assert os.path.isfile(os.path.join(out, "group-app@main.report.html"))
         assert os.path.isfile(os.path.join(out, "group-app@dev.report.html"))
         assert ("ci_lint", "group/app", "dev") in lint_gl.calls
+
+    def test_sync_prints_error_details(self, monkeypatch, tmpdir, capsys, lint_gl):
+        """The bug this exists for: a tracked project reports [error] and the
+        user must be able to see WHAT the error is without opening anything."""
+        self._env(monkeypatch, tmpdir)
+        lint_gl.lint_responses["group/app"]["valid"] = False
+        lint_gl.lint_responses["group/app"]["errors"] = [
+            "jobs:deploy config contains unknown keys: scriptt"]
+        monkeypatch.setattr(gitlab_cli, "_make_client",
+                            lambda args, config, host: lint_gl)
+        out = str(tmpdir.join("out"))
+        gitlab_cli.main(["track", "group/app", "--host", HOST])
+        capsys.readouterr()
+        rc = gitlab_cli.main(["sync", "--host", HOST, "-o", out])
+        captured = capsys.readouterr()
+        assert rc == 1
+        assert "[error]" in captured.out
+        assert ("GitLab CI Lint: jobs:deploy config contains unknown keys: "
+                "scriptt") in captured.err
+        assert "INVALID" in captured.err
+
+    def test_verbose_report_and_log_file(self, monkeypatch, tmpdir, capsys, lint_gl):
+        self._env(monkeypatch, tmpdir)
+        monkeypatch.setattr(gitlab_cli, "_make_client",
+                            lambda args, config, host: lint_gl)
+        out = str(tmpdir.join("out"))
+        logf = str(tmpdir.join("logs", "gl.log"))
+        rc = gitlab_cli.main(["report", "group/app", "--host", HOST, "-o", out,
+                              "-vv", "--log-file", logf])
+        assert rc == 0
+        with open(logf, encoding="utf-8") as f:
+            text = f.read()
+        assert "Generating report for group/app" in text
+        assert "CI Lint returned the merged configuration" in text
+        assert "Wrote" in text
+
+    def test_error_hint_mentions_verbose(self, monkeypatch, tmpdir, capsys):
+        self._env(monkeypatch, tmpdir)
+        gl = FakeGitLab()   # knows no projects -> GitLabNotFound
+        monkeypatch.setattr(gitlab_cli, "_make_client",
+                            lambda args, config, host: gl)
+        rc = gitlab_cli.main(["report", "nope/nope", "--host", HOST])
+        assert rc == 2
+        err = capsys.readouterr().err
+        assert "Error:" in err
+        assert "-v" in err   # points at the verbose escape hatch
 
     def test_report_inline_ref(self, monkeypatch, tmpdir, capsys, lint_gl):
         self._env(monkeypatch, tmpdir)
