@@ -1,7 +1,7 @@
 # Upstream/downstream pipeline links + tracked-set rollup — design
 
 Date: 2026-08-25
-Status: approved, in implementation.
+Status: implemented — see the as-built notes at the end.
 
 ## Problem
 
@@ -283,3 +283,31 @@ pipeview/model.py             # SCHEMA_VERSION = 4
 5. `rollup.html` + `rollup_html.py`.
 6. Graph controls in `report.html` (node toggles → groups → focus).
 7. Docs: README, CHANGELOG.
+
+## As-built notes
+
+- The `::` id-collision fix landed leaner than planned: the resolution
+  pass never parses node-id strings at all — trigger targets come from
+  `trigger_info`, needs targets from `cross_project_needs` (which also
+  records the ghost's id for panel linking), so no parser id scheme
+  changed and single-report ids are untouched.
+- `needs:project` ghosts previously dropped the `ref:`; the typed
+  records on the needing job now carry it, which is what makes exact
+  ref matching possible for artifact links.
+- Include-link provenance under the files strategy comes from a new
+  `gitlab_remote["include_projects"]` annotation parsed out of the fetch
+  layer's exact `project:<path>@<ref>:<file>` external-map keys — the
+  slugified `_external/` paths on disk are lossy and are not used.
+- The rollup embeds each project's model refreshed *after*
+  `annotate_reports`, so the page's copy and the re-rendered per-project
+  files agree about `rollup_link` annotations.
+- Collapsed groups double as the landing point for `invokes` edges
+  (which target file paths and are otherwise routed to the Files view):
+  the trigger job connects to its child pipeline's group node, and a
+  recursive make target to its sub-make's. Expanded clusters draw a
+  dagre compound outline; dagre cannot route edges to cluster parents,
+  so the edge appears only while collapsed.
+- Everything was driven in headless Chromium during development (fleet →
+  drill-down → portal jump → breadcrumbs; expand/collapse round-trips;
+  node toggles; focus direction/depth) with zero console errors, plus
+  the offline-resources scan extended to the rollup page.
