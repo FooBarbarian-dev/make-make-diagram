@@ -1520,6 +1520,14 @@ def _build_jobs(state: _ParserState) -> None:
                     state.edges.append(Edge(src=job_id, dst=ghost_id, kind="needs"))
                     details.append(
                         f"{need_name} @ {need['project']} (cross-project)")
+                    # Typed record on the needing job (the ghost is shared and
+                    # ref-less): what a cross-report linker needs to resolve it.
+                    node.annotations.setdefault("cross_project_needs", []).append({
+                        "project": str(need["project"]),
+                        "job": need_name,
+                        "ref": _scalar_str(need["ref"]) if "ref" in need else None,
+                        "ghost": ghost_id,
+                    })
                     continue
             else:
                 continue
@@ -1559,10 +1567,95 @@ def _build_jobs(state: _ParserState) -> None:
             node.annotations["needs_details"] = details
 
 
+def _trigger_info(trigger: Any) -> dict | None:
+    """Typed summary of a trigger job's semantics (additive, schema v4).
+
+    mode "child" = parent-child pipeline (trigger:include — same project,
+    ref, and SHA, even when the config FILE comes from another project);
+    mode "multi_project" = trigger:project / string shorthand (runs in the
+    other project on its own ref and config). Values are recorded raw;
+    anything containing CI variables is flagged unresolved, never guessed.
+    """
+    # trigger:forward defaults (same as the what-if compiler): yaml
+    # variables ARE forwarded, pipeline variables are NOT
+    forward = {"yaml_variables": True, "pipeline_variables": False}
+    if isinstance(trigger, dict):
+        fwd = trigger.get("forward")
+        if isinstance(fwd, dict):
+            if "yaml_variables" in fwd:
+                forward["yaml_variables"] = fwd["yaml_variables"] is not False
+            if "pipeline_variables" in fwd:
+                forward["pipeline_variables"] = fwd["pipeline_variables"] is True
+
+    info: dict[str, Any] = {
+        "mode": "multi_project",
+        "project": None,
+        "ref": None,
+        "strategy": None,
+        "forward": forward,
+        "unresolved": [],
+    }
+
+    if not isinstance(trigger, dict):
+        project = _scalar_str(trigger)
+        info["project"] = project
+        if "$" in project:
+            info["unresolved"].append("project uses CI variables")
+        return info
+
+    if isinstance(trigger.get("strategy"), str):
+        info["strategy"] = trigger["strategy"]
+    if isinstance(trigger.get("inputs"), dict):
+        info["inputs"] = sorted(map(str, trigger["inputs"]))
+
+    includes = trigger.get("include")
+    if includes is not None:
+        info["mode"] = "child"
+        info["includes"] = []
+        if isinstance(includes, (str, dict)):
+            includes = [includes]
+        for inc in includes if isinstance(includes, list) else []:
+            if isinstance(inc, str):
+                inc = {"local": inc}
+            if not isinstance(inc, dict):
+                continue
+            inc_type = next(
+                (k for k in ("local", "project", "template", "artifact", "remote")
+                 if k in inc), "unknown")
+            entry: dict[str, Any] = {"type": inc_type,
+                                     "value": str(inc.get(inc_type, "?"))}
+            if inc_type == "project":
+                entry["file"] = str(inc.get("file", "?"))
+                if "ref" in inc:
+                    entry["ref"] = _scalar_str(inc["ref"])
+            if inc_type == "artifact":
+                entry["job"] = str(inc.get("job", "?"))
+                info["unresolved"].append(
+                    "child config generated at runtime by job "
+                    f"'{entry['job']}' (dynamic child pipeline)")
+            info["includes"].append(entry)
+        return info
+
+    project = trigger.get("project")
+    info["project"] = _scalar_str(project) if project is not None \
+        else _scalar_str(trigger)
+    if "$" in info["project"]:
+        info["unresolved"].append("project uses CI variables")
+    branch = trigger.get("branch")
+    if branch is not None:
+        info["ref"] = _scalar_str(branch)
+        if "$" in info["ref"]:
+            info["unresolved"].append("ref uses CI variables")
+    return info
+
+
 def _process_trigger(
     trigger: Any, job_id: str, rel_path: str, line_no: int, state: _ParserState
 ) -> None:
     node = state.nodes[job_id]
+    info = _trigger_info(trigger)
+    if info is not None:
+        node.annotations["trigger_info"] = info
     if isinstance(trigger, dict):
         if isinstance(trigger.get("strategy"), str):
             node.annotations["trigger_strategy"] = trigger["strategy"]
