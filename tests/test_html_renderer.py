@@ -56,6 +56,18 @@ class TestHtmlGeneration:
         assert "/*WHATIF_PLACEHOLDER*/" not in content
         assert '"whatif"' in content   # gitlab reports carry the program
 
+    def test_whatif_text_listing_and_delta_controls(self, gitlab_report, tmpdir):
+        path = os.path.join(tmpdir, "report.html")
+        render_html(gitlab_report, path)
+        with open(path) as f:
+            content = f.read()
+        # copy/paste listing + pin-a-baseline delta controls
+        assert 'id="wi-copy-text"' in content
+        assert 'id="wi-pin-baseline"' in content
+        # the DOM-free helpers the UI drives ship inside the inlined evaluator
+        for helper in ("textSummary", "diffEvents", "textDiff", "describeConfig"):
+            assert f"{helper}:" in content
+
     def test_json_round_trips_from_html(self, make_report, tmpdir):
         path = os.path.join(tmpdir, "report.html")
         render_html(make_report, path)

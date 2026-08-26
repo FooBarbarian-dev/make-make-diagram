@@ -138,6 +138,20 @@ The generated report is a single self-contained HTML file with four views
    documentation tooltips (what the variable is, an example value, and when
    GitLab sets it).
 
+   Every evaluation also renders as a **plain-text job listing** — one
+   section per candidate pipeline naming the jobs that would run, in
+   stage order with stage and verdict — behind a collapsible block and a
+   **Copy job list** button, ready to paste into an issue or chat. And
+   **Pin as baseline** freezes the current scenario so you can flip any
+   knob (the event preset included) and see the **delta**: per-pipeline
+   diff graphs where added jobs are green, removed jobs red-dashed, and
+   verdict changes amber (`runs → manual gate`), with a `+ / - / ~ / =`
+   text diff (the button becomes **Copy delta**) that also names
+   pipeline-level differences — a pipeline that exists on one side only,
+   or one that would fail creation. Comparing *push to branch* against
+   *tag push* — or against "MR closed", or a variable flipped — becomes
+   one click instead of memory.
+
 ## Fetching from GitLab (`pipeview gitlab`)
 
 Everything above works on local files. The `gitlab` subcommand — the **only**
