@@ -6,6 +6,12 @@
  * report.html at generation (offline guarantee) and runnable under plain
  * `node` for the vector test suite.
  *
+ * PARITY CONTRACT: pipeview/parsers/gitlab_whatif_eval.py is this
+ * evaluator's Python twin (used by trigger-docs generation), pinned to it
+ * by tests/whatif_vectors.json and the full-output sweep in
+ * tests/test_whatif_parity.py. Change semantics here and there together,
+ * vectors first — never one interpreter alone.
+ *
  * Value model for variables (three different "missing" cases):
  *   - a name in the env            → that string value
  *   - deliberately unset for this pipeline type (CI_COMMIT_BRANCH in an MR
