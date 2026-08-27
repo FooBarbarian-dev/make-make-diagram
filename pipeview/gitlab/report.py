@@ -37,6 +37,7 @@ def generate_report(
     formats=DEFAULT_FORMATS,
     strategy: str = "auto",
     bundled_templates: bool = True,
+    trigger_docs: dict | None = None,
 ) -> tuple[Report, list[str]]:
     """Fetch, parse, and render one project's pipeline report.
 
@@ -98,6 +99,30 @@ def generate_report(
         p = os.path.join(outdir, f"{slug}.graph.svg")
         export_svg(report, p)
         written.append(p)
+
+    # --trigger-docs: per-scenario markdown beside the report. Doc problems
+    # become report diagnostics (so sync's printing and exit codes carry
+    # them) and never block the report itself.
+    if trigger_docs is not None:
+        from pipeview.render.trigger_docs import (
+            generate_trigger_docs,
+            write_docs_folder,
+        )
+        provenance = {"project": proj_full, "ref": ref, "commit": "",
+                      "version": pipeview.__version__}
+        docs = generate_trigger_docs(
+            report.to_dict(), trigger_docs["scenarios"],
+            trigger_docs["skipped"], provenance, trigger_docs["cmd"])
+        if docs is None:
+            report.diagnostics.append(Diagnostic(
+                severity="info",
+                message="No what-if program in this configuration — "
+                        "trigger docs skipped"))
+        else:
+            docdir = os.path.join(outdir, f"{slug}.trigger-docs")
+            report.diagnostics.extend(write_docs_folder(docdir, docs))
+            written.append(docdir)
+
     for p in written:
         log.info("Wrote %s", p)
     return report, written

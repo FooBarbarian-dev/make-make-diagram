@@ -1,0 +1,28 @@
+# Job and stage names chosen to break markdown tables and mermaid graphs:
+# pipes, quotes, brackets, backticks, emoji, and mermaid's `end` keyword.
+stages: [build, end]
+
+"weird | pipe":
+  stage: build
+  script: [echo hi]
+
+'quote"job':
+  stage: build
+  script: [echo hi]
+
+"brackets[1]":
+  stage: build
+  script: [echo hi]
+
+"back`tick":
+  stage: end
+  script: [echo hi]
+  needs: ["weird | pipe"]
+
+"emoji 🚀 job":
+  stage: end
+  script: [echo hi]
+
+"end":
+  stage: end
+  script: [echo hi]

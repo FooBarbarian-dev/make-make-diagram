@@ -2,6 +2,45 @@
 
 ## Unreleased
 
+**Markdown trigger docs** (see
+`docs/superpowers/specs/2026-08-27-trigger-docs-design.md`). Define the
+trigger scenarios you care about once, in a YAML file, and every report
+run can also emit committed-markdown docs — per scenario, per project.
+
+- `--trigger-docs FILE` on `pipeview <path>`, `pipeview gitlab report`
+  and `pipeview gitlab sync` writes a `<slug>.trigger-docs/` folder
+  beside each report: one `<id>.md` per scenario — outcome summary,
+  fan-out diagram when one event spawns several candidate pipelines,
+  per-pipeline mermaid DAG with verdicts encoded in node shape (manual
+  hexagons, ⏱ delays, dashed *depends*), stage-ordered job tables with a
+  deciding-rule "Why" column, a collapsed not-added table, an opt-in
+  lifecycle sequence diagram — plus a `pipeline-triggers.md` index.
+  Trigger jobs stop at the boundary; unknowables stay *depends*; no
+  timestamps, so unchanged inputs regenerate byte-identically.
+  Regeneration deletes only files carrying the provenance marker;
+  hand-written files in the folder are warned about, never deleted or
+  overwritten. Doc problems never block report generation.
+- New `pipeview scenarios` subcommand group (offline, one binary):
+  `init` writes a commented starter file, `check` validates one
+  (exit 0/1/2), `preview` renders docs for a local checkout to stdout.
+- The engine piece: `parsers/gitlab_whatif_eval.py`, a Python twin of
+  the report's inlined JS What-If evaluator. Both interpreters answer to
+  `tests/whatif_vectors.json` (now also run natively under pytest) and to
+  a full-output parity sweep over every gitlab fixture and example × 14
+  configs (`tests/test_whatif_parity.py`) — deep-equal JSON required.
+- Phase 2 (see
+  `docs/superpowers/specs/2026-08-27-trigger-docs-phase2-design.md`):
+  the What-If tab gains **Export scenario** (copy the current knobs as a
+  scenarios-file YAML stanza — the tab becomes the authoring UI; pinned
+  by a semantic round-trip test: exported YAML must evaluate identically
+  after loading) and **Copy markdown** (the job listing or pinned delta
+  as markdown tables, same wording as the plain listing). The schema
+  gains `changed_files: all`, `open_mr` on schedule/web/api/trigger, and
+  `open_mr.{mr_flavor, mr_labels}` so exports are lossless. And `pipeview scenarios verify FILE REPO
+  DOCSDIR` is the read-only drift check: committed docs vs fresh
+  generation with provenance masked, exit non-zero on drift — CI can
+  police doc freshness without write access.
+
 **What-If: copy/paste job listing + trigger delta comparison** (see
 `docs/superpowers/specs/2026-08-25-whatif-text-listing-and-delta-design.md`).
 

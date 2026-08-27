@@ -6,6 +6,12 @@
  * report.html at generation (offline guarantee) and runnable under plain
  * `node` for the vector test suite.
  *
+ * PARITY CONTRACT: pipeview/parsers/gitlab_whatif_eval.py is this
+ * evaluator's Python twin (used by trigger-docs generation), pinned to it
+ * by tests/whatif_vectors.json and the full-output sweep in
+ * tests/test_whatif_parity.py. Change semantics here and there together,
+ * vectors first — never one interpreter alone.
+ *
  * Value model for variables (three different "missing" cases):
  *   - a name in the env            → that string value
  *   - deliberately unset for this pipeline type (CI_COMMIT_BRANCH in an MR
@@ -1676,6 +1682,233 @@ var PipeviewWhatIf = (function () {
     return lines.join('\n');
   }
 
+  /* ---------------- markdown listing + delta ---------------- */
+
+  // Markdown-table flavor of textSummary/textDiff for pasting into issues,
+  // MRs and wikis. Same vocabulary (outcomeText) as the plain listing —
+  // the committed trigger docs are a different surface with their own
+  // renderer; each has one source of truth.
+
+  function mdCell(s) {
+    return String(s).replace(/\n/g, ' ').replace(/\|/g, '\\|');
+  }
+
+  function mdCode(s) {
+    s = String(s);
+    return s.indexOf('`') >= 0 ? '`` ' + s + ' ``' : '`' + s + '`';
+  }
+
+  function markdownSummary(report, result, config) {
+    var meta = jobMeta(report);
+    var lines = ['**What-if:** ' + mdCell(describeConfig(config))];
+    if (result.fatal && result.fatal.length) {
+      lines.push('');
+      lines.push('> ⚠ **Invalid configuration — GitLab refuses to create any '
+        + 'pipeline:**');
+      result.fatal.forEach(function (f) { lines.push('> - ' + mdCell(f.message)); });
+      return lines.join('\n');
+    }
+    function section(cand, depth) {
+      lines.push('');
+      lines.push('### ' + (depth ? 'Child pipeline: ' : '') + candHeading(cand));
+      if (cand.created === false) {
+        lines.push('');
+        lines.push('*Not created — ' + mdCell(cand.reason || 'no reason recorded')
+          + '.*');
+        return;
+      }
+      if (cand.creationFails) {
+        lines.push('');
+        lines.push('> ⚠ creation FAILS (needs/dependencies problem — see the report)');
+      } else if (cand.created === null) {
+        lines.push('');
+        lines.push('> ⚠ creation uncertain: ' + mdCell(cand.reason || 'depends'));
+      }
+      lines.push('');
+      var ids = stageSorted(
+        cand.jobOrder.filter(function (id) { return mightRun(cand.jobs[id]); }), meta);
+      if (!ids.length) {
+        lines.push('*(no jobs would run)*');
+      } else {
+        lines.push('| Job | Stage | Verdict |');
+        lines.push('|---|---|---|');
+        ids.forEach(function (id) {
+          lines.push('| ' + mdCell(mdCode(meta.names[id] || id))
+            + ' | ' + mdCell(meta.stages[id] || '')
+            + ' | ' + mdCell(outcomeText(cand.jobs[id])) + ' |');
+        });
+      }
+      (cand.children || []).forEach(function (child) { section(child, depth + 1); });
+    }
+    result.candidates.forEach(function (cand) { section(cand, 0); });
+    if (result.duplicates && result.duplicates.length) {
+      lines.push('');
+      lines.push('**Duplicates** (may run in more than one pipeline for this '
+        + 'single event): ' + result.duplicates.map(function (d) {
+          return mdCell(mdCode(meta.names[d.job] || d.job));
+        }).join(', '));
+    }
+    return lines.join('\n');
+  }
+
+  function markdownDiff(report, diff, labelA, labelB) {
+    var meta = jobMeta(report);
+    var c = diff.counts;
+    var lines = [
+      '**What-if delta** — ' + c.added + ' added, ' + c.removed + ' removed, '
+        + c.changed + ' changed, ' + c.same + ' unchanged',
+      '',
+      '- baseline: ' + mdCell(labelA),
+      '- current: ' + mdCell(labelB)
+    ];
+    var status = pipelineStatusLines(diff);
+    if (status.length) {
+      lines.push('');
+      lines.push('**Pipelines:**');
+      status.slice(1).forEach(function (l) {
+        lines.push('- ' + mdCell(l.replace(/^\s+/, '')));
+      });
+    }
+    if (!diff.order.length) {
+      lines.push('');
+      lines.push('*(no jobs would run in either configuration)*');
+      return lines.join('\n');
+    }
+    lines.push('');
+    lines.push('| Δ | Job | Verdict |');
+    lines.push('|---|---|---|');
+    var order = stageSorted(diff.order, meta);
+    var symbol = { added: '+', removed: '-', changed: '~', same: '=' };
+    ['added', 'removed', 'changed', 'same'].forEach(function (kind) {
+      order.forEach(function (id) {
+        var j = diff.jobs[id];
+        if (j.delta !== kind) return;
+        var verdict;
+        if (kind === 'added') {
+          verdict = outcomeText(j.b.outcome) + pipesNote(j.b);
+        } else if (kind === 'removed') {
+          verdict = 'was: ' + outcomeText(j.a.outcome) + pipesNote(j.a);
+        } else if (kind === 'changed') {
+          var ta = outcomeText(j.a.outcome), tb = outcomeText(j.b.outcome);
+          verdict = ta === tb
+            ? tb + '  [in ' + j.a.pipes.length + ' pipeline'
+              + (j.a.pipes.length > 1 ? 's' : '') + ' → '
+              + j.b.pipes.length + ' pipeline' + (j.b.pipes.length > 1 ? 's' : '') + ']'
+            : ta + ' → ' + tb;
+        } else {
+          verdict = outcomeText(j.b.outcome);
+        }
+        lines.push('| ' + symbol[kind] + ' | '
+          + mdCell(mdCode(meta.names[id] || id)) + ' | '
+          + mdCell(verdict) + ' |');
+      });
+    });
+    return lines.join('\n');
+  }
+
+  /* ---------------- scenario export (YAML) ---------------- */
+
+  // Serialize a config as one scenarios-file stanza (snake_case, the
+  // schema pipeview/scenarios.py loads). The contract is semantic: the
+  // exported YAML, loaded and mapped back through to_whatif_config, must
+  // evaluate identically (pinned by tests/test_whatif_export.py).
+
+  function yamlScalar(v) {
+    if (v === true) return 'true';
+    if (v === false) return 'false';
+    var s = String(v);
+    if (s.indexOf('\n') >= 0) {
+      return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n') + '"';
+    }
+    // plain style only when YAML cannot re-type or mis-parse it
+    if (/^[A-Za-z_][A-Za-z0-9_.\/-]*$/.test(s)
+        && !/^(true|false|null|yes|no|on|off)$/i.test(s)) {
+      return s;
+    }
+    return "'" + s.replace(/'/g, "''") + "'";
+  }
+
+  function yamlFlowMap(obj) {
+    var keys = Object.keys(obj).sort();
+    if (!keys.length) return '{}';
+    return '{ ' + keys.map(function (k) {
+      return yamlScalar(k) + ': ' + yamlScalar(obj[k]);
+    }).join(', ') + ' }';
+  }
+
+  function scenarioId(config) {
+    var base;
+    switch (config.scenario) {
+      case 'push_branch': base = 'push-' + (config.branch || 'branch'); break;
+      case 'push_tag': base = 'tag-' + (config.tag || 'v1.0.0'); break;
+      case 'mr': base = 'mr-' + (config.branch || 'source'); break;
+      default:
+        base = config.scenario + (config.refKind === 'tag' ? '-tag' : '');
+    }
+    var id = base.toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
+    return id || 'scenario';
+  }
+
+  function scenarioYaml(config) {
+    var s = config.scenario || 'push_branch';
+    var lines = [
+      '# pipeview trigger-docs scenario — exported from the What-If tab.',
+      '# Paste the `- id:` block into your scenarios file, or keep this as one.',
+      'version: 1',
+      'scenarios:',
+      '  - id: ' + scenarioId(config) + '   # rename to taste',
+      '    event: ' + s
+    ];
+    function add(key, value) { lines.push('    ' + key + ': ' + value); }
+    var branchy = s === 'push_branch' || s === 'schedule' || s === 'web'
+      || s === 'api' || s === 'trigger';
+    var onTag = s === 'push_tag'
+      || (branchy && s !== 'push_branch' && config.refKind === 'tag');
+
+    if (onTag) {
+      if (s !== 'push_tag') add('ref_kind', 'tag');
+      add('tag', yamlScalar(config.tag || 'v1.0.0'));
+      if (config.tagProtected) add('tag_protected', 'true');
+    } else if (config.branch) {
+      add('branch', yamlScalar(config.branch));
+    }
+    if (s === 'push_branch' && config.newBranch) add('new_branch', 'true');
+    if (branchy && !onTag && config.openMR) {
+      var mr = {};
+      if (config.target) mr.target = config.target;
+      if (config.draft) mr.draft = true;
+      if (config.mrFlavor && config.mrFlavor !== 'detached') {
+        mr.mr_flavor = config.mrFlavor;
+      }
+      if (config.mrLabels) mr.mr_labels = config.mrLabels;
+      add('open_mr', yamlFlowMap(mr));
+    }
+    if (s === 'mr') {
+      if (config.target) add('target', yamlScalar(config.target));
+      if (config.draft) add('draft', 'true');
+      if (config.mrFlavor && config.mrFlavor !== 'detached') {
+        add('mr_flavor', config.mrFlavor);
+      }
+      if (config.mrLabels) add('mr_labels', yamlScalar(config.mrLabels));
+    }
+    var changed = config.changedFiles;
+    if (changed === 'all') {
+      add('changed_files', 'all');
+    } else if (Array.isArray(changed)) {
+      add('changed_files', '[' + changed.map(yamlScalar).join(', ') + ']');
+    }
+    if (config.commitMessage && config.commitMessage !== 'Update code') {
+      add('commit_message', yamlScalar(config.commitMessage));
+    }
+    var overrides = config.overrides || {};
+    if (Object.keys(overrides).length) {
+      add('variables', yamlFlowMap(overrides));
+    }
+    return lines.join('\n') + '\n';
+  }
+
   return {
     evalExpr: evalExpr,
     globToRegExp: globToRegExp,
@@ -1688,7 +1921,10 @@ var PipeviewWhatIf = (function () {
     outcomeText: outcomeText,
     textSummary: textSummary,
     diffEvents: diffEvents,
-    textDiff: textDiff
+    textDiff: textDiff,
+    markdownSummary: markdownSummary,
+    markdownDiff: markdownDiff,
+    scenarioYaml: scenarioYaml
   };
 })();
 
