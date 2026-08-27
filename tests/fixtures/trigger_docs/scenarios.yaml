@@ -1,0 +1,22 @@
+version: 1
+scenarios:
+  - id: push-main
+    title: Push to main
+    intro: |
+      What runs on every merge to main.
+    event: push_branch
+    branch: main
+  - id: push-feature-mr
+    title: Push to a feature branch with an open MR
+    event: push_branch
+    branch: feature/x
+    open_mr: { target: main }
+    diagrams: [dag, lifecycle]
+  - id: release-tag
+    title: Release tag
+    event: push_tag
+    tag: v1.2.3
+  - id: nightly
+    title: Nightly schedule
+    event: schedule
+    variables: { NIGHTLY: "1" }

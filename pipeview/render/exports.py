@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from pipeview.model import Edge, Node, Report
+from pipeview.render.mmd import escape_label as _escape_mmd
+from pipeview.render.mmd import node_id as _mmd_id
 
 _EDGE_STYLE = {
     "prerequisite": "solid",
@@ -225,16 +227,6 @@ def _dfs_level(
 
 def _escape_dot(s: str) -> str:
     return s.replace("\\", "\\\\").replace('"', '\\"')
-
-
-def _escape_mmd(s: str) -> str:
-    return s.replace('"', "'").replace("[", "(").replace("]", ")")
-
-
-def _mmd_id(s: str) -> str:
-    for ch in ":/.-  ":
-        s = s.replace(ch, "_")
-    return s
 
 
 def _escape_svg(s: str) -> str:

@@ -72,6 +72,43 @@ class Scenario:
     source: SourceLocation | None = None
 
 
+def to_whatif_config(scenario: Scenario) -> dict[str, Any]:
+    """Spell a Scenario as the What-If evaluator's config object — the
+    camelCase knobs whatif.js and gitlab_whatif_eval share."""
+    c = scenario.config
+    out: dict[str, Any] = {"scenario": scenario.event}
+    if "branch" in c:
+        out["branch"] = c["branch"]
+    if "tag" in c:
+        out["tag"] = c["tag"]
+    if "ref_kind" in c:
+        out["refKind"] = c["ref_kind"]
+    if "new_branch" in c:
+        out["newBranch"] = bool(c["new_branch"])
+    if "tag_protected" in c:
+        out["tagProtected"] = bool(c["tag_protected"])
+    if "target" in c:
+        out["target"] = c["target"]
+    if "draft" in c:
+        out["draft"] = bool(c["draft"])
+    if "mr_flavor" in c:
+        out["mrFlavor"] = c["mr_flavor"]
+    if "mr_labels" in c:
+        labels = c["mr_labels"]
+        out["mrLabels"] = ",".join(str(v) for v in labels) \
+            if isinstance(labels, list) else str(labels)
+    if "open_mr" in c:
+        out["openMR"] = True
+        if c["open_mr"].get("target"):
+            out["target"] = c["open_mr"]["target"]
+        out["draft"] = c["open_mr"].get("draft", False)
+    if "changed_files" in c:
+        out["changedFiles"] = list(c["changed_files"])
+    if "variables" in c:
+        out["overrides"] = dict(c["variables"])
+    return out
+
+
 def _hash_stanza(stanza: dict) -> str:
     canonical = json.dumps(stanza, sort_keys=True, default=str)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()[:8]
