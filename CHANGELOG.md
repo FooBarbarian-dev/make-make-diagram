@@ -28,6 +28,18 @@ run can also emit committed-markdown docs — per scenario, per project.
   `tests/whatif_vectors.json` (now also run natively under pytest) and to
   a full-output parity sweep over every gitlab fixture and example × 14
   configs (`tests/test_whatif_parity.py`) — deep-equal JSON required.
+- Phase 2 (see
+  `docs/superpowers/specs/2026-08-27-trigger-docs-phase2-design.md`):
+  the What-If tab gains **Export scenario** (copy the current knobs as a
+  scenarios-file YAML stanza — the tab becomes the authoring UI; pinned
+  by a semantic round-trip test: exported YAML must evaluate identically
+  after loading) and **Copy markdown** (the job listing or pinned delta
+  as markdown tables, same wording as the plain listing). The schema
+  gains `changed_files: all` and `open_mr` on schedule/web/api/trigger
+  so exports are lossless. And `pipeview scenarios verify FILE REPO
+  DOCSDIR` is the read-only drift check: committed docs vs fresh
+  generation with provenance masked, exit non-zero on drift — CI can
+  police doc freshness without write access.
 
 **What-If: copy/paste job listing + trigger delta comparison** (see
 `docs/superpowers/specs/2026-08-25-whatif-text-listing-and-delta-design.md`).

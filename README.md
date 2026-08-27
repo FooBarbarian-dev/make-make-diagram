@@ -141,7 +141,12 @@ The generated report is a single self-contained HTML file with four views
    Every evaluation also renders as a **plain-text job listing** — one
    section per candidate pipeline naming the jobs that would run, in
    stage order with stage and verdict — behind a collapsible block and a
-   **Copy job list** button, ready to paste into an issue or chat. And
+   **Copy job list** button, ready to paste into an issue or chat.
+   **Copy markdown** exports the same listing (or the delta) as markdown
+   tables instead, for issues, MRs and wikis; **Export scenario** copies
+   the current knobs as a trigger-docs YAML stanza, making the tab the
+   authoring UI for the scenarios file (see *Markdown trigger docs*
+   below). And
    **Pin as baseline** freezes the current scenario so you can flip any
    knob (the event preset included) and see the **delta**: per-pipeline
    diff graphs where added jobs are green, removed jobs red-dashed, and
@@ -168,7 +173,14 @@ pipeview scenarios preview scenarios.yaml .   # iterate: docs to stdout
 
 pipeview . --trigger-docs scenarios.yaml -o out/                 # local checkout
 pipeview gitlab sync -o reports/ --trigger-docs scenarios.yaml   # every tracked project
+
+pipeview scenarios verify scenarios.yaml . docs/ci   # drift check (read-only,
+                                                     #   for a scheduled CI job)
 ```
+
+You don't have to hand-write the YAML: the What-If tab's **Export
+scenario** button copies the knobs you configured interactively as a
+ready-to-paste stanza.
 
 A scenario is a named What-If configuration — the same knobs as the tab,
 spelled in YAML:
@@ -196,7 +208,12 @@ writes to GitLab. The docs carry no timestamps, so regenerating with
 unchanged inputs is byte-identical and `git diff` answers "did anything
 change?". Every generated file carries a provenance marker; regeneration
 deletes only marker-bearing files, and a hand-written file in the folder
-is warned about, never deleted or overwritten.
+is warned about, never deleted or overwritten. `pipeview scenarios
+verify` closes the loop: it compares a repo's committed docs against
+fresh generation (provenance masked, so a newer pipeview regenerating
+identical content is not drift) and exits non-zero when they've gone
+stale — cron it in CI and doc freshness polices itself, with pipeview
+still read-only.
 
 The honesty rules match the What-If tab, because the same evaluation runs
 (a Python twin of the report's inlined evaluator, pinned to it by a
@@ -409,7 +426,7 @@ silently skipped with an info diagnostic.
 
 ```
 pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--trigger-docs FILE] [--version]
-pipeview scenarios [init|check|preview] …
+pipeview scenarios [init|check|preview|verify] …
 pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 ```
 
