@@ -47,6 +47,8 @@ CASES = [
      "configA": {"scenario": "push_branch", "branch": "main"}},
     {"name": "stage_order", "fixture": "whatif_stageorder",
      "configA": {"scenario": "push_branch", "branch": "main"}},
+    {"name": "hostile_markdown", "fixture": "hostile_names",
+     "configA": {"scenario": "push_branch", "branch": "main"}},
 ]
 
 
@@ -216,3 +218,99 @@ class TestTextDiff:
         lines = run["dup_mr_closed"]["textDiff"].splitlines()
         assert any("Merge request pipeline — baseline only" in ln for ln in lines)
         assert not any("Branch pipeline →" in ln for ln in lines)
+
+
+def _md_table_rows(text: str) -> list[list[str]]:
+    """Markdown table BODY rows (after a separator) split into cells,
+    honoring escaped pipes."""
+    import re
+    rows: list[list[str]] = []
+    in_body = False
+    for line in text.splitlines():
+        if line.startswith("|") and set(line) <= {"|", "-", " "}:
+            in_body = True          # the |---| separator: body follows
+            continue
+        if not line.startswith("|"):
+            in_body = False
+            continue
+        if in_body:
+            cells = re.split(r"(?<!\\)\|", line)
+            rows.append([c.strip() for c in cells[1:-1]])
+    return rows
+
+
+class TestMarkdownSummary:
+    def test_header_and_sections(self, run):
+        md = run["dup_listing"]["markdownA"]
+        assert md.splitlines()[0] == (
+            "**What-if:** Push to a branch — branch feature/widget — open MR → main"
+        )
+        assert "### Branch pipeline (push on feature/widget)" in md
+        assert ("### Merge request pipeline "
+                "(merge_request_event on feature/widget → main)") in md
+
+    def test_tables_are_well_formed(self, run):
+        for row in _md_table_rows(run["dup_listing"]["markdownA"]):
+            assert len(row) == 3, row
+
+    def test_verdicts_agree_with_text_listing(self, run):
+        # same vocabulary as the plain listing: every markdown row's verdict
+        # must appear on that job's line in textSummary
+        summary_lines = run["dup_listing"]["summaryA"].splitlines()
+        for name, _stage, verdict in _md_table_rows(run["dup_listing"]["markdownA"]):
+            job = name.strip("`")
+            line = next(ln for ln in summary_lines if ln.strip().startswith(job))
+            assert verdict in line, (job, verdict, line)
+
+    def test_duplicates_footer(self, run):
+        md = run["dup_listing"]["markdownA"]
+        assert "**Duplicates**" in md
+        assert "`lint_everything`" in md
+
+    def test_invalid_config_renders_blockquote(self, run):
+        md = run["invalid_listing"]["markdownA"]
+        assert "Invalid configuration" in md
+        assert "| Job |" not in md
+
+    def test_child_pipelines_get_their_own_sections(self, run):
+        assert "### Child pipeline:" in run["child_listing"]["markdownA"]
+
+    def test_hostile_names_stay_tabular(self, run):
+        md = run["hostile_markdown"]["markdownA"]
+        rows = _md_table_rows(md)
+        assert rows, md
+        for row in rows:
+            assert len(row) == 3, row
+        assert any("weird" in row[0] for row in rows)
+
+
+class TestMarkdownDiff:
+    def test_counts_and_labels(self, run):
+        md = run["dup_branch_vs_tag"]["markdownDiff"]
+        counts = run["dup_branch_vs_tag"]["counts"]
+        head = md.splitlines()[0]
+        assert f"{counts['added']} added" in head
+        assert f"{counts['removed']} removed" in head
+        assert "- baseline: " in md
+        assert "- current: " in md
+
+    def test_delta_table_symbols(self, run):
+        md = run["dup_branch_vs_tag"]["markdownDiff"]
+        rows = _md_table_rows(md)
+        assert rows
+        for row in rows:
+            assert len(row) == 3, row
+            assert row[0] in ("+", "-", "~", "="), row
+
+    def test_deltas_match_structured_diff(self, run):
+        case = run["dup_branch_vs_tag"]
+        symbol_for = {"added": "+", "removed": "-", "changed": "~", "same": "="}
+        expected = {}
+        for job_id, delta in case["deltas"].items():
+            expected[job_id.split("::")[-1]] = symbol_for[delta]
+        for sym, name, _verdict in _md_table_rows(case["markdownDiff"]):
+            assert expected.get(name.strip("`")) == sym, (name, sym)
+
+    def test_pipeline_section_when_pairing_is_noteworthy(self, run):
+        md = run["dup_branch_vs_tag"]["markdownDiff"]
+        assert "**Pipelines:**" in md

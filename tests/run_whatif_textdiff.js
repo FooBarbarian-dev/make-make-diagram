@@ -19,7 +19,8 @@ for (const c of input.cases) {
   const entry = {
     name: c.name,
     labelA: W.describeConfig(c.configA),
-    summaryA: W.textSummary(c.report, resA, c.configA)
+    summaryA: W.textSummary(c.report, resA, c.configA),
+    markdownA: W.markdownSummary(c.report, resA, c.configA)
   };
   if (c.configB) {
     const resB = W.evaluateEvent(c.report, c.configB);
@@ -38,6 +39,7 @@ for (const c of input.cases) {
       deltas: p.deltas
     }));
     entry.textDiff = W.textDiff(c.report, diff, entry.labelA, entry.labelB);
+    entry.markdownDiff = W.markdownDiff(c.report, diff, entry.labelA, entry.labelB);
   }
   out.cases.push(entry);
 }

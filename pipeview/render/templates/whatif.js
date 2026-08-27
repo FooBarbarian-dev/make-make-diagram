@@ -1682,6 +1682,130 @@ var PipeviewWhatIf = (function () {
     return lines.join('\n');
   }
 
+  /* ---------------- markdown listing + delta ---------------- */
+
+  // Markdown-table flavor of textSummary/textDiff for pasting into issues,
+  // MRs and wikis. Same vocabulary (outcomeText) as the plain listing —
+  // the committed trigger docs are a different surface with their own
+  // renderer; each has one source of truth.
+
+  function mdCell(s) {
+    return String(s).replace(/\n/g, ' ').replace(/\|/g, '\\|');
+  }
+
+  function mdCode(s) {
+    s = String(s);
+    return s.indexOf('`') >= 0 ? '`` ' + s + ' ``' : '`' + s + '`';
+  }
+
+  function markdownSummary(report, result, config) {
+    var meta = jobMeta(report);
+    var lines = ['**What-if:** ' + mdCell(describeConfig(config))];
+    if (result.fatal && result.fatal.length) {
+      lines.push('');
+      lines.push('> ⚠ **Invalid configuration — GitLab refuses to create any '
+        + 'pipeline:**');
+      result.fatal.forEach(function (f) { lines.push('> - ' + mdCell(f.message)); });
+      return lines.join('\n');
+    }
+    function section(cand, depth) {
+      lines.push('');
+      lines.push('### ' + (depth ? 'Child pipeline: ' : '') + candHeading(cand));
+      if (cand.created === false) {
+        lines.push('');
+        lines.push('*Not created — ' + mdCell(cand.reason || 'no reason recorded')
+          + '.*');
+        return;
+      }
+      if (cand.creationFails) {
+        lines.push('');
+        lines.push('> ⚠ creation FAILS (needs/dependencies problem — see the report)');
+      } else if (cand.created === null) {
+        lines.push('');
+        lines.push('> ⚠ creation uncertain: ' + mdCell(cand.reason || 'depends'));
+      }
+      lines.push('');
+      var ids = stageSorted(
+        cand.jobOrder.filter(function (id) { return mightRun(cand.jobs[id]); }), meta);
+      if (!ids.length) {
+        lines.push('*(no jobs would run)*');
+      } else {
+        lines.push('| Job | Stage | Verdict |');
+        lines.push('|---|---|---|');
+        ids.forEach(function (id) {
+          lines.push('| ' + mdCell(mdCode(meta.names[id] || id))
+            + ' | ' + mdCell(meta.stages[id] || '')
+            + ' | ' + mdCell(outcomeText(cand.jobs[id])) + ' |');
+        });
+      }
+      (cand.children || []).forEach(function (child) { section(child, depth + 1); });
+    }
+    result.candidates.forEach(function (cand) { section(cand, 0); });
+    if (result.duplicates && result.duplicates.length) {
+      lines.push('');
+      lines.push('**Duplicates** (may run in more than one pipeline for this '
+        + 'single event): ' + result.duplicates.map(function (d) {
+          return mdCell(mdCode(meta.names[d.job] || d.job));
+        }).join(', '));
+    }
+    return lines.join('\n');
+  }
+
+  function markdownDiff(report, diff, labelA, labelB) {
+    var meta = jobMeta(report);
+    var c = diff.counts;
+    var lines = [
+      '**What-if delta** — ' + c.added + ' added, ' + c.removed + ' removed, '
+        + c.changed + ' changed, ' + c.same + ' unchanged',
+      '',
+      '- baseline: ' + mdCell(labelA),
+      '- current: ' + mdCell(labelB)
+    ];
+    var status = pipelineStatusLines(diff);
+    if (status.length) {
+      lines.push('');
+      lines.push('**Pipelines:**');
+      status.slice(1).forEach(function (l) {
+        lines.push('- ' + mdCell(l.replace(/^\s+/, '')));
+      });
+    }
+    if (!diff.order.length) {
+      lines.push('');
+      lines.push('*(no jobs would run in either configuration)*');
+      return lines.join('\n');
+    }
+    lines.push('');
+    lines.push('| Δ | Job | Verdict |');
+    lines.push('|---|---|---|');
+    var order = stageSorted(diff.order, meta);
+    var symbol = { added: '+', removed: '-', changed: '~', same: '=' };
+    ['added', 'removed', 'changed', 'same'].forEach(function (kind) {
+      order.forEach(function (id) {
+        var j = diff.jobs[id];
+        if (j.delta !== kind) return;
+        var verdict;
+        if (kind === 'added') {
+          verdict = outcomeText(j.b.outcome) + pipesNote(j.b);
+        } else if (kind === 'removed') {
+          verdict = 'was: ' + outcomeText(j.a.outcome) + pipesNote(j.a);
+        } else if (kind === 'changed') {
+          var ta = outcomeText(j.a.outcome), tb = outcomeText(j.b.outcome);
+          verdict = ta === tb
+            ? tb + '  [in ' + j.a.pipes.length + ' pipeline'
+              + (j.a.pipes.length > 1 ? 's' : '') + ' → '
+              + j.b.pipes.length + ' pipeline' + (j.b.pipes.length > 1 ? 's' : '') + ']'
+            : ta + ' → ' + tb;
+        } else {
+          verdict = outcomeText(j.b.outcome);
+        }
+        lines.push('| ' + symbol[kind] + ' | '
+          + mdCell(mdCode(meta.names[id] || id)) + ' | '
+          + mdCell(verdict) + ' |');
+      });
+    });
+    return lines.join('\n');
+  }
+
   /* ---------------- scenario export (YAML) ---------------- */
 
   // Serialize a config as one scenarios-file stanza (snake_case, the
@@ -1794,6 +1918,8 @@ var PipeviewWhatIf = (function () {
     textSummary: textSummary,
     diffEvents: diffEvents,
     textDiff: textDiff,
+    markdownSummary: markdownSummary,
+    markdownDiff: markdownDiff,
     scenarioYaml: scenarioYaml
   };
 })();
