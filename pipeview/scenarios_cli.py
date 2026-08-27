@@ -86,6 +86,8 @@ def main(argv: list[str] | None = None) -> int:
         return _cmd_check(args)
     if args.command == "preview":
         return _cmd_preview(args)
+    if args.command == "verify":
+        return _cmd_verify(args)
     parser.print_help()
     return 2
 
@@ -113,6 +115,24 @@ def _build_parser() -> argparse.ArgumentParser:
     p_preview.add_argument("repo", help="local checkout (or .gitlab-ci.yml path)")
     p_preview.add_argument("--scenario", metavar="ID",
                            help="render just this scenario")
+
+    p_verify = sub.add_parser(
+        "verify",
+        help="check committed docs against fresh generation (read-only)",
+        description=(
+            "Regenerate the docs for a local checkout and compare with the "
+            "committed copies — provenance lines are masked, so a newer "
+            "pipeview regenerating identical content is not drift. Exit 0 in "
+            "sync, 1 on drift (each file named), 2 when inputs are unusable. "
+            "Note: generation here parses the local checkout; docs generated "
+            "by `gitlab sync` for configs that rely on cross-repo includes "
+            "may legitimately differ."
+        ),
+    )
+    p_verify.add_argument("path", help="scenarios file")
+    p_verify.add_argument("repo", help="local checkout (or .gitlab-ci.yml path)")
+    p_verify.add_argument("docs_dir",
+                          help="the committed docs folder (e.g. docs/ci)")
     return parser
 
 
@@ -188,6 +208,58 @@ def _cmd_preview(args) -> int:
         print(f"note: this configuration has {sev} diagnostics — "
               f"run `pipeview {args.repo}` for details", file=sys.stderr)
     return 1 if diags else 0
+
+
+def _cmd_verify(args) -> int:
+    # local import: pipeview.cli routes to this module, so import lazily
+    from pipeview.cli import _discover_roots, _parse_root
+    from pipeview.render.trigger_docs import (
+        compare_docs_folder,
+        generate_trigger_docs,
+    )
+
+    scenarios, diags = load_scenarios(args.path)
+    _print_diags(diags)
+    if not scenarios:
+        print(f"{args.path}: no usable scenarios", file=sys.stderr)
+        return 2
+    repo = os.path.abspath(args.repo)
+    roots = [(p, k) for p, k in _discover_roots(repo) if k == "gitlab_yaml"]
+    if not roots:
+        print(f"Error: no GitLab CI configuration found at {args.repo}",
+              file=sys.stderr)
+        return 2
+    if not os.path.isdir(args.docs_dir):
+        print(f"Error: {args.docs_dir} is not a directory", file=sys.stderr)
+        return 2
+    root_path, root_kind = roots[0]
+    report = _parse_root(root_path, root_kind)
+    skipped = [d.message for d in diags if d.severity == "error"]
+    provenance = {"project": os.path.basename(root_path), "ref": "",
+                  "commit": "", "version": pipeview.__version__}
+    files = generate_trigger_docs(
+        report.to_dict(), scenarios, skipped, provenance,
+        f"pipeview scenarios verify {args.path} {args.repo} {args.docs_dir}")
+    if files is None:
+        print(f"Error: {root_path} carries no what-if program", file=sys.stderr)
+        return 2
+
+    result = compare_docs_folder(args.docs_dir, files)
+    for name in result["missing"]:
+        print(f"missing: {name} — expected but not present "
+              f"(or not pipeview-generated)", file=sys.stderr)
+    for name in result["stale"]:
+        print(f"stale: {name} — content differs from fresh generation",
+              file=sys.stderr)
+    for name in result["orphaned"]:
+        print(f"orphaned: {name} — no current scenario produces it",
+              file=sys.stderr)
+    if result["missing"] or result["stale"] or result["orphaned"]:
+        print(f"{args.docs_dir}: drift — {len(result['ok'])}/{len(files)} "
+              f"docs up to date")
+        return 1
+    print(f"{args.docs_dir}: up to date ({len(files)} docs)")
+    return 0
 
 
 if __name__ == "__main__":

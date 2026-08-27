@@ -136,3 +136,76 @@ class TestLocalTriggerDocs:
         assert code == 1
         assert "trigger docs skipped" in capsys.readouterr().err
         assert os.path.isfile(os.path.join(outdir, "gitlab-ci.report.html"))
+
+
+class TestVerify:
+    FIXTURE = str(TESTS / "fixtures" / "gitlab" / "minimal")
+
+    def _generate(self, tmp_path):
+        outdir = str(tmp_path / "out")
+        assert main([self.FIXTURE, "-o", outdir,
+                     "--trigger-docs", SCENARIOS]) == 0
+        return os.path.join(outdir, "gitlab-ci.trigger-docs")
+
+    def test_up_to_date(self, tmp_path, capsys):
+        docdir = self._generate(tmp_path)
+        assert main(["scenarios", "verify", SCENARIOS, self.FIXTURE,
+                     docdir]) == 0
+        assert "up to date" in capsys.readouterr().out
+
+    def test_provenance_only_differences_are_not_drift(self, tmp_path):
+        from pipeview.parsers.gitlab_parser import parse_gitlab
+        from pipeview.render.trigger_docs import (
+            generate_trigger_docs,
+            write_docs_folder,
+        )
+        from pipeview.scenarios import load_scenarios
+
+        scenarios, _ = load_scenarios(SCENARIOS)
+        report = parse_gitlab(os.path.join(self.FIXTURE, ".gitlab-ci.yml"))
+        files = generate_trigger_docs(
+            report.to_dict(), scenarios, [],
+            {"project": "group/other", "ref": "release/2.0",
+             "commit": "feedface00", "version": "9.9.9"},
+            "pipeview gitlab sync -o /somewhere/else --trigger-docs other.yaml")
+        docdir = str(tmp_path / "committed")
+        write_docs_folder(docdir, files)
+        assert main(["scenarios", "verify", SCENARIOS, self.FIXTURE,
+                     docdir]) == 0
+
+    def test_stale_doc_is_drift(self, tmp_path, capsys):
+        docdir = self._generate(tmp_path)
+        doc = Path(docdir, "push-main.md")
+        doc.write_text(doc.read_text(encoding="utf-8")
+                       .replace("## Outcome", "## Outcome (edited)"),
+                       encoding="utf-8")
+        assert main(["scenarios", "verify", SCENARIOS, self.FIXTURE,
+                     docdir]) == 1
+        assert "stale: push-main.md" in capsys.readouterr().err
+
+    def test_missing_doc_is_drift(self, tmp_path, capsys):
+        docdir = self._generate(tmp_path)
+        os.remove(os.path.join(docdir, "release-tag.md"))
+        assert main(["scenarios", "verify", SCENARIOS, self.FIXTURE,
+                     docdir]) == 1
+        assert "missing: release-tag.md" in capsys.readouterr().err
+
+    def test_orphaned_marker_doc_is_drift(self, tmp_path, capsys):
+        docdir = self._generate(tmp_path)
+        Path(docdir, "old-scenario.md").write_text(
+            "<!-- pipeview-trigger-doc: scenario=old -->\nold\n",
+            encoding="utf-8")
+        assert main(["scenarios", "verify", SCENARIOS, self.FIXTURE,
+                     docdir]) == 1
+        assert "orphaned: old-scenario.md" in capsys.readouterr().err
+
+    def test_human_files_are_ignored(self, tmp_path):
+        docdir = self._generate(tmp_path)
+        Path(docdir, "notes.md").write_text("my notes\n", encoding="utf-8")
+        assert main(["scenarios", "verify", SCENARIOS, self.FIXTURE,
+                     docdir]) == 0
+
+    def test_bad_docs_dir_exit_2(self, tmp_path, capsys):
+        assert main(["scenarios", "verify", SCENARIOS, self.FIXTURE,
+                     str(tmp_path / "absent")]) == 2
+        assert "not a directory" in capsys.readouterr().err
