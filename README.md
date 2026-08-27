@@ -201,7 +201,8 @@ scenarios:
 ```
 
 Each project in the run gets a self-contained folder beside its HTML
-report — `<slug>.trigger-docs/` with one `<id>.md` per scenario plus a
+report — `<slug>.trigger-docs/` (locally, e.g. `gitlab-ci.trigger-docs/`)
+with one `<id>.md` per scenario plus a
 `pipeline-triggers.md` index — ready to be copied into that repo (say,
 `docs/ci/`) and committed by you or your tooling. pipeview itself never
 writes to GitLab. The docs carry no timestamps, so regenerating with

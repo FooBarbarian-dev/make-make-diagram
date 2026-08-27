@@ -61,8 +61,8 @@ Still out of scope: per-scenario `projects:` filters, chain-following,
   pipeline (children nested with a "Child pipeline:" prefix), a
   `| Job | Stage | Verdict |` table of the jobs that might run, footers
   for duplicates and not-created pipelines. The delta variant is one
-  table with a leading `Δ` column (`+`/`−`/`~`/`=`) and the same
-  pipeline-pairing notes `textDiff` prints. No mermaid: the interactive
+  table with a leading `Δ` column (`+`/`-`/`~`/`=`, the ASCII symbols
+  `textDiff` uses) and the same pipeline-pairing notes `textDiff` prints. No mermaid: the interactive
   graph is a click away in the report, and issues want tables.
 - Cell hygiene matches the Python renderer: pipes escaped, job names in
   code spans, one line per cell.
@@ -109,6 +109,12 @@ Still out of scope: per-scenario `projects:` filters, chain-following,
   open MR (CI_OPEN_MERGE_REQUESTS is set in every branch pipeline whose
   branch has one — the documented dedup pattern reads it), so a lossless
   export needs the key there too.
+- **And a third, found in review**: `open_mr` accepts `mr_flavor` and
+  `mr_labels` sub-knobs. A push-with-open-MR event spawns a real MR
+  candidate pipeline whose env those knobs shape
+  (CI_MERGE_REQUEST_EVENT_TYPE, the branch SHAs, labels) — without them
+  the export was lossy for exactly that case; the round-trip suite now
+  pins it (`push-with-flavored-mr`).
 - **`strip_provenance` masks a third thing**: the index's regeneration
   command. It embeds the invocation (sync's flags vs verify's), which
   differs without the content differing — same reasoning as the

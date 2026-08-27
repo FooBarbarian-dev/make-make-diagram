@@ -395,3 +395,21 @@ Implemented as specced, with these refinements found during the build:
   "never deleted or overwritten").
 - **`commit_message` joined the schema** (rules on `CI_COMMIT_MESSAGE`,
   "[skip ci]"-style, are common enough to belong in v1).
+- **Skipped scenarios render as their own index section**, not rows in
+  the summary table — the error messages are sentences and would wreck
+  the table; absence is still never silent.
+- **Two tests live elsewhere than the plan named**: the offline
+  no-`http(s)://` scan for generated markdown is in
+  `tests/test_trigger_docs.py` (not an extension of
+  `test_html_renderer.py`), and the scenarios-CLI tests are the new
+  `tests/test_scenarios_cli.py` rather than additions to `test_cli.py`.
+  Same coverage, tidier homes.
+- **Phase 2 later widened the schema** — `changed_files: all`, `open_mr`
+  on schedule/web/api/trigger, and `open_mr.{mr_flavor, mr_labels}` —
+  see the phase-2 spec's as-built notes.
+- **A review pass after phase 2 fixed one evaluator-port divergence**:
+  empty legacy lists (`only: []`) are "match nothing" in the shipped JS
+  (an empty OR), but Python's truthiness let them fall back to the
+  branches+tags default. Fixed to mirror JS exactly; pinned by the
+  `legacy_empty` fixture and two new shared vectors, which both
+  interpreters now answer.

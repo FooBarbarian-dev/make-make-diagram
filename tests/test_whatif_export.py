@@ -48,6 +48,13 @@ CONFIGS = {
         "refKind": "branch", "tagProtected": False, "newBranch": False,
         "tag": "v1.0.0", "overrides": {},
     },
+    "push-with-flavored-mr": {
+        "scenario": "push_branch", "branch": "feature/x", "openMR": True,
+        "target": "main", "draft": False, "mrFlavor": "merge_train",
+        "mrLabels": "urgent,backend", "commitMessage": "",
+        "changedFiles": None, "refKind": "branch", "tagProtected": False,
+        "newBranch": False, "tag": "v1.0.0", "overrides": {},
+    },
     "new-branch-changed-list": {
         "scenario": "push_branch", "branch": "topic", "newBranch": True,
         "changedFiles": ["src/**/*.py", "weird name.txt"],

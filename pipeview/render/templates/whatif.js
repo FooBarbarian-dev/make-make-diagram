@@ -1879,6 +1879,10 @@ var PipeviewWhatIf = (function () {
       var mr = {};
       if (config.target) mr.target = config.target;
       if (config.draft) mr.draft = true;
+      if (config.mrFlavor && config.mrFlavor !== 'detached') {
+        mr.mr_flavor = config.mrFlavor;
+      }
+      if (config.mrLabels) mr.mr_labels = config.mrLabels;
       add('open_mr', yamlFlowMap(mr));
     }
     if (s === 'mr') {

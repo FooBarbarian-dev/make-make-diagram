@@ -221,6 +221,31 @@ def test_open_mr_block_is_validated(tmp_path):
     assert any("targt" in d.message for d in _errors(diags))
 
 
+def test_open_mr_carries_mr_flavor_and_labels(tmp_path):
+    text = textwrap.dedent("""\
+        version: 1
+        scenarios:
+          - id: train
+            event: push_branch
+            branch: feature/x
+            open_mr: { target: main, mr_flavor: merge_train,
+                       mr_labels: [urgent, backend] }
+          - id: bad-flavor
+            event: push_branch
+            open_mr: { mr_flavor: sideways }
+    """)
+    scenarios, diags = _load(tmp_path, text)
+    assert [s.id for s in scenarios] == ["train"]
+    assert scenarios[0].config["open_mr"] == {
+        "draft": False, "target": "main", "mr_flavor": "merge_train",
+        "mr_labels": "urgent,backend"}
+    from pipeview.scenarios import to_whatif_config
+    config = to_whatif_config(scenarios[0])
+    assert config["mrFlavor"] == "merge_train"
+    assert config["mrLabels"] == "urgent,backend"
+    assert any("sideways" in d.message for d in _errors(diags))
+
+
 def test_branchy_tag_warns(tmp_path):
     text = textwrap.dedent("""\
         version: 1

@@ -1,0 +1,18 @@
+# Empty legacy only/except values: `only: []` is an OR over nothing — it
+# matches no ref, so the job is never added (it must NOT fall back to the
+# branches+tags default). An empty `except:` list excludes nothing.
+normal:
+  script: [echo ok]
+
+never_added:
+  script: [echo no]
+  only: []
+
+except_empty:
+  script: [echo ok]
+  except: []
+
+only_empty_variables:
+  script: [echo no]
+  only:
+    variables: []

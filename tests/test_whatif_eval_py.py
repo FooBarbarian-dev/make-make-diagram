@@ -63,6 +63,57 @@ def test_results_are_json_serializable(vectors):
     json.dumps(got)
 
 
+_DECIDING_CI = """\
+job_a:
+  script: [echo x]
+  rules:
+    - if: $CI_COMMIT_TAG
+      when: manual
+    - if: $CI_COMMIT_BRANCH == "main"
+
+job_b:
+  script: [echo x]
+  rules:
+    - changes:
+        paths: [src/**/*]
+"""
+
+# (config, job, expected state, index of the deciding rule in the trace,
+#  its condition text) — the raw material of the trigger-docs "Why" column.
+_DECIDING_CASES = [
+    ({"scenario": "push_branch", "branch": "main"}, "job_a",
+     "runs", 1, '$CI_COMMIT_BRANCH == "main"'),
+    ({"scenario": "push_tag", "tag": "v1.0.0"}, "job_a",
+     "manual", 0, "$CI_COMMIT_TAG"),
+    ({"scenario": "push_branch", "branch": "dev"}, "job_a",
+     "not-added", None, None),
+    ({"scenario": "push_branch", "branch": "main",
+      "changedFiles": ["src/app.py"]}, "job_b",
+     "runs", 0, "changes: src/**/*"),
+]
+
+
+def test_deciding_rule_capture(tmp_path):
+    """The outcome's trace names the rule that decided the verdict — index,
+    condition text, and verdict — which is what the docs' "Why" column and
+    the report's rule panels are built from."""
+    ci = tmp_path / ".gitlab-ci.yml"
+    ci.write_text(_DECIDING_CI, encoding="utf-8")
+    report = parse_gitlab(str(ci)).to_dict()
+    for config, job, state, rule_idx, desc in _DECIDING_CASES:
+        cand = evaluate_event(report, config)["candidates"][0]
+        outcome = cand["jobs"][job]
+        assert outcome["state"] == state, (config, job, outcome)
+        matched = [t for t in outcome["trace"] if t.get("verdict") == "matched"]
+        if rule_idx is None:
+            assert not matched, (config, job, outcome["trace"])
+            assert outcome["reason"] == "no rule matched"
+        else:
+            assert len(matched) == 1, (config, job, outcome["trace"])
+            assert matched[0]["rule"] == rule_idx
+            assert matched[0]["desc"] == desc
+
+
 def test_version_guard():
     report = {"annotations": {"whatif": {"version": WHATIF_VERSION + 1}},
               "nodes": []}

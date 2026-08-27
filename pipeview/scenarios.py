@@ -52,7 +52,7 @@ _EVENT_KEYS: dict[str, frozenset[str]] = {
 }
 _ALL_KEYS = _COMMON_KEYS.union(*_EVENT_KEYS.values())
 
-_OPEN_MR_KEYS = frozenset({"target", "draft"})
+_OPEN_MR_KEYS = frozenset({"target", "draft", "mr_flavor", "mr_labels"})
 _MR_FLAVORS = frozenset({"detached", "merged_result", "merge_train"})
 _REF_KINDS = frozenset({"branch", "tag"})
 _DIAGRAMS = ("dag", "lifecycle")
@@ -106,6 +106,10 @@ def to_whatif_config(scenario: Scenario) -> dict[str, Any]:
         if c["open_mr"].get("target"):
             out["target"] = c["open_mr"]["target"]
         out["draft"] = c["open_mr"].get("draft", False)
+        if c["open_mr"].get("mr_flavor"):
+            out["mrFlavor"] = c["open_mr"]["mr_flavor"]
+        if c["open_mr"].get("mr_labels"):
+            out["mrLabels"] = c["open_mr"]["mr_labels"]
     if "changed_files" in c:
         out["changedFiles"] = "all" if c["changed_files"] == "all" \
             else list(c["changed_files"])
@@ -257,12 +261,21 @@ def load_scenarios(path: str) -> tuple[list[Scenario], list[Diagnostic]]:
             if bad_keys:
                 error(f"{label}: unknown key(s) in `open_mr`: {', '.join(bad_keys)}")
                 continue
-            config["open_mr"] = {
-                "target": str(open_mr["target"]) if "target" in open_mr else None,
-                "draft": bool(open_mr.get("draft", False)),
-            }
-            if config["open_mr"]["target"] is None:
-                del config["open_mr"]["target"]
+            if "mr_flavor" in open_mr and open_mr["mr_flavor"] not in _MR_FLAVORS:
+                error(f"{label}: `open_mr.mr_flavor` must be one of "
+                      f"{', '.join(sorted(_MR_FLAVORS))} "
+                      f"(found {open_mr['mr_flavor']!r})")
+                continue
+            normalized = {"draft": bool(open_mr.get("draft", False))}
+            if open_mr.get("target") is not None:
+                normalized["target"] = str(open_mr["target"])
+            if "mr_flavor" in open_mr:
+                normalized["mr_flavor"] = open_mr["mr_flavor"]
+            if open_mr.get("mr_labels") is not None:
+                labels = open_mr["mr_labels"]
+                normalized["mr_labels"] = ",".join(str(v) for v in labels) \
+                    if isinstance(labels, list) else str(labels)
+            config["open_mr"] = normalized
 
         if "variables" in stanza:
             variables = _as_string_map(stanza["variables"])

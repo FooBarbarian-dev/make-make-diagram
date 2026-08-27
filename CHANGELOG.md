@@ -35,8 +35,8 @@ run can also emit committed-markdown docs — per scenario, per project.
   by a semantic round-trip test: exported YAML must evaluate identically
   after loading) and **Copy markdown** (the job listing or pinned delta
   as markdown tables, same wording as the plain listing). The schema
-  gains `changed_files: all` and `open_mr` on schedule/web/api/trigger
-  so exports are lossless. And `pipeview scenarios verify FILE REPO
+  gains `changed_files: all`, `open_mr` on schedule/web/api/trigger, and
+  `open_mr.{mr_flavor, mr_labels}` so exports are lossless. And `pipeview scenarios verify FILE REPO
   DOCSDIR` is the read-only drift check: committed docs vs fresh
   generation with provenance masked, exit non-zero on drift — CI can
   police doc freshness without write access.

@@ -556,21 +556,22 @@ def _legacy_half(spec, candidate, ctx, notes, is_only):
     # GitLab's documented combination (verified against source): `only`
     # includes when ALL clause kinds match (AND); `except` excludes when ANY
     # clause kind matches (OR). Inside every array it is OR. An absent `only`
-    # defaults to branches+tags. (`is None`, not truthiness: JS treats an
-    # empty spec object as present, and so must we.)
+    # defaults to branches+tags. (`is None`, not truthiness, throughout: JS
+    # treats an empty spec object and EMPTY LISTS as present — `only: []`
+    # matches nothing and must not fall back to the default.)
     if spec is None:
         return _legacy_refs_match(["branches", "tags"], candidate, notes) \
             if is_only else False
     parts = []
     refs = spec.get("refs")
-    if is_only and not refs:
+    if is_only and refs is None:
         refs = ["branches", "tags"]
-    if refs:
+    if refs is not None:
         parts.append(_legacy_refs_match(refs, candidate, notes))
-    if spec.get("variables"):
+    if spec.get("variables") is not None:
         parts.append(tri_or([eval_expr(ast, ctx["env"], notes, ctx["controlled"])
                              for ast in spec["variables"]]))
-    if spec.get("changes"):
+    if spec.get("changes") is not None:
         # only:changes with a no-push-event ref is documented "always true"
         # (only → job runs; except → job never runs)
         if ctx["changesAlwaysTrue"] or ctx["changedFiles"] == "all":

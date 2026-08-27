@@ -40,7 +40,10 @@ INIT_TEMPLATE = """\
 #               push_tag     push a tag            (knobs: tag, tag_protected)
 #               mr           merge request         (knobs: branch, target,
 #                                                   draft, mr_flavor, mr_labels)
-#               schedule | web | api | trigger     (knobs: ref_kind, branch, tag)
+#               schedule | web | api | trigger     (knobs: ref_kind, branch,
+#                                                   tag, open_mr)
+#             open_mr means "this branch has an open MR" and takes
+#             { target, draft, mr_flavor, mr_labels }
 #   variables:     optional — simulated project-level variables {NAME: value}
 #   changed_files: optional — list of changed paths, or the literal `all`
 #                  (assume every changes: pattern matches); omit it to leave
