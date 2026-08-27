@@ -1055,3 +1055,29 @@ class TestSyncRollup:
         _, out = self._sync(monkeypatch, tmpdir, linked_gl)
         TestNoNetworkResources()._assert_no_network_refs(
             os.path.join(out, "rollup.report.html"))
+
+
+# ---------------------------------------------------------------------------
+# --trigger-docs wiring
+# ---------------------------------------------------------------------------
+
+class TestTriggerDocsWiring:
+    def test_docs_written_beside_report(self, lint_gl, tmpdir):
+        from pipeview.scenarios import load_scenarios
+        scenarios, diags = load_scenarios(os.path.join(
+            os.path.dirname(__file__), "fixtures", "trigger_docs",
+            "scenarios.yaml"))
+        assert scenarios and not diags
+        report, written = generate_report(
+            lint_gl, "group/app", outdir=str(tmpdir),
+            trigger_docs={"scenarios": scenarios, "skipped": [],
+                          "cmd": "pipeview gitlab sync --trigger-docs s.yaml"})
+        docdir = os.path.join(str(tmpdir), "group-app@main.trigger-docs")
+        assert docdir in written
+        assert os.path.isfile(os.path.join(docdir, "pipeline-triggers.md"))
+        text = open(os.path.join(docdir, "push-main.md"),
+                    encoding="utf-8").read()
+        assert "project=group/app" in text
+        assert "ref=main" in text
+        # docs never block the report
+        assert any(p.endswith(".report.html") for p in written)

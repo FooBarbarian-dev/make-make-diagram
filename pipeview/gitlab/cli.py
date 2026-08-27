@@ -182,6 +182,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "default when two or more tracked entries sync successfully)"
         ),
     )
+    parser.add_argument(
+        "--trigger-docs", metavar="FILE",
+        help=(
+            "report/sync: scenarios file (start one with `pipeview scenarios "
+            "init`) — also write per-trigger markdown docs beside each report, "
+            "to <outdir>/<slug>.trigger-docs/"
+        ),
+    )
     parser.add_argument("--search", help="projects: server-side search filter")
     parser.add_argument("--ca-bundle", help="Custom CA bundle for TLS verification")
     parser.add_argument(
@@ -318,6 +326,25 @@ def _cmd_projects(args, client) -> int:
     return 0
 
 
+def _trigger_docs_request(args, cmd: str) -> tuple[dict | None, int]:
+    """--trigger-docs: load the scenarios file once. Returns (request, floor)
+    where the request feeds generate_report and floor is the minimum exit
+    code — scenario-file problems never block report generation."""
+    if not getattr(args, "trigger_docs", None):
+        return None, 0
+    from pipeview.scenarios import load_scenarios
+    scenarios, diags = load_scenarios(args.trigger_docs)
+    for d in diags:
+        print(f"{args.trigger_docs}: [{d.severity}] {d.message}", file=sys.stderr)
+    if not scenarios:
+        print(f"No usable scenarios in {args.trigger_docs} — trigger docs "
+              "skipped", file=sys.stderr)
+        return None, 1
+    return {"scenarios": scenarios,
+            "skipped": [d.message for d in diags if d.severity == "error"],
+            "cmd": cmd}, (1 if diags else 0)
+
+
 def _cmd_report(args, client) -> int:
     project, ref = _split_project_ref(args)
     if not project:
@@ -326,14 +353,19 @@ def _cmd_report(args, client) -> int:
         return 2
     from pipeview.gitlab.report import generate_report
     formats = {f.strip() for f in args.format.split(",") if f.strip()}
+    trigger_docs, floor = _trigger_docs_request(
+        args, f"pipeview gitlab report {args.project} "
+              f"--trigger-docs {args.trigger_docs} -o {args.output}")
     report, written = generate_report(
         client, project, ref=ref, outdir=args.output,
         formats=formats, strategy=args.strategy,
-        bundled_templates=not args.no_bundled_templates)
+        bundled_templates=not args.no_bundled_templates,
+        trigger_docs=trigger_docs)
     for path in written:
         print(f"Report generated: {path}")
     _print_diagnostics(report)
-    return 1 if report.max_severity() in ("warning", "error") else 0
+    return max(floor,
+               1 if report.max_severity() in ("warning", "error") else 0)
 
 
 def _cmd_track(args, config: GitLabConfig, host: str, add: bool) -> int:
@@ -383,7 +415,9 @@ def _cmd_sync(args, config: GitLabConfig, host: str, client) -> int:
         print("Note: --ref is ignored by sync — each tracked entry carries "
               "its own ref (track group/app@ref to pin one)", file=sys.stderr)
     formats = {f.strip() for f in args.format.split(",") if f.strip()}
-    worst = 0
+    trigger_docs, worst = _trigger_docs_request(
+        args, f"pipeview gitlab sync -o {args.output} "
+              f"--trigger-docs {args.trigger_docs}")
     successes: list[tuple[str, object, list[str]]] = []  # (entry, report, written)
     failed: list[str] = []
     for entry in tracked:
@@ -392,7 +426,8 @@ def _cmd_sync(args, config: GitLabConfig, host: str, client) -> int:
             report, written = generate_report(
                 client, path, ref=ref, outdir=args.output,
                 formats=formats, strategy=args.strategy,
-                bundled_templates=not args.no_bundled_templates)
+                bundled_templates=not args.no_bundled_templates,
+                trigger_docs=trigger_docs)
         except GitLabError as e:
             print(f"{entry}: FAILED — {e}", file=sys.stderr)
             if args.verbose:

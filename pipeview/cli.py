@@ -27,6 +27,13 @@ def main(argv: list[str] | None = None) -> int:
         from pipeview.gitlab.cli import main as gitlab_main
         return gitlab_main(argv[1:])
 
+    # `pipeview scenarios …` routes to the trigger-docs scenario helpers —
+    # offline, like everything outside `gitlab`. A local directory literally
+    # named "scenarios" is still reachable as `pipeview ./scenarios`.
+    if argv and argv[0] == "scenarios":
+        from pipeview.scenarios_cli import main as scenarios_main
+        return scenarios_main(argv[1:])
+
     parser = argparse.ArgumentParser(
         prog="pipeview",
         description=(
@@ -77,6 +84,15 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--trigger-docs",
+        metavar="FILE",
+        help=(
+            "Scenarios file (start one with `pipeview scenarios init`): also "
+            "write per-trigger markdown docs for each GitLab CI root, to "
+            "<outdir>/<name>.trigger-docs/"
+        ),
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"pipeview {pipeview.__version__}",
@@ -93,6 +109,23 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     os.makedirs(outdir, exist_ok=True)
+
+    trigger_scenarios = None
+    trigger_skipped: list[str] = []
+    docs_floor = 0
+    if args.trigger_docs:
+        from pipeview.scenarios import load_scenarios
+        trigger_scenarios, sdiags = load_scenarios(args.trigger_docs)
+        for d in sdiags:
+            print(f"  {args.trigger_docs}: [{d.severity}] {d.message}",
+                  file=sys.stderr)
+        trigger_skipped = [d.message for d in sdiags if d.severity == "error"]
+        if sdiags:
+            docs_floor = 1
+        if not trigger_scenarios:
+            print(f"No usable scenarios in {args.trigger_docs} — "
+                  "trigger docs skipped", file=sys.stderr)
+            trigger_scenarios = None
 
     any_diagnostics = False
     max_severity = None
@@ -119,6 +152,16 @@ def main(argv: list[str] | None = None) -> int:
         if "svg" in formats:
             export_svg(report, os.path.join(outdir, f"{basename}.graph.svg"))
 
+        if trigger_scenarios:
+            if root_kind == "gitlab_yaml":
+                docs_floor = max(docs_floor, _emit_trigger_docs(
+                    report, trigger_scenarios, trigger_skipped,
+                    os.path.join(outdir, f"{basename}.trigger-docs"),
+                    root_path, args))
+            else:
+                print(f"  {root_path}: trigger docs apply to GitLab CI "
+                      "configurations — skipped", file=sys.stderr)
+
         if report.diagnostics:
             any_diagnostics = True
             sev = report.max_severity()
@@ -131,9 +174,34 @@ def main(argv: list[str] | None = None) -> int:
 
         print(f"Report generated: {outdir}/{basename}.*")
 
-    if any_diagnostics and max_severity in ("warning", "error"):
+    if docs_floor or (any_diagnostics and max_severity in ("warning", "error")):
         return 1
     return 0
+
+
+def _emit_trigger_docs(report: Report, scenarios, skipped: list[str],
+                       docdir: str, root_path: str, args) -> int:
+    """Write the trigger-docs folder for one GitLab root. Returns the exit
+    floor (docs problems never block report generation)."""
+    from pipeview.render.trigger_docs import (
+        generate_trigger_docs,
+        write_docs_folder,
+    )
+    provenance = {"project": os.path.basename(root_path), "ref": "",
+                  "commit": "", "version": pipeview.__version__}
+    cmd = f"pipeview {args.path} --trigger-docs {args.trigger_docs} -o {args.output}"
+    files = generate_trigger_docs(report.to_dict(), scenarios, skipped,
+                                  provenance, cmd)
+    if files is None:
+        print(f"  {root_path}: no what-if program — trigger docs skipped",
+              file=sys.stderr)
+        return 0
+    floor = 0
+    for d in write_docs_folder(docdir, files):
+        print(f"  {docdir}: [{d.severity}] {d.message}", file=sys.stderr)
+        floor = 1
+    print(f"Trigger docs generated: {docdir}/")
+    return floor
 
 
 def _discover_roots(path: str) -> list[tuple[str, str]]:
