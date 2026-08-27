@@ -35,6 +35,7 @@ EVENTS = frozenset({
 
 _COMMON_KEYS = frozenset({
     "id", "title", "intro", "event", "variables", "changed_files", "diagrams",
+    "commit_message",
 })
 _REFLESS_EVENT_KEYS = frozenset({"ref_kind", "branch", "tag"})
 _EVENT_KEYS: dict[str, frozenset[str]] = {
@@ -104,6 +105,8 @@ def to_whatif_config(scenario: Scenario) -> dict[str, Any]:
         out["draft"] = c["open_mr"].get("draft", False)
     if "changed_files" in c:
         out["changedFiles"] = list(c["changed_files"])
+    if "commit_message" in c:
+        out["commitMessage"] = c["commit_message"]
     if "variables" in c:
         out["overrides"] = dict(c["variables"])
     return out
@@ -272,6 +275,12 @@ def load_scenarios(path: str) -> tuple[list[Scenario], list[Diagnostic]]:
                 error(f"{label}: `changed_files` must be a list of paths")
                 continue
             config["changed_files"] = changed
+        if "commit_message" in stanza:
+            message = stanza["commit_message"]
+            if isinstance(message, (dict, list)):
+                error(f"{label}: `commit_message` must be a string")
+                continue
+            config["commit_message"] = "" if message is None else str(message)
 
         diagrams = ["dag"]
         if "diagrams" in stanza:

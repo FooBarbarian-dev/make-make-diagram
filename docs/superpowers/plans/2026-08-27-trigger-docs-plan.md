@@ -2,7 +2,8 @@
 
 Date: 2026-08-27
 Spec: `docs/superpowers/specs/2026-08-27-trigger-docs-design.md`
-Status: not started
+Status: complete — all five milestones landed (see the spec's as-built
+notes for refinements found during the build)
 
 Working rules for every milestone: write the failing test first; keep the
 suite and `ruff check .` green at every commit; no network in any new code

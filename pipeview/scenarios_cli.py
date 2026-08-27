@@ -45,6 +45,8 @@ INIT_TEMPLATE = """\
 #   changed_files: optional — list of changed paths; omit it to leave the
 #                  changed-files question open (rules:changes reports
 #                  *depends* instead of guessing)
+#   commit_message: optional — the simulated commit message, for rules on
+#                  CI_COMMIT_MESSAGE / CI_COMMIT_TITLE ("[skip ci]"-style)
 #   diagrams:      optional — [dag] (default) or [dag, lifecycle]
 version: 1
 scenarios:

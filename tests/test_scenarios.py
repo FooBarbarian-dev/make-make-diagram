@@ -264,6 +264,23 @@ def test_unknown_diagram_warns_and_is_dropped(tmp_path):
     assert any("gantt" in d.message for d in _warnings(diags))
 
 
+def test_commit_message_key(tmp_path):
+    text = textwrap.dedent("""\
+        version: 1
+        scenarios:
+          - id: skip-ci
+            event: push_branch
+            commit_message: "chore: bump [skip ci]"
+          - id: bad
+            event: push_branch
+            commit_message: [a, b]
+    """)
+    scenarios, diags = _load(tmp_path, text)
+    assert [s.id for s in scenarios] == ["skip-ci"]
+    assert scenarios[0].config["commit_message"] == "chore: bump [skip ci]"
+    assert any("commit_message" in d.message for d in _errors(diags))
+
+
 def test_scenario_records_are_plain_data(tmp_path):
     scenarios, _ = _load(tmp_path, GOOD)
     s = scenarios[0]

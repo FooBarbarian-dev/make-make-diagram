@@ -1,7 +1,7 @@
 # Trigger docs: automated per-scenario markdown pipeline docs — design
 
 Date: 2026-08-27
-Status: approved (interactive brainstorm); not yet implemented
+Status: implemented (as-built notes at the end)
 
 ## Problem
 
@@ -366,3 +366,32 @@ One bad input degrades one output, never the run:
    only make sense in some repos.
 4. Following trigger chains within the tracked set (rollup integration);
    collapsed `<details>` full traces; `--index-name`.
+
+## As-built notes
+
+Implemented as specced, with these refinements found during the build:
+
+- **Parity got a second lock.** Beyond the shared vector table
+  (`tests/whatif_vectors.json`, now also run natively under pytest),
+  `tests/test_whatif_parity.py` sweeps every gitlab fixture and both
+  example projects across a 14-config matrix and requires the two
+  interpreters' full JSON outputs to be deep-equal (434 cases at
+  landing).
+- **Mermaid ids are sanitized and uniquified** with `j_`/`s_`/`b_`
+  prefixes so job names like `end`, emoji, pipes, quotes and brackets
+  cannot break graphs or tables (pinned by the `hostile_names` fixture).
+- **Boundary text names the target but no strategy** — the compiler does
+  not capture `trigger:strategy`, so the docs do not claim one (the
+  spec's example sketch showed "strategy: depend"; the honest form
+  shipped instead).
+- **Provenance `commit` is empty for now**: the fetch layer records the
+  ref, not a resolved SHA, and local runs do not ask git. The marker
+  field stays, for a later resolver (and `--check`).
+- **`scenarios preview` exits on the scenarios file's health only**; the
+  repo's own diagnostics are noted on stderr but belong to report
+  generation.
+- **Name collisions**: a hand-written file in the docs folder wins — the
+  generated file is skipped with a warning ("never deleted" refined to
+  "never deleted or overwritten").
+- **`commit_message` joined the schema** (rules on `CI_COMMIT_MESSAGE`,
+  "[skip ci]"-style, are common enough to belong in v1).

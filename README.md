@@ -152,6 +152,62 @@ The generated report is a single self-contained HTML file with four views
    *tag push* — or against "MR closed", or a variable flipped — becomes
    one click instead of memory.
 
+## Markdown trigger docs (`--trigger-docs`)
+
+The What-If tab answers "what runs for this trigger?" interactively.
+Trigger docs answer it as **committed markdown**: define the trigger
+scenarios you care about once, in a small YAML file, and every report run
+can also emit one doc per scenario — plain sentences, job tables with a
+deciding-rule "why" column, and mermaid diagrams that GitLab's file
+viewer renders natively.
+
+```bash
+pipeview scenarios init                       # commented starter file
+pipeview scenarios check scenarios.yaml       # validate before a big sync
+pipeview scenarios preview scenarios.yaml .   # iterate: docs to stdout
+
+pipeview . --trigger-docs scenarios.yaml -o out/                 # local checkout
+pipeview gitlab sync -o reports/ --trigger-docs scenarios.yaml   # every tracked project
+```
+
+A scenario is a named What-If configuration — the same knobs as the tab,
+spelled in YAML:
+
+```yaml
+version: 1
+scenarios:
+  - id: push-main            # → push-main.md
+    title: Push to main
+    event: push_branch       # push_branch | push_tag | mr | schedule | web | api | trigger
+    branch: main
+  - id: release-tag
+    event: push_tag
+    tag: v1.2.3              # an example ref; each project's rules decide
+  - id: nightly
+    event: schedule
+    variables: { NIGHTLY: "1" }
+```
+
+Each project in the run gets a self-contained folder beside its HTML
+report — `<slug>.trigger-docs/` with one `<id>.md` per scenario plus a
+`pipeline-triggers.md` index — ready to be copied into that repo (say,
+`docs/ci/`) and committed by you or your tooling. pipeview itself never
+writes to GitLab. The docs carry no timestamps, so regenerating with
+unchanged inputs is byte-identical and `git diff` answers "did anything
+change?". Every generated file carries a provenance marker; regeneration
+deletes only marker-bearing files, and a hand-written file in the folder
+is warned about, never deleted or overwritten.
+
+The honesty rules match the What-If tab, because the same evaluation runs
+(a Python twin of the report's inlined evaluator, pinned to it by a
+shared vector suite): unknowables render as *depends* with the missing
+fact named, never guessed; trigger jobs stop at the boundary ("spawns
+downstream pipeline in `group/other`") rather than pretending to know the
+downstream; and one event spawning several candidate pipelines gets a
+fan-out diagram plus a duplicate-jobs callout. Verdicts are encoded in
+node shape and label — manual gates as hexagons, delays as ⏱, *depends*
+dashed with a `?` — so GitLab's light and dark themes both stay legible.
+
 ## Fetching from GitLab (`pipeview gitlab`)
 
 Everything above works on local files. The `gitlab` subcommand — the **only**
@@ -352,7 +408,8 @@ silently skipped with an info diagnostic.
 ## CLI reference
 
 ```
-pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--version]
+pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--trigger-docs FILE] [--version]
+pipeview scenarios [init|check|preview] …
 pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 ```
 
@@ -362,6 +419,7 @@ pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 | `-o OUTDIR` | `./pipeview-out` | Output directory |
 | `--format` | `html,json` | Comma-separated: `html`, `json`, `svg`, `dot`, `mmd` |
 | `--no-enrich` | off | Skip the Make enrichment pass |
+| `--trigger-docs FILE` | off | Also write per-scenario markdown docs (see above) |
 | `--version` | | Print version and exit |
 
 ### Exit codes
@@ -379,10 +437,14 @@ Three layers, one package:
 ```
 pipeview/
   cli.py             # argument parsing, root discovery, orchestration
+  scenarios.py       # trigger-docs scenario file: schema + loader
+  scenarios_cli.py   # `pipeview scenarios` — init/check/preview helpers
   model.py           # normalized build model (dataclasses + serialization)
   parsers/
     make_parser.py   # static GNU Make parser
     gitlab_parser.py # GitLab CI YAML parser
+    gitlab_whatif.py # compiles rules/only/except into an evaluatable program
+    gitlab_whatif_eval.py # Python twin of the report's What-If evaluator
     enrich.py        # optional make -pqn enrichment pass
   gitlab/            # `pipeview gitlab` — the only networked code
     api.py           # stdlib GitLab REST client
@@ -395,6 +457,8 @@ pipeview/
   render/
     html.py          # single-file HTML report generator
     exports.py       # model.json, graph.dot, graph.mmd, graph.svg
+    trigger_docs.py  # per-scenario markdown docs (--trigger-docs)
+    mmd.py           # mermaid escaping helpers (exports + trigger docs)
     templates/       # HTML/CSS/JS template (inlined at generation time)
   vendor/
     dagre.min.js     # pinned dagre 0.8.5 for graph layout
