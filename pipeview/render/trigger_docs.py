@@ -107,6 +107,8 @@ def _scenario_line(scenario: Scenario) -> str:
     changed = scenario.config.get("changed_files")
     if changed is None:
         parts.append("changed files: not specified")
+    elif changed == "all":
+        parts.append("changed files: every pattern matches")
     elif changed:
         parts.append("changed files: " + ", ".join(f"`{p}`" for p in changed))
     else:

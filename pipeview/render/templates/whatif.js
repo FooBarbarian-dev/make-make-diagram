@@ -1682,6 +1682,105 @@ var PipeviewWhatIf = (function () {
     return lines.join('\n');
   }
 
+  /* ---------------- scenario export (YAML) ---------------- */
+
+  // Serialize a config as one scenarios-file stanza (snake_case, the
+  // schema pipeview/scenarios.py loads). The contract is semantic: the
+  // exported YAML, loaded and mapped back through to_whatif_config, must
+  // evaluate identically (pinned by tests/test_whatif_export.py).
+
+  function yamlScalar(v) {
+    if (v === true) return 'true';
+    if (v === false) return 'false';
+    var s = String(v);
+    if (s.indexOf('\n') >= 0) {
+      return '"' + s.replace(/\\/g, '\\\\').replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n') + '"';
+    }
+    // plain style only when YAML cannot re-type or mis-parse it
+    if (/^[A-Za-z_][A-Za-z0-9_.\/-]*$/.test(s)
+        && !/^(true|false|null|yes|no|on|off)$/i.test(s)) {
+      return s;
+    }
+    return "'" + s.replace(/'/g, "''") + "'";
+  }
+
+  function yamlFlowMap(obj) {
+    var keys = Object.keys(obj).sort();
+    if (!keys.length) return '{}';
+    return '{ ' + keys.map(function (k) {
+      return yamlScalar(k) + ': ' + yamlScalar(obj[k]);
+    }).join(', ') + ' }';
+  }
+
+  function scenarioId(config) {
+    var base;
+    switch (config.scenario) {
+      case 'push_branch': base = 'push-' + (config.branch || 'branch'); break;
+      case 'push_tag': base = 'tag-' + (config.tag || 'v1.0.0'); break;
+      case 'mr': base = 'mr-' + (config.branch || 'source'); break;
+      default:
+        base = config.scenario + (config.refKind === 'tag' ? '-tag' : '');
+    }
+    var id = base.toLowerCase().replace(/[^a-z0-9-]+/g, '-')
+      .replace(/-{2,}/g, '-').replace(/^-+|-+$/g, '');
+    return id || 'scenario';
+  }
+
+  function scenarioYaml(config) {
+    var s = config.scenario || 'push_branch';
+    var lines = [
+      '# pipeview trigger-docs scenario — exported from the What-If tab.',
+      '# Paste the `- id:` block into your scenarios file, or keep this as one.',
+      'version: 1',
+      'scenarios:',
+      '  - id: ' + scenarioId(config) + '   # rename to taste',
+      '    event: ' + s
+    ];
+    function add(key, value) { lines.push('    ' + key + ': ' + value); }
+    var branchy = s === 'push_branch' || s === 'schedule' || s === 'web'
+      || s === 'api' || s === 'trigger';
+    var onTag = s === 'push_tag'
+      || (branchy && s !== 'push_branch' && config.refKind === 'tag');
+
+    if (onTag) {
+      if (s !== 'push_tag') add('ref_kind', 'tag');
+      add('tag', yamlScalar(config.tag || 'v1.0.0'));
+      if (config.tagProtected) add('tag_protected', 'true');
+    } else if (config.branch) {
+      add('branch', yamlScalar(config.branch));
+    }
+    if (s === 'push_branch' && config.newBranch) add('new_branch', 'true');
+    if (branchy && !onTag && config.openMR) {
+      var mr = {};
+      if (config.target) mr.target = config.target;
+      if (config.draft) mr.draft = true;
+      add('open_mr', yamlFlowMap(mr));
+    }
+    if (s === 'mr') {
+      if (config.target) add('target', yamlScalar(config.target));
+      if (config.draft) add('draft', 'true');
+      if (config.mrFlavor && config.mrFlavor !== 'detached') {
+        add('mr_flavor', config.mrFlavor);
+      }
+      if (config.mrLabels) add('mr_labels', yamlScalar(config.mrLabels));
+    }
+    var changed = config.changedFiles;
+    if (changed === 'all') {
+      add('changed_files', 'all');
+    } else if (Array.isArray(changed)) {
+      add('changed_files', '[' + changed.map(yamlScalar).join(', ') + ']');
+    }
+    if (config.commitMessage && config.commitMessage !== 'Update code') {
+      add('commit_message', yamlScalar(config.commitMessage));
+    }
+    var overrides = config.overrides || {};
+    if (Object.keys(overrides).length) {
+      add('variables', yamlFlowMap(overrides));
+    }
+    return lines.join('\n') + '\n';
+  }
+
   return {
     evalExpr: evalExpr,
     globToRegExp: globToRegExp,
@@ -1694,7 +1793,8 @@ var PipeviewWhatIf = (function () {
     outcomeText: outcomeText,
     textSummary: textSummary,
     diffEvents: diffEvents,
-    textDiff: textDiff
+    textDiff: textDiff,
+    scenarioYaml: scenarioYaml
   };
 })();
 

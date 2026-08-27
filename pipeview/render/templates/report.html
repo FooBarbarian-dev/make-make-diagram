@@ -997,6 +997,8 @@ kbd {
           probable behavior — hover for assumptions</span>
         <button class="btn" id="wi-copy-text"
           data-tip="Copy the plain-text job listing (or the delta when a baseline is pinned)">Copy job list</button>
+        <button class="btn" id="wi-export-scenario"
+          data-tip="Copy the current scenario as a trigger-docs YAML stanza — paste it into the scenarios file that pipeview --trigger-docs reads">Export scenario</button>
         <button class="btn" id="wi-pin-baseline"
           data-tip="Freeze the current scenario as a baseline, then change any knob — the scenario preset included — to see what the change adds, removes, or alters">Pin as baseline</button>
         <label class="legend-item" style="min-height:0">
@@ -3815,6 +3817,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   }
 
   const wiCopyBtn = document.getElementById('wi-copy-text');
+  const wiExportBtn = document.getElementById('wi-export-scenario');
   const wiPinBtn = document.getElementById('wi-pin-baseline');
 
   // Clipboard fallback for browsers where the async API is unavailable or
@@ -3854,20 +3857,35 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     return wiBaseline ? 'Copy delta' : 'Copy job list';
   }
 
+  // Shared copy flow for the toolbar buttons: async clipboard, hidden-
+  // textarea fallback; if both fail the payload lands selected in the text
+  // block so a manual Ctrl+C always works.
+  function wiClipboardFlow(btn, text, restoreLabel) {
+    const done = ok => {
+      btn.textContent = ok ? 'Copied ✓' : 'Select + Ctrl+C';
+      if (!ok) {
+        const pre = document.getElementById('wi-text-pre');
+        if (pre) pre.textContent = text;
+        wiSelectText();
+      }
+      setTimeout(() => { btn.textContent = restoreLabel(); }, 1800);
+    };
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text)
+        .then(() => done(true), () => done(wiCopyFallback(text)));
+    } else {
+      done(wiCopyFallback(text));
+    }
+  }
+
   if (whatifAvailable) {
     wiShowSkippedEl.addEventListener('change', renderWiResults);
     wiCopyBtn.addEventListener('click', () => {
-      const done = ok => {
-        wiCopyBtn.textContent = ok ? 'Copied ✓' : 'Select + Ctrl+C';
-        if (!ok) wiSelectText();
-        setTimeout(() => { wiCopyBtn.textContent = wiCopyLabel(); }, 1800);
-      };
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(wiCopyText)
-          .then(() => done(true), () => done(wiCopyFallback(wiCopyText)));
-      } else {
-        done(wiCopyFallback(wiCopyText));
-      }
+      wiClipboardFlow(wiCopyBtn, wiCopyText, wiCopyLabel);
+    });
+    wiExportBtn.addEventListener('click', () => {
+      wiClipboardFlow(wiExportBtn, PipeviewWhatIf.scenarioYaml(wiConfig()),
+                      () => 'Export scenario');
     });
     wiPinBtn.addEventListener('click', () => {
       if (wiBaseline) {

@@ -264,6 +264,40 @@ def test_unknown_diagram_warns_and_is_dropped(tmp_path):
     assert any("gantt" in d.message for d in _warnings(diags))
 
 
+def test_changed_files_all(tmp_path):
+    text = textwrap.dedent("""\
+        version: 1
+        scenarios:
+          - id: everything
+            event: push_branch
+            changed_files: all
+          - id: typo
+            event: push_branch
+            changed_files: alll
+    """)
+    scenarios, diags = _load(tmp_path, text)
+    assert [s.id for s in scenarios] == ["everything"]
+    assert scenarios[0].config["changed_files"] == "all"
+    assert any("literal `all`" in d.message for d in _errors(diags))
+    from pipeview.scenarios import to_whatif_config
+    assert to_whatif_config(scenarios[0])["changedFiles"] == "all"
+
+
+def test_open_mr_on_refless_events(tmp_path):
+    text = textwrap.dedent("""\
+        version: 1
+        scenarios:
+          - id: nightly-mr
+            event: schedule
+            branch: feature/x
+            open_mr: { target: main }
+    """)
+    scenarios, diags = _load(tmp_path, text)
+    assert [s.id for s in scenarios] == ["nightly-mr"]
+    assert not _warnings(diags) and not _errors(diags)
+    assert scenarios[0].config["open_mr"] == {"target": "main", "draft": False}
+
+
 def test_commit_message_key(tmp_path):
     text = textwrap.dedent("""\
         version: 1

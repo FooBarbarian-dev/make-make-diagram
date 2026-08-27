@@ -42,8 +42,9 @@ INIT_TEMPLATE = """\
 #                                                   draft, mr_flavor, mr_labels)
 #               schedule | web | api | trigger     (knobs: ref_kind, branch, tag)
 #   variables:     optional — simulated project-level variables {NAME: value}
-#   changed_files: optional — list of changed paths; omit it to leave the
-#                  changed-files question open (rules:changes reports
+#   changed_files: optional — list of changed paths, or the literal `all`
+#                  (assume every changes: pattern matches); omit it to leave
+#                  the changed-files question open (rules:changes reports
 #                  *depends* instead of guessing)
 #   commit_message: optional — the simulated commit message, for rules on
 #                  CI_COMMIT_MESSAGE / CI_COMMIT_TITLE ("[skip ci]"-style)

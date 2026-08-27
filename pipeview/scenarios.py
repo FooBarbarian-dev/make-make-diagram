@@ -37,7 +37,10 @@ _COMMON_KEYS = frozenset({
     "id", "title", "intro", "event", "variables", "changed_files", "diagrams",
     "commit_message",
 })
-_REFLESS_EVENT_KEYS = frozenset({"ref_kind", "branch", "tag"})
+# schedule/web/api/trigger run on a branch or tag; open_mr is meaningful
+# there too — CI_OPEN_MERGE_REQUESTS is set in EVERY branch pipeline whose
+# branch has an open MR (the documented dedup pattern relies on it)
+_REFLESS_EVENT_KEYS = frozenset({"ref_kind", "branch", "tag", "open_mr"})
 _EVENT_KEYS: dict[str, frozenset[str]] = {
     "push_branch": frozenset({"branch", "open_mr", "new_branch"}),
     "push_tag": frozenset({"tag", "tag_protected"}),
@@ -104,7 +107,8 @@ def to_whatif_config(scenario: Scenario) -> dict[str, Any]:
             out["target"] = c["open_mr"]["target"]
         out["draft"] = c["open_mr"].get("draft", False)
     if "changed_files" in c:
-        out["changedFiles"] = list(c["changed_files"])
+        out["changedFiles"] = "all" if c["changed_files"] == "all" \
+            else list(c["changed_files"])
     if "commit_message" in c:
         out["commitMessage"] = c["commit_message"]
     if "variables" in c:
@@ -270,11 +274,16 @@ def load_scenarios(path: str) -> tuple[list[Scenario], list[Diagnostic]]:
                 warn(f"{label}: variable `{name}` shadows a GitLab predefined "
                      f"variable — the scenario value wins in the simulation")
         if "changed_files" in stanza:
-            changed = _as_string_list(stanza["changed_files"])
-            if changed is None:
-                error(f"{label}: `changed_files` must be a list of paths")
-                continue
-            config["changed_files"] = changed
+            if stanza["changed_files"] == "all":
+                # the What-If tab's third state: every changes: pattern matches
+                config["changed_files"] = "all"
+            else:
+                changed = _as_string_list(stanza["changed_files"])
+                if changed is None:
+                    error(f"{label}: `changed_files` must be a list of paths, "
+                          f"or the literal `all`")
+                    continue
+                config["changed_files"] = changed
         if "commit_message" in stanza:
             message = stanza["commit_message"]
             if isinstance(message, (dict, list)):
