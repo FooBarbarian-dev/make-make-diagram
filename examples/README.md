@@ -17,15 +17,15 @@ open examples/out/Makefile.report.html
 
 What to look for in the report:
 
-- **Dependency Graph**: the DAG shows normal prerequisite edges, the
+- **Graph**: the DAG shows normal prerequisite edges, the
   dashed order-only edge to `builddir`, the pattern rule node, and the
   recursive-make invocation into `sub/`.
-- **Task Catalog**: `build`, `test`, `clean`, `deploy`, and `sub` appear
+- **Tasks**: `build`, `test`, `clean`, `deploy`, and `sub` appear
   with their `##` descriptions and `make <target>` invocation commands.
-- **Variable Explorer**: `CC`, `CFLAGS`, `LDFLAGS`, `TARGET`, and
+- **Variables**: `CC`, `CFLAGS`, `LDFLAGS`, `TARGET`, and
   `DEPLOY_HOST` show up with event timelines — defined in `config.mk`,
   some overridden in the root Makefile.
-- **File Map**: the include tree (`Makefile` → `config.mk`) and the
+- **Files**: the include tree (`Makefile` → `config.mk`) and the
   recursive-make link to `sub/Makefile`.
 
 ## gitlab-project
@@ -47,13 +47,13 @@ open examples/out/gitlab-ci.report.html
 
 What to look for in the report:
 
-- **Dependency Graph**: the `needs:` DAG differs from stage ordering —
+- **Graph**: the `needs:` DAG differs from stage ordering —
   `unit_tests` and `lint` both need only `build_wheel`, while
   `integration_tests` needs `build_image`. Ghost nodes appear dashed.
-- **Task Catalog**: `deploy_production` shows the `manual` flag.
-- **Variable Explorer**: variables at global, template, and job scopes
+- **Tasks**: `deploy_production` shows the `manual` flag.
+- **Variables**: variables at global, template, and job scopes
   with an event timeline showing inheritance through `extends:`.
-- **File Map**: the local include resolves; the `project:` include shows
+- **Files**: the local include resolves; the `project:` include shows
   as unresolved with a diagnostic.
 
 ## gitlab-whatif-project

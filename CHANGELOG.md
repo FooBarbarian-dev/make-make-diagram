@@ -439,6 +439,23 @@ full audit):
   stylesheet, inline SVG favicon (no favicon 404 from file://).
 - Designed empty states, including "No diagnostics — everything resolved."
 
+**Documentation**
+
+- New [user guide](docs/user-guide.md): a
+  screenshot tour of every report view plus two worked examples — mapping
+  a recursive Make build, and chasing a GitLab duplicate-pipeline problem
+  through the What-If tab to a pinned-baseline delta and committed
+  trigger docs.
+- UI screenshots (captured from the bundled examples) in
+  `docs/screenshots/`, with a few embedded in the README.
+- README accuracy pass: view names now match the report's actual tab
+  labels (Graph / Tasks / Variables / Files — the UI renamed them in the
+  UX-audit pass, the README hadn't caught up), the architecture tree
+  gained the files it was missing (`gitlab_templates.py`,
+  `data/gitlab_ci_templates/`, `parsers/gitlab_predefined.py`,
+  `gitlab/rollup.py`, `render/rollup_html.py`), and the exit-code table
+  notes that trigger-docs problems floor the exit code at 1.
+
 ## 0.1.0
 
 Initial release.
