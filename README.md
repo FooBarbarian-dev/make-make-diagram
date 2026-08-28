@@ -12,32 +12,37 @@ projects you can access from a terminal UI, and generate the same reports
 straight from what GitLab serves — cross-repository `include:`s resolved
 and all.
 
+![Graph view of a GitLab CI report](docs/screenshots/graph-gitlab.png)
+*The Graph view of a GitLab CI report: the `needs:` DAG, `extends:` template
+edges, and a legend that doubles as the view's filters. See the
+[user guide](docs/user-guide.md) for a full tour with more screenshots.*
+
 ## Quickstart
 
 ```bash
 git clone https://github.com/FooBarbarian-dev/make-make-diagram.git && cd make-make-diagram
 pip install .
-pipeview examples/make-project -o /tmp/pipeview-demo
-open /tmp/pipeview-demo/Makefile.report.html   # or xdg-open on Linux
+pipeview examples/make-project -o examples/out
+open examples/out/Makefile.report.html   # xdg-open on Linux, start on Windows
 ```
 
-The report opens with the **Dependency Graph** — an interactive DAG showing
+The report opens on the **Graph** tab — an interactive dependency DAG showing
 build targets, prerequisites, pattern rules, and sub-make recursion. Click a
-node to inspect it. Switch tabs to the **Task Catalog** (runnable targets with
-descriptions), the **Variable Explorer** (searchable table with event
-timelines), or the **File Map** (include tree and diagnostics). Everything
-works from `file://` with no network.
+node to inspect it. Switch tabs to **Tasks** (runnable targets with
+descriptions), **Variables** (searchable table with event timelines), or
+**Files** (include tree and diagnostics). Everything works from `file://`
+with no network.
 
 For the GitLab example:
 
 ```bash
-pipeview examples/gitlab-project -o /tmp/pipeview-demo-gl
-open /tmp/pipeview-demo-gl/gitlab-ci.report.html
+pipeview examples/gitlab-project -o examples/out
+open examples/out/gitlab-ci.report.html
 ```
 
 This report shows a `needs:` DAG that differs from stage order, an `extends:`
-chain through templates, resolved and ghost includes, and a manual production
-gate.
+chain through templates, resolved includes plus a *ghost* one (a reference
+that can't be resolved offline, drawn dashed), and a manual production gate.
 
 ## Installation
 
@@ -55,6 +60,9 @@ Or use `pipx` for an isolated CLI install:
 pipx install .
 ```
 
+To update later: `git pull` and re-run the install (`pip install .` or
+`pipx upgrade pipeview`). `pipeview --version` shows what you have.
+
 ### Development
 
 ```bash
@@ -69,7 +77,7 @@ The only requirement is Python 3.10+ and PyYAML:
 
 ```bash
 pip install PyYAML
-python -m pipeview examples/make-project -o /tmp/pipeview-demo
+python -m pipeview examples/make-project -o examples/out
 ```
 
 ### Air-gapped install
@@ -94,9 +102,10 @@ that work from `file://` — no CDN, no remote fonts, no fetches of any kind.
 ## HTML report views
 
 The generated report is a single self-contained HTML file with four views
-(five for GitLab CI):
+(five for GitLab CI). The [user guide](docs/user-guide.md) walks through each
+one with screenshots.
 
-1. **Dependency Graph** — Interactive DAG with pan/zoom, click-to-inspect,
+1. **Graph** — Interactive dependency DAG with pan/zoom, click-to-inspect,
    focus mode (highlights the reachable subgraph, with direction —
    dependencies / dependents / both — and hop-depth controls), and a legend
    that doubles as the view options: edge-kind filters, node-kind toggles
@@ -105,10 +114,10 @@ The generated report is a single self-contained HTML file with four views
    into one expandable node each, with their trigger/recursion edge attached.
    Ghost nodes (unresolved references) appear dashed.
 
-2. **Task Catalog** — Runnable targets/jobs listed with name, description,
+2. **Tasks** — Runnable targets/jobs listed with name, description,
    invocation command, and flags. The "what can I run?" page.
 
-3. **Variable Explorer** — Searchable table of all variables with event
+3. **Variables** — Searchable table of all variables with event
    timelines showing where each was defined, overridden, or appended, with
    scope and file:line. Recipe text renders `$(VAR)` references as clickable
    links. For GitLab CI, predefined `CI_*`/`GITLAB_*` variables carry curated
@@ -116,7 +125,7 @@ The generated report is a single self-contained HTML file with four views
    collapsible reference below the table documents the whole catalog, with
    the names this configuration references sorted first.
 
-4. **File Map** — Tree of source files with include/recursion structure,
+4. **Files** — Tree of source files with include/recursion structure,
    per-file status, and all diagnostics.
 
 5. **What-If** *(GitLab CI reports only)* — A pipeline simulator. Pick an
@@ -157,6 +166,15 @@ The generated report is a single self-contained HTML file with four views
    *tag push* — or against "MR closed", or a variable flipped — becomes
    one click instead of memory.
 
+![What-If view: one push spawning two candidate pipelines](docs/screenshots/whatif-duplicates.png)
+*What-If: a push to a feature branch with an open MR spawns two candidate
+pipelines. The jobs that would run in both are badged as duplicates, with the
+usual `workflow:rules` fix named.*
+
+![Variables view with an event timeline](docs/screenshots/variables-make.png)
+*Variables: every definition, override, and append with scope and file:line —
+here, a sub-make's `?=` losing to a global `=` from `config.mk`.*
+
 ## Markdown trigger docs (`--trigger-docs`)
 
 The What-If tab answers "what runs for this trigger?" interactively.
@@ -167,15 +185,15 @@ deciding-rule "why" column, and mermaid diagrams that GitLab's file
 viewer renders natively.
 
 ```bash
-pipeview scenarios init                       # commented starter file
-pipeview scenarios check scenarios.yaml       # validate before a big sync
-pipeview scenarios preview scenarios.yaml .   # iterate: docs to stdout
+pipeview scenarios init                                # writes pipeview-scenarios.yaml
+pipeview scenarios check pipeview-scenarios.yaml       # validate before a big sync
+pipeview scenarios preview pipeview-scenarios.yaml .   # iterate: docs to stdout
 
-pipeview . --trigger-docs scenarios.yaml -o out/                 # local checkout
-pipeview gitlab sync -o reports/ --trigger-docs scenarios.yaml   # every tracked project
+pipeview . --trigger-docs pipeview-scenarios.yaml -o out/                 # local checkout
+pipeview gitlab sync -o reports/ --trigger-docs pipeview-scenarios.yaml   # every tracked project
 
-pipeview scenarios verify scenarios.yaml . docs/ci   # drift check (read-only,
-                                                     #   for a scheduled CI job)
+pipeview scenarios verify pipeview-scenarios.yaml . docs/ci   # drift check (read-only,
+                                                              #   for a scheduled CI job)
 ```
 
 You don't have to hand-write the YAML: the What-If tab's **Export
@@ -306,7 +324,7 @@ Two strategies (`--strategy auto|lint|files`, default `auto`):
   your own permissions. No repository traversal needed. GitLab's own
   `errors`/`warnings` verdict lands in the report's diagnostics, and the
   response's provenance metadata (which file came from which repo) lands in
-  the File Map.
+  the Files view.
 - **`files`** — fetches the root CI file and walks `include:` recursively
   across repositories via the repository-files API (`include:project` files
   come from their own repos, templates from the template API, and so on).
@@ -388,7 +406,7 @@ test_job:
     - make test
 ```
 
-Documented targets appear with descriptions in the Task Catalog view.
+Documented targets appear with descriptions in the Tasks view.
 Undocumented targets show a nudge to add a `## comment`.
 
 ## Offline guarantee
@@ -448,6 +466,10 @@ pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 | 1 | Report(s) generated but with warning/error diagnostics |
 | 2 | No report could be produced (no roots found, bad path) |
 
+Info-only diagnostics still exit 0. With `--trigger-docs`, problems in the
+scenarios file or the docs folder also floor the exit code at 1, even when
+the report itself is clean.
+
 ## Architecture
 
 Three layers, one package:
@@ -456,11 +478,16 @@ Three layers, one package:
 pipeview/
   cli.py             # argument parsing, root discovery, orchestration
   scenarios.py       # trigger-docs scenario file: schema + loader
-  scenarios_cli.py   # `pipeview scenarios` — init/check/preview helpers
+  scenarios_cli.py   # `pipeview scenarios` — init/check/preview/verify helpers
   model.py           # normalized build model (dataclasses + serialization)
+  gitlab_templates.py # lookup into the bundled template snapshot
+  data/
+    gitlab_ci_templates/  # snapshot of GitLab's built-in templates
+                          # (pinned release recorded in _meta.json)
   parsers/
     make_parser.py   # static GNU Make parser
     gitlab_parser.py # GitLab CI YAML parser
+    gitlab_predefined.py  # curated docs for predefined CI_*/GITLAB_* variables
     gitlab_whatif.py # compiles rules/only/except into an evaluatable program
     gitlab_whatif_eval.py # Python twin of the report's What-If evaluator
     enrich.py        # optional make -pqn enrichment pass
@@ -470,14 +497,17 @@ pipeview/
     config.py        # ~/.config/pipeview/gitlab.json (hosts, tracked lists)
     fetch.py         # lint & files fetch strategies
     report.py        # fetched config -> the ordinary offline pipeline
+    rollup.py        # cross-project link resolution for `sync`
     tui.py           # curses project browser
     cli.py           # subcommand parsing
   render/
     html.py          # single-file HTML report generator
+    rollup_html.py   # rollup.report.html generator
     exports.py       # model.json, graph.dot, graph.mmd, graph.svg
     trigger_docs.py  # per-scenario markdown docs (--trigger-docs)
     mmd.py           # mermaid escaping helpers (exports + trigger docs)
-    templates/       # HTML/CSS/JS template (inlined at generation time)
+    templates/       # report.html, rollup.html, whatif.js (inlined at
+                     # generation time)
   vendor/
     dagre.min.js     # pinned dagre 0.8.5 for graph layout
 ```
@@ -495,6 +525,14 @@ make lint                   # lint
 make examples               # regenerate example reports
 make self                   # run pipeview on this repo's own Makefile
 ```
+
+## Documentation
+
+- **[User guide](docs/user-guide.md)** — a tour of every report view with
+  screenshots, plus two worked examples: mapping a recursive Make build, and
+  chasing a GitLab duplicate-pipeline problem through the What-If tab.
+- **[examples/](examples/README.md)** — runnable demo projects with notes on
+  what each report shows.
 
 ## License
 
