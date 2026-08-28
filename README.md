@@ -22,8 +22,8 @@ edges, and a legend that doubles as the view's filters. See the
 ```bash
 git clone https://github.com/FooBarbarian-dev/make-make-diagram.git && cd make-make-diagram
 pip install .
-pipeview examples/make-project -o /tmp/pipeview-demo
-open /tmp/pipeview-demo/Makefile.report.html   # or xdg-open on Linux
+pipeview examples/make-project -o examples/out
+open examples/out/Makefile.report.html   # xdg-open on Linux, start on Windows
 ```
 
 The report opens on the **Graph** tab — an interactive dependency DAG showing
@@ -36,13 +36,13 @@ with no network.
 For the GitLab example:
 
 ```bash
-pipeview examples/gitlab-project -o /tmp/pipeview-demo-gl
-open /tmp/pipeview-demo-gl/gitlab-ci.report.html
+pipeview examples/gitlab-project -o examples/out
+open examples/out/gitlab-ci.report.html
 ```
 
 This report shows a `needs:` DAG that differs from stage order, an `extends:`
-chain through templates, resolved and ghost includes, and a manual production
-gate.
+chain through templates, resolved includes plus a *ghost* one (a reference
+that can't be resolved offline, drawn dashed), and a manual production gate.
 
 ## Installation
 
@@ -60,6 +60,9 @@ Or use `pipx` for an isolated CLI install:
 pipx install .
 ```
 
+To update later: `git pull` and re-run the install (`pip install .` or
+`pipx upgrade pipeview`). `pipeview --version` shows what you have.
+
 ### Development
 
 ```bash
@@ -74,7 +77,7 @@ The only requirement is Python 3.10+ and PyYAML:
 
 ```bash
 pip install PyYAML
-python -m pipeview examples/make-project -o /tmp/pipeview-demo
+python -m pipeview examples/make-project -o examples/out
 ```
 
 ### Air-gapped install
@@ -182,15 +185,15 @@ deciding-rule "why" column, and mermaid diagrams that GitLab's file
 viewer renders natively.
 
 ```bash
-pipeview scenarios init                       # commented starter file
-pipeview scenarios check scenarios.yaml       # validate before a big sync
-pipeview scenarios preview scenarios.yaml .   # iterate: docs to stdout
+pipeview scenarios init                                # writes pipeview-scenarios.yaml
+pipeview scenarios check pipeview-scenarios.yaml       # validate before a big sync
+pipeview scenarios preview pipeview-scenarios.yaml .   # iterate: docs to stdout
 
-pipeview . --trigger-docs scenarios.yaml -o out/                 # local checkout
-pipeview gitlab sync -o reports/ --trigger-docs scenarios.yaml   # every tracked project
+pipeview . --trigger-docs pipeview-scenarios.yaml -o out/                 # local checkout
+pipeview gitlab sync -o reports/ --trigger-docs pipeview-scenarios.yaml   # every tracked project
 
-pipeview scenarios verify scenarios.yaml . docs/ci   # drift check (read-only,
-                                                     #   for a scheduled CI job)
+pipeview scenarios verify pipeview-scenarios.yaml . docs/ci   # drift check (read-only,
+                                                              #   for a scheduled CI job)
 ```
 
 You don't have to hand-write the YAML: the What-If tab's **Export

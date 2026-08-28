@@ -96,6 +96,28 @@ class TestMermaidExport:
             content = f.read()
         assert "build_job" in content
 
+    def test_mermaid_ids_and_labels_are_parseable(self, tmpdir):
+        # Make graphs carry ids like `$(OBJS)` and `%.o`; bare, either one
+        # is a mermaid parse error. Ids must flatten to [0-9A-Za-z_] and
+        # every label must be quoted.
+        import re
+        repo_root = Path(__file__).parent.parent
+        report = parse_makefile(str(repo_root / "examples" / "make-project"
+                                    / "Makefile"))
+        assert any("$(" in n.id or "%" in n.id for n in report.nodes)
+        path = os.path.join(tmpdir, "graph.mmd")
+        export_mermaid(report, path)
+        with open(path) as f:
+            lines = f.read().splitlines()
+        node_re = re.compile(
+            r'^  (\w+)(\[|\{\{|\(\[)"[^"]*"(\]|\}\}|\]\))$')
+        node_lines = [ln for ln in lines[1:]
+                      if not ln.startswith(("  style", "  subgraph"))
+                      and "-->" not in ln and ".->" not in ln and ln.strip()]
+        assert node_lines
+        for ln in node_lines:
+            assert node_re.match(ln), f"unparseable mermaid node line: {ln!r}"
+
 
 class TestSvgExport:
     def test_svg_valid(self, make_report, tmpdir):

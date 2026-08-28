@@ -8,14 +8,23 @@ duplicate-pipeline problem through the What-If simulator.
 
 All screenshots below come from the runnable projects in
 [`examples/`](../examples/README.md), so you can regenerate every report
-shown here and click around yourself:
+shown here and click around yourself. You need Python 3.10+ and PyYAML —
+see [Installation](../README.md#installation) in the README for pipx and
+air-gapped options:
 
 ```bash
+git clone https://github.com/FooBarbarian-dev/make-make-diagram.git
+cd make-make-diagram
 pip install .
-pipeview examples/make-project -o out/make
-pipeview examples/gitlab-project -o out/gitlab
-pipeview examples/gitlab-whatif-project -o out/whatif
+
+pipeview examples/make-project -o examples/out/make
+pipeview examples/gitlab-project -o examples/out/gitlab
+pipeview examples/gitlab-whatif-project -o examples/out/whatif
 ```
+
+Each run writes a self-contained `*.report.html`. Open it like any local
+file: `open <file>` on macOS, `xdg-open <file>` on Linux, `start <file>` on
+Windows — or drag the file onto a browser window.
 
 **Contents**
 
@@ -30,6 +39,7 @@ pipeview examples/gitlab-whatif-project -o out/whatif
 - [Worked example 2: chasing a duplicate-pipeline problem](#worked-example-2-chasing-a-duplicate-pipeline-problem)
 - [From What-If to committed docs: trigger docs](#from-what-if-to-committed-docs-trigger-docs)
 - [Working with a GitLab instance](#working-with-a-gitlab-instance)
+- [When something looks off](#when-something-looks-off)
 - [Other output formats](#other-output-formats)
 
 ## Generating a report
@@ -43,8 +53,9 @@ pipeview .                           # discover both in a directory
 ```
 
 Given a directory, pipeview looks for a `Makefile` (or `makefile`, or
-`GNUmakefile`) and a `.gitlab-ci.yml`, and generates one report per root it
-finds. Output lands in `./pipeview-out` unless you pass `-o`:
+`GNUmakefile`) and a `.gitlab-ci.yml`, and generates one report per **root**
+it finds — each top-level file that stands on its own as a pipeline
+definition. Output lands in `./pipeview-out` unless you pass `-o`:
 
 - `Makefile.report.html` / `gitlab-ci.report.html` — the interactive report
 - `Makefile.model.json` / `gitlab-ci.model.json` — the normalized model
@@ -61,8 +72,11 @@ side-effectful shell expansions, pass `--no-enrich`; the static parser alone
 never executes anything.
 
 Exit codes: `0` clean, `1` report generated but with warning/error
-diagnostics (or trigger-docs problems), `2` no report could be produced.
-Info-level diagnostics leave the exit code at 0.
+**diagnostics** — the problems found while parsing, all listed in the Files
+view — or trigger-docs problems, `2` no report could be produced.
+Info-level diagnostics leave the exit code at 0. `pipeview --version`
+prints the installed version; to update a git install, `git pull` and
+re-run `pip install .`.
 
 ## A tour of the report
 
@@ -79,6 +93,15 @@ opens a detail panel on the right. The panel cross-links everything: a
 variable's "used by" lists jump to the jobs that use it, a job's
 dependencies jump to other jobs, and file:line references jump to the Files
 view.
+
+Everything is keyboard-reachable; the shortcuts worth memorizing:
+
+| Keys | Where | What |
+|------|-------|------|
+| `/` or `Ctrl`/`Cmd`+`K` | anywhere | focus the search box |
+| `↑` `↓` `Enter` `Esc` | search box | move through results, open one, close |
+| `←` `→` `Home` `End` | tab bar (a tab focused) | switch views |
+| `←` `→` `Home` `End` | panel splitter (focused) | resize the detail panel |
 
 ### Graph
 
@@ -112,7 +135,8 @@ cross-project include. Every ghost also appears in the diagnostics list.
 ![GitLab CI graph with the deploy_production job selected](screenshots/graph-gitlab-detail.png)
 *A GitLab CI report: `needs:` edges (solid) cut across stage order,
 `extends:` chains (dashed) lead to `.base`-style templates, and the panel
-shows the selected job's rules and What-If compilation.*
+shows the selected job's rules and how they'll be evaluated (see
+[What-If](#what-if-gitlab-ci) below).*
 
 ### Tasks
 
@@ -175,8 +199,10 @@ appear as ghost nodes where referenced.*
 A pipeline simulator, answering "what would actually run if…?" without
 pushing anything. Pick an event in the left rail — push, tag push, MR,
 schedule, manual (web), API, trigger token — then set the starting state:
-branch, whether an open MR uses it, MR target/draft/flavor/labels, changed
-files, the commit message, and simulated project-level variables.
+branch or tag name, whether an open MR uses the branch, the MR's target /
+draft state / labels / pipeline flavor (detached, merged results, or merge
+train), changed files, the commit message, and simulated project-level
+variables.
 
 The results pane shows **every candidate pipeline** GitLab would consider
 for that single event, side by side — branch pipeline and MR pipeline for
@@ -200,11 +226,18 @@ toolbar for the assumptions).
 
 ![What-If view with two candidate pipelines and duplicate badges](screenshots/whatif-duplicates.png)
 *One push, two pipelines: jobs that would run in both are badged as
-duplicates and summarized in the banner. Dotenv artifact propagation is
-called out, with a reminder that dotenv variables can never affect rules.*
+duplicates and summarized in the banner. Variables a job hands to later
+jobs via `artifacts:reports:dotenv` are called out too, with a reminder
+that they can never affect rules (rules evaluate before any job runs).*
 
 Click any job for its **rule-by-rule trace**: each rule in order, which
 matched, which didn't, and the exact variable values that decided it.
+
+> **Why didn't my job run on this MR?** Pick **MR created / "Run
+> pipeline" on MR**, set the target branch and any labels, list the MR's
+> changed files, then click the job and read its trace: the first rule
+> that matched with `when: never`, or no rule matching at all, is your
+> answer — with the deciding variable values right there.
 
 ![Rule-by-rule trace for a job](screenshots/whatif-trace.png)
 *`build` in the branch pipeline: rule 1 (`merge_request_event`) didn't
@@ -238,8 +271,8 @@ want to know what you can run, what depends on what, and where `CFLAGS`
 actually comes from.
 
 ```bash
-pipeview examples/make-project -o out/make
-open out/make/Makefile.report.html        # xdg-open on Linux
+pipeview examples/make-project -o examples/out/make
+open examples/out/make/Makefile.report.html     # xdg-open on Linux
 ```
 
 **1. Start at the Graph.** The DAG shows `deploy → test → build` at the
@@ -255,11 +288,14 @@ the recipe with every `$(VAR)` clickable, and both dependency directions
 (`test` and `deploy` depend on it).
 
 ![Focused graph with build's detail panel](screenshots/graph-make-focus.png)
+*Everything outside `build`'s cone is dimmed; the legend shows the three
+edge kinds in play and the collapsed `sub` group.*
 
 **3. Check the Tasks tab.** Five documented phony targets with their
 invocations — this is the page to send a new teammate.
 
 ![Tasks view](screenshots/tasks-make.png)
+*`build` carries the `default goal` chip — it's what bare `make` runs.*
 
 **4. Trace `CFLAGS` in Variables.** The timeline shows `=` in `config.mk:5`
 setting `-Wall -Werror -O2`, and a `?=` in `sub/Makefile:4` that loses to
@@ -268,9 +304,15 @@ builds). "Used by" links jump to `test`, the pattern rule, and
 `sub:support.o`.
 
 ![CFLAGS timeline](screenshots/variables-make.png)
+*The filled dot on the timeline marks the event that produced the final
+value; "resolves to" shows what the reference expands to.*
 
 **5. Files for the include story.** `Makefile → config.mk` plus the
-recursion into `sub/Makefile`, with any unresolved includes flagged.
+recursion into `sub/Makefile` ("invoked by clean, sub"), each file marked
+`✓ ok` — and, for this project, the designed empty state: "No diagnostics —
+every include resolved and every file parsed cleanly."
+
+![Files view of the make report](screenshots/files-make.png)
 
 ## Worked example 2: chasing a duplicate-pipeline problem
 
@@ -281,17 +323,20 @@ a job whose final rule is a bare `when: on_success` catch-all, and a job
 with explicit rules for both branch and MR pipelines.
 
 ```bash
-pipeview examples/gitlab-whatif-project -o out/whatif
-open out/whatif/gitlab-ci.report.html
+pipeview examples/gitlab-whatif-project -o examples/out/whatif
+open examples/out/whatif/gitlab-ci.report.html    # xdg-open on Linux
 ```
 
-**1. Reproduce it in What-If.** Pick **Push to a branch**, choose
-**feature branch…**, and check **an open MR uses this branch as source**.
+**1. Reproduce it in What-If.** Open the **What-If** tab. Pick **Push to a
+branch**, choose **feature branch…** (leave the prefilled name,
+`feature/widget`), and check **an open MR uses this branch as source**.
 Two candidate pipelines render side by side — a branch pipeline and a
 merge-request pipeline, both `✓ created` — and the banner names the three
 jobs badged as duplicates: `build`, `lint`, `integration_tests`.
 
 ![Duplicate pipelines side by side](screenshots/whatif-duplicates.png)
+*Each duplicated job appears once per pipeline column, marked with a dot
+badge; `deploy_production` stays dashed (`when: never`) in both.*
 
 **2. Ask *why* per job.** Click `build` in the branch pipeline: its first
 rule targets `merge_request_event` (doesn't match here), but rule 2 matches
@@ -299,11 +344,16 @@ rule targets `merge_request_event` (doesn't match here), but rule 2 matches
 folklore, is your evidence for the fix.
 
 ![Rule trace](screenshots/whatif-trace.png)
+*The trace panel names the rule that decided the verdict and the variable
+values it saw — `$CI_PIPELINE_SOURCE = "push"` here.*
 
-**3. Apply the standard fix and re-check.** Uncomment the `workflow:rules`
-dedup block at the top of the example's `.gitlab-ci.yml`, regenerate, and
-re-select the same knobs: the branch pipeline now collapses to *not
-created* while an MR is open, and the duplicate badges disappear.
+**3. Apply the standard fix and re-check.** Edit
+`examples/gitlab-whatif-project/.gitlab-ci.yml` and uncomment the
+`workflow:` block near the top (the documented dedup pattern). Re-run the
+`pipeview` command above, reload the report in your browser, and re-select
+the same knobs: the branch pipeline now collapses to *not created* while
+an MR is open, and the duplicate badges disappear. (`git checkout
+examples/` restores the example afterwards.)
 
 **4. Compare states with a pinned baseline.** Curious what a release tag
 would run instead? **Pin as baseline**, switch the event to **Push a new
@@ -314,6 +364,8 @@ tag pipelines) `needs: build`, whose rules keep it out of them — a real
 pipeline-creation failure you'd otherwise discover by pushing the tag.
 
 ![Delta between branch push and tag push](screenshots/whatif-delta.png)
+*The toolbar now reads **Unpin baseline** / **Copy delta**; the removed MR
+pipeline and the failing tag pipeline are named side by side.*
 
 **5. Share the finding.** **Copy markdown** pastes the job tables into the
 MR discussion; **Export scenario** copies the knobs as YAML so the exact
@@ -326,36 +378,62 @@ The What-If tab answers "what runs for this trigger?" interactively;
 read in GitLab's file viewer — plain sentences, job tables with a
 deciding-rule "why" column, and mermaid diagrams.
 
+The flow below runs against the bundled example so every command works
+as pasted; in your own repository, replace
+`examples/gitlab-whatif-project` with the path to your checkout (`.`).
+
 ```bash
-pipeview scenarios init                     # commented starter file
+pipeview scenarios init          # writes a commented pipeview-scenarios.yaml
 # …or click "Export scenario" in the What-If tab and paste the stanza
 
-pipeview scenarios check pipeview-scenarios.yaml         # validate
-pipeview scenarios preview pipeview-scenarios.yaml .     # iterate on stdout
+pipeview scenarios check pipeview-scenarios.yaml       # validate
+pipeview scenarios preview pipeview-scenarios.yaml \
+    examples/gitlab-whatif-project                     # iterate on stdout
 
-pipeview . --trigger-docs pipeview-scenarios.yaml -o out/
+pipeview examples/gitlab-whatif-project \
+    --trigger-docs pipeview-scenarios.yaml -o examples/out/whatif
 ```
 
-Each GitLab CI root gets a folder beside its report —
-`gitlab-ci.trigger-docs/` locally — with one `<id>.md` per scenario plus a
-`pipeline-triggers.md` index. Copy it into the repo (say `docs/ci/`) and
-commit; the docs carry no timestamps, so regenerating with unchanged inputs
-is byte-identical and `git diff` answers "did anything change?".
-
-Close the loop in CI:
+Each GitLab CI root gets a folder beside its report — here
+`examples/out/whatif/gitlab-ci.trigger-docs/` — with one `<id>.md` per
+scenario plus a `pipeline-triggers.md` index. Copy it into the repo the
+docs describe and commit:
 
 ```bash
-pipeview scenarios verify pipeview-scenarios.yaml . docs/ci
+mkdir -p docs/ci
+cp -r examples/out/whatif/gitlab-ci.trigger-docs/. docs/ci/
 ```
 
-`verify` regenerates in memory, masks the provenance markers, compares
-against the committed folder, and exits non-zero on drift — cron it and doc
-freshness polices itself, with pipeview still read-only.
+The docs carry no timestamps, so regenerating with unchanged inputs is
+byte-identical and `git diff` answers "did anything change?".
 
-The same honesty rules as the tab apply (it is literally the same
-evaluation — a Python twin of the report's evaluator, pinned to it by a
-shared vector suite): unknowables render as *depends* with the missing fact
-named, and trigger jobs stop at the project boundary.
+Close the loop with `verify` — it regenerates in memory, compares against
+the committed folder (ignoring the generated-by marker comment pipeview
+writes into each file, so a newer pipeview producing identical content is
+not drift), and exits non-zero when the docs have gone stale:
+
+```bash
+pipeview scenarios verify pipeview-scenarios.yaml \
+    examples/gitlab-whatif-project docs/ci
+```
+
+Run it as a scheduled CI job and doc freshness polices itself, with
+pipeview still read-only — it needs no token and writes nothing:
+
+```yaml
+check-trigger-docs:
+  image: python:3.12
+  script:
+    - pip install git+https://github.com/FooBarbarian-dev/make-make-diagram.git
+    - pipeview scenarios verify pipeview-scenarios.yaml . docs/ci
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+```
+
+The same honesty rules as the tab apply — the markdown and the What-If tab
+run the same evaluation logic, kept in lockstep by a shared test suite, so
+they cannot disagree: unknowables render as *depends* with the missing
+fact named, and trigger jobs stop at the project boundary.
 
 ## Working with a GitLab instance
 
@@ -373,6 +451,12 @@ pipeview gitlab report group/app --ref main              # one report
 pipeview gitlab track group/app@release/2.0              # remember a ref
 pipeview gitlab sync -o reports/                         # all tracked + rollup
 ```
+
+With two or more projects tracked, `sync` also writes
+`rollup.report.html`: a fleet view with one node per tracked project and
+the `trigger:`/`needs:project`/`include:project` references between them
+resolved into real cross-project links — the page for "which pipelines
+feed which". Click a project there to drill into its job graph in place.
 
 **Browser keys**: `↑`/`↓` (or `k`/`j`) move · `/` server-side search ·
 `enter` open project, then generate for the selected ref · `o` open the
@@ -392,6 +476,32 @@ stored default.
 `-vv` (every HTTP request with timing), or `--log-file debug.log` for full
 detail regardless. Diagnostics print per entry — including GitLab's own CI
 Lint verdict — so a failing project tells you *what* failed.
+
+## When something looks off
+
+**The graph is too dense to read.** Click the node you care about — focus
+mode dims everything outside its cone. Tighten it further from the
+legend's **Focus** section (direction + a hop depth of 1–2), uncheck edge
+kinds you don't need, and leave groups collapsed: a recursive sub-make or
+child pipeline folds into a single node until you expand it.
+
+**Exit code 1, but the report looks fine.** Something warned during
+parsing. Click the yellow/red badge in the report header (or open the
+Files view) to see every diagnostic with its file:line; the CLI printed a
+summary to stderr too.
+
+**Make variables show defaults, or values you know are wrong.** The
+enrichment pass (`make -pqn`) may have been skipped — it is, silently with
+an info diagnostic, when `make` isn't on PATH, errors, or takes longer
+than 30 seconds. Check the Files view for the notice. The reverse case:
+if your Makefile's `$(shell …)` expansions have side effects, run with
+`--no-enrich` — the static parser alone never executes anything.
+
+**A node is dashed and I don't know why.** Dashed means *ghost*: referenced
+but never defined in the parsed files — a prerequisite with no rule, or a
+job from an include pipeview can't fetch offline. Click it; the panel
+names the reference that created it, and the matching diagnostic says
+which include failed to resolve.
 
 ## Other output formats
 

@@ -80,11 +80,10 @@ def export_mermaid(report: Report, path: str) -> None:
         open_br, close_br = _NODE_SHAPE_MMD.get(node.kind, ("[", "]"))
         name = _escape_mmd(node.name)
         nid = _mmd_id(node.id)
+        # Labels are quoted: names like `$(OBJS)` or `%.o` are invalid bare.
+        lines.append(f'  {nid}{open_br}"{name}"{close_br}')
         if node.kind == "ghost":
-            lines.append(f"  {nid}{open_br}{name}{close_br}")
             lines.append(f"  style {nid} stroke-dasharray: 5 5")
-        else:
-            lines.append(f"  {nid}{open_br}{name}{close_br}")
 
     for edge in report.edges:
         label = _EDGE_LABEL.get(edge.kind, "")
