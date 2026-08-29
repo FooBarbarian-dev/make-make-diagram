@@ -25,4 +25,8 @@ examples: install
 self: install
 	pipeview Makefile -o examples/out
 
-.PHONY: install dev test lint examples self
+## Build and unit-test the VS Code extension (needs node + npm)
+vscode:
+	cd vscode-extension && npm install && npm test
+
+.PHONY: install dev test lint examples self vscode
