@@ -1,9 +1,23 @@
 # Changelog
 
-## Unreleased
+Releases from 0.2.0 onward are cut by
+[release-please](https://github.com/googleapis/release-please) from
+Conventional Commits merged to `main`; generated sections are prepended
+here and enriched by hand where a feature deserves the narrative.
+
+## 0.2.0 (2026-08-29)
+
+**Project infrastructure.** GitHub Actions CI (ruff + pytest across
+Python 3.10–3.13 + a package build check on every PR), automated
+releases via release-please (version bumps, changelog, GitHub Release
+with sdist/wheel attached), a repo-root `AGENTS.md` with the working
+rules for contributors and coding agents, and a docs reorganization:
+design specs and audits moved to `docs/agents/` (completed
+implementation plans deleted), with `docs/user-guide.md` remaining the
+primary user document.
 
 **Markdown trigger docs** (see
-`docs/superpowers/specs/2026-08-27-trigger-docs-design.md`). Define the
+`docs/agents/specs/2026-08-27-trigger-docs-design.md`). Define the
 trigger scenarios you care about once, in a YAML file, and every report
 run can also emit committed-markdown docs — per scenario, per project.
 
@@ -29,7 +43,7 @@ run can also emit committed-markdown docs — per scenario, per project.
   a full-output parity sweep over every gitlab fixture and example × 14
   configs (`tests/test_whatif_parity.py`) — deep-equal JSON required.
 - Phase 2 (see
-  `docs/superpowers/specs/2026-08-27-trigger-docs-phase2-design.md`):
+  `docs/agents/specs/2026-08-27-trigger-docs-phase2-design.md`):
   the What-If tab gains **Export scenario** (copy the current knobs as a
   scenarios-file YAML stanza — the tab becomes the authoring UI; pinned
   by a semantic round-trip test: exported YAML must evaluate identically
@@ -42,7 +56,7 @@ run can also emit committed-markdown docs — per scenario, per project.
   police doc freshness without write access.
 
 **What-If: copy/paste job listing + trigger delta comparison** (see
-`docs/superpowers/specs/2026-08-25-whatif-text-listing-and-delta-design.md`).
+`docs/agents/specs/2026-08-25-whatif-text-listing-and-delta-design.md`).
 
 - **Plain-text job listing**: every What-If evaluation renders a
   collapsible text block — one section per candidate pipeline (children
@@ -71,7 +85,7 @@ run can also emit committed-markdown docs — per scenario, per project.
   ref so listings can say `feature/widget → main`.
 
 **Cross-project pipeline links + tracked-set rollup** (see
-`docs/superpowers/specs/2026-08-25-upstream-downstream-rollup-design.md`).
+`docs/agents/specs/2026-08-25-upstream-downstream-rollup-design.md`).
 `pipeview gitlab sync` now sees across the tracked set: references
 between tracked projects resolve into real links instead of dead-end
 ghosts, and a fleet-level **rollup report** is generated beside the
@@ -115,7 +129,7 @@ per-project reports.
   containing `</script>` can no longer break the report page.
 
 **Same-name jobs now merge across files the way GitLab merges them**
-(see `docs/superpowers/specs/2026-08-25-gitlab-job-merge-semantics-design.md`).
+(see `docs/agents/specs/2026-08-25-gitlab-job-merge-semantics-design.md`).
 A local job that customizes a job an included file defines — the standard
 "override a template job's `rules:`" pattern — used to *replace* the
 included definition wholesale, so the job lost its script and the report
@@ -149,7 +163,7 @@ v19.3.0) and fixed to match:
 
 **GitLab built-in templates resolve everywhere — bundled snapshot
 fallback** (see
-`docs/superpowers/specs/2026-08-25-gitlab-template-fallback-design.md`).
+`docs/agents/specs/2026-08-25-gitlab-template-fallback-design.md`).
 `include:template` entries used to come out as ghost jobs whenever the
 template wasn't servable through GitLab's REST template API — which is
 most of them: the API only exposes the flattened "dropdown" keys
@@ -181,7 +195,7 @@ security/Auto-DevOps pipeline hit this.
   suffixed key) so this class of bug can't pass the suite again.
 
 **`pipeview gitlab` — fetch straight from a GitLab instance** (see
-`docs/superpowers/specs/2026-08-25-gitlab-remote-fetch-design.md`). A new
+`docs/agents/specs/2026-08-25-gitlab-remote-fetch-design.md`). A new
 subcommand — the only part of pipeview that touches a network — connects to
 a GitLab host, browses the projects your token can see, and generates the
 ordinary offline reports from what GitLab serves, cross-repository
@@ -262,7 +276,7 @@ per-anchor CSS pseudo-element.
   views; the detail panel and origin chip already had them.
 
 GitLab CI **predefined-variable docs** (see
-`docs/superpowers/specs/2026-08-19-gitlab-predefined-variable-docs-design.md`).
+`docs/agents/specs/2026-08-19-gitlab-predefined-variable-docs-design.md`).
 GitLab reports now explain the `CI_*`/`GITLAB_*` variables they surface —
 what each is, an example value, and when GitLab sets (or notably unsets) it.
 
@@ -287,7 +301,7 @@ what each is, an example value, and when GitLab sets (or notably unsets) it.
   wording, never an invented description.
 
 GitLab CI **What-If simulation** (see
-`docs/superpowers/specs/2026-08-18-gitlab-what-if-design.md`). Model schema
+`docs/agents/specs/2026-08-18-gitlab-what-if-design.md`). Model schema
 bumped to v3 (`Node.annotations["whatif"]`, `Report.annotations["whatif"]`);
 v2 JSON still loads.
 
@@ -340,7 +354,7 @@ v2 JSON still loads.
   rules, failure-only artifact chains, and duplicated jobs sharing a
   `resource_group` are called out.
 
-Parser conformance pass (see `docs/parser-audit.md` for the full
+Parser conformance pass (see `docs/agents/parser-audit.md` for the full
 construct-by-construct matrix, verdicts, and accepted limitations). Model
 schema bumped to v2 (`VariableEvent.annotations`, `Variable.exported`,
 `Variable.origin`, `Report.annotations`); v1 JSON still loads.
@@ -409,7 +423,7 @@ starts-immediately/parallel/delayed flags, matrix details, a pipeline-gate
 banner, and hover explanations for automatic variables and recipe-line
 prefixes.
 
-Also in this release — report UI overhaul (see `docs/ux-audit.md` for the
+Also in this release — report UI overhaul (see `docs/agents/ux-audit.md` for the
 full audit):
 
 - Repo-wide text overflow policy: ellipsis + full value on hover/in the
