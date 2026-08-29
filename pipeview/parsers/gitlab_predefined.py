@@ -4,7 +4,7 @@ One catalog, embedded whole into ``report.annotations["predefined_var_docs"]``
 by ``parse_gitlab`` and rendered by the HTML report (What-If tooltips, the
 Variable Explorer detail panel, and the Variables-tab reference section).
 
-Honesty rules (see docs/superpowers/specs/2026-08-19-gitlab-predefined-
+Honesty rules (see docs/agents/specs/2026-08-19-gitlab-predefined-
 variable-docs-design.md):
 
 - Every name the What-If simulator sets or controls (``buildEnv`` /
