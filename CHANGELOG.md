@@ -2,6 +2,34 @@
 
 ## Unreleased
 
+**Zed extension, `pipeview lsp`, and the `editors/` layout** (see
+`docs/superpowers/specs/2026-08-29-zed-extension-and-editor-layout-design.md`).
+
+- Editor integrations now live under `editors/` — `editors/vscode/`
+  (moved from `vscode-extension/`, unchanged) and the new
+  `editors/zed/` — with `editors/README.md` stating the parity
+  philosophy (every feature lives in the core: CLI, report HTML, or
+  language server; extensions only decide how their editor triggers it)
+  and a per-editor feature matrix.
+- **`pipeview lsp`**: a stdlib-only language server over stdio. Parser
+  diagnostics published on open/save (offline, never Make-enriched),
+  hover docs for predefined `CI_*` variables from the curated catalog,
+  document links for `include:local`, and code actions that generate
+  the report via the ordinary CLI in-process (stdout captured — the
+  protocol channel stays clean) and open it in the default browser.
+  `initializationOptions`: `upstream` (default on, matching the VS Code
+  extension), `upstreamRemote`, `outputDir` (default: a cache dir, so
+  repositories stay clean). Unrelated YAML gets silence.
+- **Zed extension** (`editors/zed/`): a wasm extension
+  (`zed_extension_api` 0.7.0, ~80 lines by design) wiring
+  `pipeview lsp` up for YAML and Make buffers. Zed has no webviews, so
+  the report code action opens the self-contained `file://` HTML in the
+  browser — a complete viewer by construction. Server resolution:
+  settings binary → `pipeview` on PATH → `python -m pipeview`; the
+  worktree shell env flows through so GitLab tokens reach `--upstream`
+  runs. Remote-project report/sync stay terminal flows in Zed (no
+  extension input UI); `make zed` builds for `wasm32-wasip2`.
+
 **Upstream include resolution + VS Code extension** (see
 `docs/superpowers/specs/2026-08-29-vscode-extension-upstream-includes-design.md`).
 

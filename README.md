@@ -520,6 +520,7 @@ pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--trigger-docs FILE]
                 [--upstream] [--version]
 pipeview scenarios [init|check|preview|verify] …
 pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
+pipeview lsp     # language server over stdio (used by editors/)
 ```
 
 | Flag | Default | Description |
@@ -555,6 +556,7 @@ Three layers, one package:
 ```
 pipeview/
   cli.py             # argument parsing, root discovery, orchestration
+  lsp.py             # `pipeview lsp` — stdio language server for editors/
   scenarios.py       # trigger-docs scenario file: schema + loader
   scenarios_cli.py   # `pipeview scenarios` — init/check/preview/verify helpers
   model.py           # normalized build model (dataclasses + serialization)
