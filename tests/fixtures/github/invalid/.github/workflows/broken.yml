@@ -1,0 +1,28 @@
+name: Broken
+on:
+  push:
+    branches: [main]
+    branches-ignore: [dev]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    needs: missing_job
+    if: startsWith(github.ref, "refs/tags/")
+    steps:
+      - run: make build
+
+  no_steps:
+    runs-on: ubuntu-latest
+
+  circular_a:
+    runs-on: ubuntu-latest
+    needs: circular_b
+    steps:
+      - run: "true"
+
+  circular_b:
+    runs-on: ubuntu-latest
+    needs: circular_a
+    steps:
+      - run: "true"

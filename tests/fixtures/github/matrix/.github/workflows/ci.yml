@@ -1,0 +1,24 @@
+name: Matrix
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+
+jobs:
+  test:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: [18, 20]
+        exclude:
+          - os: macos-latest
+            node: 18
+        include:
+          - os: ubuntu-latest
+            node: 20
+            coverage: "true"
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm test

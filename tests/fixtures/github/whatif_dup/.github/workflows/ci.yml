@@ -1,0 +1,27 @@
+# The classic GitHub duplicate-run shape: one workflow subscribed to both
+# push (unfiltered) and pull_request. A push to a branch with an open PR
+# runs every job twice.
+name: CI
+on:
+  push:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make build
+
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - run: make test
+
+  ## Never matches: github.ref carries the refs/heads/ prefix
+  deploy:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.ref == 'main'
+    steps:
+      - run: ./deploy.sh

@@ -1,0 +1,17 @@
+name: Nightly
+on:
+  schedule:
+    - cron: "0 4 * * *"
+  workflow_dispatch:
+    inputs:
+      suite:
+        type: choice
+        default: full
+        options: [full, quick]
+
+jobs:
+  soak:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || inputs.suite == 'full'
+    steps:
+      - run: make soak

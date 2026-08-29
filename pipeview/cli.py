@@ -224,6 +224,10 @@ def _discover_roots(path: str) -> list[tuple[str, str]]:
         if os.path.isfile(gitlab_path):
             roots.append((gitlab_path, "gitlab_yaml"))
 
+        workflows_dir = os.path.join(path, ".github", "workflows")
+        if os.path.isdir(workflows_dir):
+            roots.append((workflows_dir, "github_workflows"))
+
     return roots
 
 
@@ -234,8 +238,27 @@ def _classify_file(path: str) -> str | None:
     if basename == ".gitlab-ci.yml" or (path.endswith(".yml") and "gitlab" in basename.lower()):
         return "gitlab_yaml"
     if path.endswith(".yml") or path.endswith(".yaml"):
+        norm = os.path.abspath(path).replace(os.sep, "/")
+        if "/.github/workflows/" in norm or _looks_like_github_workflow(path):
+            return "github_workflows"
         return "gitlab_yaml"
     return None
+
+
+def _looks_like_github_workflow(path: str) -> bool:
+    """Content sniff for a workflow file outside .github/workflows: a
+    top-level mapping with jobs: and on: (unquoted `on` reads as YAML
+    True) and no GitLab-only markers."""
+    try:
+        import yaml
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
+            data = yaml.safe_load(f.read())
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    keys = {("on" if k is True else k) for k in data}
+    return "jobs" in keys and "on" in keys and "stages" not in keys
 
 
 def _parse_root(path: str, kind: str, bundled_templates: bool = True) -> Report:
@@ -243,6 +266,9 @@ def _parse_root(path: str, kind: str, bundled_templates: bool = True) -> Report:
         return parse_makefile(path)
     elif kind == "gitlab_yaml":
         return parse_gitlab(path, bundled_templates=bundled_templates)
+    elif kind == "github_workflows":
+        from pipeview.parsers.github_parser import parse_github
+        return parse_github(path)
     else:
         return Report(
             root=path,
@@ -251,6 +277,10 @@ def _parse_root(path: str, kind: str, bundled_templates: bool = True) -> Report:
 
 
 def _output_basename(path: str, kind: str) -> str:
+    if kind == "github_workflows":
+        if os.path.isdir(path):
+            return "github-actions"
+        return os.path.basename(path).replace(".", "_")
     basename = os.path.basename(path)
     if basename == ".gitlab-ci.yml":
         return "gitlab-ci"
