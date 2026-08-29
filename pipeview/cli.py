@@ -35,6 +35,13 @@ def main(argv: list[str] | None = None) -> int:
         from pipeview.scenarios_cli import main as scenarios_main
         return scenarios_main(argv[1:])
 
+    # `pipeview lsp` serves the language server over stdio (used by the
+    # editor integrations under editors/). A local directory literally
+    # named "lsp" is still reachable as `pipeview ./lsp`.
+    if argv and argv[0] == "lsp":
+        from pipeview.lsp import main as lsp_main
+        return lsp_main(argv[1:])
+
     parser = argparse.ArgumentParser(
         prog="pipeview",
         description=(
