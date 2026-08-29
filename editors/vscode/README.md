@@ -60,7 +60,7 @@ add `-v` to `pipeview.extraArgs` to see fetch steps and decisions there.
 ## Development
 
 ```bash
-cd vscode-extension
+cd editors/vscode
 npm install
 npm test          # tsc build + node --test unit tests
 ```

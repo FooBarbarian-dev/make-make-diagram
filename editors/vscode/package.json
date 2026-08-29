@@ -7,7 +7,8 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/FooBarbarian-dev/make-make-diagram"
+    "url": "https://github.com/FooBarbarian-dev/make-make-diagram",
+    "directory": "editors/vscode"
   },
   "engines": {
     "vscode": "^1.85.0"

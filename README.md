@@ -13,8 +13,9 @@ straight from what GitLab serves — cross-repository `include:`s resolved
 and all. Working from a checkout, `--upstream` splits the difference:
 your local files (uncommitted edits included) with the cross-repo
 includes fetched from the GitLab host the repo's own git remote points
-at. And a [VS Code extension](vscode-extension/) puts the whole thing in
-the editor, defaulting to the open repository with `--upstream` on.
+at. And editor integrations for [VS Code and Zed](editors/) put the
+whole thing in the editor, defaulting to the open repository with
+`--upstream` on.
 
 ![Graph view of a GitLab CI report](docs/screenshots/graph-gitlab.png)
 *The Graph view of a GitLab CI report: the `needs:` DAG, `extends:` template
@@ -284,18 +285,32 @@ stay ghosts and a warning diagnostic says exactly what to do.
 `--upstream` is the only way a plain `pipeview <path>` run touches a
 network, and it never happens without the flag.
 
-## VS Code extension
+## Editor integrations (VS Code, Zed)
 
-[`vscode-extension/`](vscode-extension/) wraps the CLI for the editor:
-**Pipeview: Pipeline Report for This Repo** analyzes the open repository
-(with `--upstream` on by default, per the section above) and renders the
-report in a webview panel — Graph, Tasks, Variables, Files and What-If
-included, since it is the same self-contained HTML. Context menus cover
-single files; further commands run `pipeview gitlab report`/`sync`
-(the rollup opens when produced), store a token in VS Code secret
-storage, or open an integrated terminal for the interactive
-`pipeview gitlab auth`. See the extension's
-[README](vscode-extension/README.md) for settings and development notes.
+Editor integrations live under [`editors/`](editors/), both thin shells
+over the same core — every feature belongs to the CLI, the report HTML,
+or the `pipeview lsp` language server, never to extension code. See
+[editors/README.md](editors/README.md) for the full feature matrix.
+
+- **[VS Code](editors/vscode/)** — **Pipeview: Pipeline Report for This
+  Repo** analyzes the open repository (with `--upstream` on by default,
+  per the section above) and renders the report in a webview panel —
+  Graph, Tasks, Variables, Files and What-If included, since it is the
+  same self-contained HTML. Context menus cover single files; further
+  commands run `pipeview gitlab report`/`sync` (the rollup opens when
+  produced), store a token in VS Code secret storage, or open an
+  integrated terminal for the interactive `pipeview gitlab auth`.
+- **[Zed](editors/zed/)** — Zed extensions cannot show webviews, so the
+  extension wires up `pipeview lsp` instead: pipeview's diagnostics
+  appear inline on save, predefined `CI_*` variables get hover docs
+  (the Variables-tab catalog), `include:local` entries become clickable
+  links, and a code action generates the repo's report (upstream on by
+  default) and opens it in the default browser — the report is
+  self-contained `file://` HTML precisely so any browser is a full
+  viewer.
+
+`pipeview lsp` is editor-agnostic; pointing the VS Code extension at it
+too is the designated follow-up.
 
 ## Fetching from GitLab (`pipeview gitlab`)
 
@@ -575,8 +590,10 @@ pipeview/
   vendor/
     dagre.min.js     # pinned dagre 0.8.5 for graph layout
 
-vscode-extension/    # VS Code extension: a thin TypeScript shell that
-                     # spawns the CLI and shows its HTML in webviews
+editors/             # editor integrations (see editors/README.md)
+  vscode/            # VS Code: TypeScript shell — spawns the CLI, shows
+                     #   its HTML in webviews
+  zed/               # Zed: wasm extension wiring up `pipeview lsp`
 ```
 
 Parsers emit the normalized model. The renderer consumes only the model. The

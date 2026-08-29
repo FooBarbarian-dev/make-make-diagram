@@ -27,6 +27,10 @@ self: install
 
 ## Build and unit-test the VS Code extension (needs node + npm)
 vscode:
-	cd vscode-extension && npm install && npm test
+	cd editors/vscode && npm install && npm test
 
-.PHONY: install dev test lint examples self vscode
+## Build the Zed extension (needs rust + the wasm32-wasip2 target)
+zed:
+	cd editors/zed && cargo build --release --target wasm32-wasip2
+
+.PHONY: install dev test lint examples self vscode zed

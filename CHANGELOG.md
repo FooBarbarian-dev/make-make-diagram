@@ -22,7 +22,7 @@
   `gitlab_upstream` annotation. This is the one way a plain
   `pipeview <path>` run touches a network, and only with the flag. The
   main CLI also gains `-v`/`--log-file` (the gitlab CLI's logging).
-- **VS Code extension** (`vscode-extension/`): a thin TypeScript shell
+- **VS Code extension** (`editors/vscode/`): a thin TypeScript shell
   over the CLI. "Pipeline Report for This Repo" defaults to the open
   repository with `--upstream` on and renders the self-contained report
   HTML in a webview panel — every view included, What-If and all, since
