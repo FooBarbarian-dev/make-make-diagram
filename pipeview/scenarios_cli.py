@@ -184,9 +184,10 @@ def _cmd_preview(args) -> int:
             return 2
 
     repo = os.path.abspath(args.repo)
-    roots = [(p, k) for p, k in _discover_roots(repo) if k == "gitlab_yaml"]
+    roots = [(p, k) for p, k in _discover_roots(repo)
+             if k in ("gitlab_yaml", "github_workflows")]
     if not roots:
-        print(f"Error: no GitLab CI configuration found at {args.repo}",
+        print(f"Error: no GitLab CI or GitHub Actions configuration found at {args.repo}",
               file=sys.stderr)
         return 2
     root_path, root_kind = roots[0]
@@ -227,9 +228,10 @@ def _cmd_verify(args) -> int:
         print(f"{args.path}: no usable scenarios", file=sys.stderr)
         return 2
     repo = os.path.abspath(args.repo)
-    roots = [(p, k) for p, k in _discover_roots(repo) if k == "gitlab_yaml"]
+    roots = [(p, k) for p, k in _discover_roots(repo)
+             if k in ("gitlab_yaml", "github_workflows")]
     if not roots:
-        print(f"Error: no GitLab CI configuration found at {args.repo}",
+        print(f"Error: no GitLab CI or GitHub Actions configuration found at {args.repo}",
               file=sys.stderr)
         return 2
     if not os.path.isdir(args.docs_dir):

@@ -24,14 +24,25 @@ from typing import Any
 import yaml
 
 from pipeview.model import Diagnostic, SourceLocation
+from pipeview.parsers.github_predefined import (
+    PREDEFINED_VAR_DOCS as GITHUB_PREDEFINED_VAR_DOCS,
+)
 from pipeview.parsers.gitlab_predefined import PREDEFINED_VAR_DOCS
 
 SCENARIOS_SCHEMA_VERSION = 1
 
-# The whatif.js scenario ids, verbatim.
-EVENTS = frozenset({
+# The What-If scenario ids, verbatim — the union of both providers'
+# event sets. push_branch/push_tag/schedule are shared; a report only
+# uses the scenarios its provider understands (the doc generator skips
+# the rest with a note).
+GITLAB_EVENTS = frozenset({
     "push_branch", "push_tag", "mr", "schedule", "web", "api", "trigger",
 })
+GITHUB_EVENTS = frozenset({
+    "push_branch", "push_tag", "pr", "schedule", "workflow_dispatch",
+    "release",
+})
+EVENTS = GITLAB_EVENTS | GITHUB_EVENTS
 
 _COMMON_KEYS = frozenset({
     "id", "title", "intro", "event", "variables", "changed_files", "diagrams",
@@ -42,17 +53,23 @@ _COMMON_KEYS = frozenset({
 # branch has an open MR (the documented dedup pattern relies on it)
 _REFLESS_EVENT_KEYS = frozenset({"ref_kind", "branch", "tag", "open_mr"})
 _EVENT_KEYS: dict[str, frozenset[str]] = {
-    "push_branch": frozenset({"branch", "open_mr", "new_branch"}),
+    "push_branch": frozenset({"branch", "open_mr", "new_branch", "open_pr"}),
     "push_tag": frozenset({"tag", "tag_protected"}),
     "mr": frozenset({"branch", "target", "draft", "mr_flavor", "mr_labels"}),
     "schedule": _REFLESS_EVENT_KEYS,
     "web": _REFLESS_EVENT_KEYS,
     "api": _REFLESS_EVENT_KEYS,
     "trigger": _REFLESS_EVENT_KEYS,
+    # GitHub-only events
+    "pr": frozenset({"branch", "target", "draft", "pr_action"}),
+    "workflow_dispatch": frozenset({"workflow", "inputs", "ref_kind",
+                                    "branch", "tag"}),
+    "release": frozenset({"tag", "release_action"}),
 }
 _ALL_KEYS = _COMMON_KEYS.union(*_EVENT_KEYS.values())
 
 _OPEN_MR_KEYS = frozenset({"target", "draft", "mr_flavor", "mr_labels"})
+_OPEN_PR_KEYS = frozenset({"target", "draft", "action"})
 _MR_FLAVORS = frozenset({"detached", "merged_result", "merge_train"})
 _REF_KINDS = frozenset({"branch", "tag"})
 _DIAGRAMS = ("dag", "lifecycle")
@@ -110,6 +127,53 @@ def to_whatif_config(scenario: Scenario) -> dict[str, Any]:
             out["mrFlavor"] = c["open_mr"]["mr_flavor"]
         if c["open_mr"].get("mr_labels"):
             out["mrLabels"] = c["open_mr"]["mr_labels"]
+    if "changed_files" in c:
+        out["changedFiles"] = "all" if c["changed_files"] == "all" \
+            else list(c["changed_files"])
+    if "commit_message" in c:
+        out["commitMessage"] = c["commit_message"]
+    if "variables" in c:
+        out["overrides"] = dict(c["variables"])
+    return out
+
+
+def to_github_whatif_config(scenario: Scenario) -> dict[str, Any]:
+    """Spell a Scenario as the GitHub What-If evaluator's config object —
+    the camelCase knobs whatif_github.js and github_whatif_eval share.
+    ``open_mr`` is honored as ``open_pr`` so one shared scenario file can
+    describe "push with an open MR/PR" for both providers."""
+    c = scenario.config
+    out: dict[str, Any] = {"scenario": scenario.event}
+    if "branch" in c:
+        out["branch"] = c["branch"]
+    if "tag" in c:
+        out["tag"] = c["tag"]
+    if "ref_kind" in c:
+        out["refKind"] = c["ref_kind"]
+    if "new_branch" in c:
+        out["newBranch"] = bool(c["new_branch"])
+    if "tag_protected" in c:
+        out["tagProtected"] = bool(c["tag_protected"])
+    if "target" in c:
+        out["target"] = c["target"]
+    if "draft" in c:
+        out["draft"] = bool(c["draft"])
+    if "pr_action" in c:
+        out["prAction"] = c["pr_action"]
+    open_pr = c.get("open_pr") or c.get("open_mr")
+    if open_pr is not None:
+        out["openPR"] = True
+        if open_pr.get("target"):
+            out["target"] = open_pr["target"]
+        out["draft"] = bool(open_pr.get("draft", False))
+        if open_pr.get("action"):
+            out["prAction"] = open_pr["action"]
+    if "workflow" in c:
+        out["dispatchWorkflow"] = c["workflow"]
+    if "inputs" in c:
+        out["inputs"] = dict(c["inputs"])
+    if "release_action" in c:
+        out["releaseAction"] = c["release_action"]
     if "changed_files" in c:
         out["changedFiles"] = "all" if c["changed_files"] == "all" \
             else list(c["changed_files"])
@@ -277,6 +341,40 @@ def load_scenarios(path: str) -> tuple[list[Scenario], list[Diagnostic]]:
                     if isinstance(labels, list) else str(labels)
             config["open_mr"] = normalized
 
+        if "open_pr" in config:
+            open_pr = config["open_pr"]
+            if not isinstance(open_pr, dict):
+                error(f"{label}: `open_pr` must be a mapping")
+                continue
+            bad_keys = sorted(set(open_pr) - _OPEN_PR_KEYS)
+            if bad_keys:
+                error(f"{label}: unknown key(s) in `open_pr`: "
+                      f"{', '.join(bad_keys)}")
+                continue
+            normalized_pr = {"draft": bool(open_pr.get("draft", False))}
+            if open_pr.get("target") is not None:
+                normalized_pr["target"] = str(open_pr["target"])
+            if open_pr.get("action") is not None:
+                normalized_pr["action"] = str(open_pr["action"])
+            config["open_pr"] = normalized_pr
+
+        for str_key in ("pr_action", "release_action", "workflow"):
+            if str_key in config:
+                value = config[str_key]
+                if not isinstance(value, str) or not value:
+                    error(f"{label}: `{str_key}` must be a non-empty string")
+                    config = None
+                    break
+        if config is None:
+            continue
+
+        if "inputs" in config:
+            inputs = _as_string_map(config["inputs"])
+            if inputs is None:
+                error(f"{label}: `inputs` must be a mapping of scalars")
+                continue
+            config["inputs"] = inputs
+
         if "variables" in stanza:
             variables = _as_string_map(stanza["variables"])
             if variables is None:
@@ -286,6 +384,12 @@ def load_scenarios(path: str) -> tuple[list[Scenario], list[Diagnostic]]:
             for name in sorted(set(variables) & set(PREDEFINED_VAR_DOCS)):
                 warn(f"{label}: variable `{name}` shadows a GitLab predefined "
                      f"variable — the scenario value wins in the simulation")
+            for name in sorted((set(variables)
+                                & set(GITHUB_PREDEFINED_VAR_DOCS))
+                               - set(PREDEFINED_VAR_DOCS)):
+                warn(f"{label}: variable `{name}` shadows a GitHub "
+                     f"predefined variable — the scenario value wins in "
+                     f"the simulation")
         if "changed_files" in stanza:
             if stanza["changed_files"] == "all":
                 # the What-If tab's third state: every changes: pattern matches

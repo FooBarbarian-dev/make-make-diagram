@@ -153,14 +153,15 @@ def main(argv: list[str] | None = None) -> int:
             export_svg(report, os.path.join(outdir, f"{basename}.graph.svg"))
 
         if trigger_scenarios:
-            if root_kind == "gitlab_yaml":
+            if root_kind in ("gitlab_yaml", "github_workflows"):
                 docs_floor = max(docs_floor, _emit_trigger_docs(
                     report, trigger_scenarios, trigger_skipped,
                     os.path.join(outdir, f"{basename}.trigger-docs"),
                     root_path, args))
             else:
-                print(f"  {root_path}: trigger docs apply to GitLab CI "
-                      "configurations — skipped", file=sys.stderr)
+                print(f"  {root_path}: trigger docs apply to GitLab CI and "
+                      "GitHub Actions configurations — skipped",
+                      file=sys.stderr)
 
         if report.diagnostics:
             any_diagnostics = True
@@ -187,7 +188,13 @@ def _emit_trigger_docs(report: Report, scenarios, skipped: list[str],
         generate_trigger_docs,
         write_docs_folder,
     )
-    provenance = {"project": os.path.basename(root_path), "ref": "",
+    project = os.path.basename(root_path)
+    norm = os.path.abspath(root_path).replace(os.sep, "/")
+    if norm.endswith("/.github/workflows"):
+        # the workflows dir is the root; the repo directory is the name
+        project = os.path.basename(norm[: -len("/.github/workflows")]) \
+            or project
+    provenance = {"project": project, "ref": "",
                   "commit": "", "version": pipeview.__version__}
     cmd = f"pipeview {args.path} --trigger-docs {args.trigger_docs} -o {args.output}"
     files = generate_trigger_docs(report.to_dict(), scenarios, skipped,
