@@ -768,6 +768,17 @@ def _resolve_reusable_calls(state: _ParserState) -> None:
                 ))
                 continue
             if uses.startswith("./"):
+                if _REMOTE_USES_RE.match(namespace):
+                    # a local call inside a workflow materialized from
+                    # ANOTHER repository resolves in that repository —
+                    # canonicalize it and retry as a remote call
+                    m_ns = _REMOTE_USES_RE.match(namespace)
+                    canonical = (f"{m_ns.group('owner')}/{m_ns.group('repo')}"
+                                 f"/{uses[2:]}@{m_ns.group('ref')}")
+                    config["uses"] = canonical
+                    del state.reusable_depth[job_id]
+                    new_files = True
+                    continue
                 local_rel = uses[2:]
                 abs_path = os.path.abspath(
                     os.path.join(state.repo_root, local_rel))

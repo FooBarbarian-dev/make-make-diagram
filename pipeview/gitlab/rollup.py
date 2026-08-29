@@ -158,7 +158,9 @@ def annotate_reports(rollup: dict, sources: list[RollupSource],
 
 def _project_summary(src: RollupSource) -> dict:
     report = src.report
-    remote = report.annotations.get("gitlab_remote") or {}
+    # the two providers store the same shape under their own key
+    remote = report.annotations.get("gitlab_remote") \
+        or report.annotations.get("github_remote") or {}
     sev: dict[str, int] = {}
     for d in report.diagnostics:
         sev[d.severity] = sev.get(d.severity, 0) + 1
@@ -185,7 +187,9 @@ def _project_summary(src: RollupSource) -> dict:
 def _include_references(report: Report) -> list[dict]:
     """include:project provenance from either fetch strategy, deduplicated
     to (project, ref, file)."""
-    remote = report.annotations.get("gitlab_remote") or {}
+    # the two providers store the same shape under their own key
+    remote = report.annotations.get("gitlab_remote") \
+        or report.annotations.get("github_remote") or {}
     own = (remote.get("project") or "").lower()
     out: list[dict] = []
     seen: set[tuple] = set()

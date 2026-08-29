@@ -20,12 +20,16 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    # `pipeview gitlab …` routes to the remote subcommand — the only part of
-    # pipeview that performs network access. A local directory literally
-    # named "gitlab" is still reachable as `pipeview ./gitlab`.
+    # `pipeview gitlab …` / `pipeview github …` route to the remote
+    # subcommands — the only parts of pipeview that perform network access.
+    # A local directory literally named "gitlab" is still reachable as
+    # `pipeview ./gitlab`.
     if argv and argv[0] == "gitlab":
         from pipeview.gitlab.cli import main as gitlab_main
         return gitlab_main(argv[1:])
+    if argv and argv[0] == "github":
+        from pipeview.github.cli import main as github_main
+        return github_main(argv[1:])
 
     # `pipeview scenarios …` routes to the trigger-docs scenario helpers —
     # offline, like everything outside `gitlab`. A local directory literally
