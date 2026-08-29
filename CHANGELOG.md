@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+**Upstream include resolution + VS Code extension** (see
+`docs/superpowers/specs/2026-08-29-vscode-extension-upstream-includes-design.md`).
+
+- `pipeview <path> --upstream` analyzes the local working tree as
+  always — uncommitted edits, real line numbers — but resolves
+  cross-repository includes (`project:`, `remote:`, `component:`, and
+  instance templates) by fetching them from the GitLab host the
+  repository's own git remote points at. Remote selection: explicit
+  `--upstream-remote`, else the branch's tracking remote, else
+  `origin`, else the sole remote; ssh/scp-style/http(s) remote URLs all
+  parse. Local files are never fetched or materialized; externals reuse
+  the `files`-strategy traversal (nested includes, template fallback,
+  the 150-file ceiling) and land under
+  `<outdir>/fetched/<project>@upstream/`. Auth reuses the
+  `pipeview gitlab` chain (`--token`, env vars, stored config); every
+  failure — no git, no remote, no token, fetch errors — degrades to a
+  warning diagnostic with the fix named, ghosts intact. Reports gain a
+  `gitlab_upstream` annotation. This is the one way a plain
+  `pipeview <path>` run touches a network, and only with the flag. The
+  main CLI also gains `-v`/`--log-file` (the gitlab CLI's logging).
+- **VS Code extension** (`vscode-extension/`): a thin TypeScript shell
+  over the CLI. "Pipeline Report for This Repo" defaults to the open
+  repository with `--upstream` on and renders the self-contained report
+  HTML in a webview panel — every view included, What-If and all, since
+  it is the same file the CLI writes. Also: per-file reports via
+  context menus, regenerate-last, `gitlab report`/`sync` flows (the
+  rollup opens when produced), API-token storage in VS Code secrets
+  (injected as `PIPEVIEW_GITLAB_TOKEN`), an integrated-terminal flow
+  for interactive `pipeview gitlab auth`, and a Pipeview output channel
+  carrying the CLI's full output. Disabled in untrusted workspaces.
+  `make vscode` builds and unit-tests it.
+
 **Markdown trigger docs** (see
 `docs/superpowers/specs/2026-08-27-trigger-docs-design.md`). Define the
 trigger scenarios you care about once, in a YAML file, and every report

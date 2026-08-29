@@ -10,7 +10,11 @@ from, and how files include each other.
 It can also connect to a GitLab instance (`pipeview gitlab`), browse the
 projects you can access from a terminal UI, and generate the same reports
 straight from what GitLab serves — cross-repository `include:`s resolved
-and all.
+and all. Working from a checkout, `--upstream` splits the difference:
+your local files (uncommitted edits included) with the cross-repo
+includes fetched from the GitLab host the repo's own git remote points
+at. And a [VS Code extension](vscode-extension/) puts the whole thing in
+the editor, defaulting to the open repository with `--upstream` on.
 
 ![Graph view of a GitLab CI report](docs/screenshots/graph-gitlab.png)
 *The Graph view of a GitLab CI report: the `needs:` DAG, `extends:` template
@@ -94,10 +98,12 @@ Transfer the `dist/` directory to the target machine, then:
 pip install --no-index --find-links dist/ pipeview
 ```
 
-After install, report generation performs zero network access, ever — only
-the explicit `pipeview gitlab` subcommand talks to a network, and only to
-the GitLab host you name. Generated reports are self-contained HTML files
-that work from `file://` — no CDN, no remote fonts, no fetches of any kind.
+After install, report generation performs zero network access unless you
+explicitly ask for it — only the `pipeview gitlab` subcommand and the
+opt-in `--upstream` flag talk to a network, and only to the GitLab host
+you name (or your repo's own remote names). Generated reports are
+self-contained HTML files that work from `file://` — no CDN, no remote
+fonts, no fetches of any kind.
 
 ## HTML report views
 
@@ -243,6 +249,53 @@ downstream; and one event spawning several candidate pipelines gets a
 fan-out diagram plus a duplicate-jobs callout. Verdicts are encoded in
 node shape and label — manual gates as hexagons, delays as ⏱, *depends*
 dashed with a `?` — so GitLab's light and dark themes both stay legible.
+
+## Cross-repo includes from a checkout (`--upstream`)
+
+`pipeview .` on a local checkout leaves `include:project`,
+`include:remote` and `include:component` entries as dashed ghost nodes —
+resolving them needs a network. `--upstream` resolves them using the one
+reference the checkout already carries: its own git remote.
+
+```bash
+cd ~/src/app          # a checkout of gitlab.example.com:group/app
+pipeview . --upstream -o report
+```
+
+pipeview asks git for the upstream (the current branch's tracking
+remote, else `origin`, else the sole remote — override with
+`--upstream-remote NAME`), reads the GitLab host and project path off
+the remote URL (ssh, scp-style, and http(s) URLs all work), and fetches
+*only* the externally-included files from that host — the same traversal
+as the `files` strategy, `include:template` served by the instance API
+with the bundled-snapshot fallback, nested includes inside fetched
+repositories resolved against their own repos. Your local files remain
+the source of truth: they are parsed from the working tree, uncommitted
+edits and real line numbers included, and are never fetched. Fetched
+files land under `<outdir>/fetched/<project>@upstream/` and the report's
+Files view says where each came from.
+
+Authentication reuses the `pipeview gitlab` machinery: `--token`, then
+`$PIPEVIEW_GITLAB_TOKEN` / `$GITLAB_TOKEN` / `$GITLAB_PRIVATE_TOKEN`,
+then the config stored by `pipeview gitlab auth`. Without a token (or
+without a usable upstream) the report still generates — the includes
+stay ghosts and a warning diagnostic says exactly what to do.
+
+`--upstream` is the only way a plain `pipeview <path>` run touches a
+network, and it never happens without the flag.
+
+## VS Code extension
+
+[`vscode-extension/`](vscode-extension/) wraps the CLI for the editor:
+**Pipeview: Pipeline Report for This Repo** analyzes the open repository
+(with `--upstream` on by default, per the section above) and renders the
+report in a webview panel — Graph, Tasks, Variables, Files and What-If
+included, since it is the same self-contained HTML. Context menus cover
+single files; further commands run `pipeview gitlab report`/`sync`
+(the rollup opens when produced), store a token in VS Code secret
+storage, or open an integrated terminal for the interactive
+`pipeview gitlab auth`. See the extension's
+[README](vscode-extension/README.md) for settings and development notes.
 
 ## Fetching from GitLab (`pipeview gitlab`)
 
@@ -417,17 +470,21 @@ an automated test that scans every generated report for `http://` and
 `https://` resource references.
 
 The tool never makes network requests while generating a report, and
-`pipeview <path>` never touches the network at all. Unresolvable includes
+`pipeview <path>` never touches the network at all unless you pass the
+explicit `--upstream` flag (which fetches only cross-repository includes,
+from the host your repo's git remote names, before the offline pipeline
+runs). Unresolvable includes
 (GitLab `project:`, `remote:`, `component:`) become diagnostics and ghost
 nodes, not download attempts. `include:template` entries are the one kind
 that resolves without a network: GitLab's built-in templates are bundled
 with pipeview (see above), read from disk, and clearly labeled
 `[template]` in the report — disable with `--no-bundled-templates`.
 
-The one deliberate exception is the explicit `pipeview gitlab` subcommand,
-which talks to exactly the GitLab host you point it at, materializes what it
-fetched to disk, and then runs the same offline pipeline — the reports it
-produces are as offline as everything else.
+The deliberate exceptions are the explicit `pipeview gitlab` subcommand
+and the explicit `--upstream` flag, which talk to exactly the GitLab host
+you point them at, materialize what they fetched to disk, and then run
+the same offline pipeline — the reports they produce are as offline as
+everything else.
 
 ## Make enrichment caveat
 
@@ -444,7 +501,8 @@ silently skipped with an info diagnostic.
 ## CLI reference
 
 ```
-pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--trigger-docs FILE] [--version]
+pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--trigger-docs FILE]
+                [--upstream] [--version]
 pipeview scenarios [init|check|preview|verify] …
 pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 ```
@@ -456,6 +514,11 @@ pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 | `--format` | `html,json` | Comma-separated: `html`, `json`, `svg`, `dot`, `mmd` |
 | `--no-enrich` | off | Skip the Make enrichment pass |
 | `--trigger-docs FILE` | off | Also write per-scenario markdown docs (see above) |
+| `--upstream` | off | Resolve cross-repo includes via the repo's git remote (see above) |
+| `--upstream-remote NAME` | auto | Git remote to use with `--upstream` |
+| `--token` | | `--upstream`: API token (else env vars / stored config) |
+| `--ca-bundle` / `--insecure` / `--timeout` | | `--upstream`: TLS/HTTP knobs, as in `pipeview gitlab` |
+| `-v` / `--log-file FILE` | off | Log fetch steps and decisions (`-vv`: every HTTP request) |
 | `--version` | | Print version and exit |
 
 ### Exit codes
@@ -491,11 +554,12 @@ pipeview/
     gitlab_whatif.py # compiles rules/only/except into an evaluatable program
     gitlab_whatif_eval.py # Python twin of the report's What-If evaluator
     enrich.py        # optional make -pqn enrichment pass
-  gitlab/            # `pipeview gitlab` — the only networked code
+  gitlab/            # `pipeview gitlab` + `--upstream` — the only networked code
     api.py           # stdlib GitLab REST client
     auth.py          # token resolution + prefilled-URL creation flow
     config.py        # ~/.config/pipeview/gitlab.json (hosts, tracked lists)
-    fetch.py         # lint & files fetch strategies
+    fetch.py         # lint & files fetch strategies (+ the local-seed variant)
+    upstream.py      # --upstream: git remote -> host/project, orchestration
     report.py        # fetched config -> the ordinary offline pipeline
     rollup.py        # cross-project link resolution for `sync`
     tui.py           # curses project browser
@@ -510,6 +574,9 @@ pipeview/
                      # generation time)
   vendor/
     dagre.min.js     # pinned dagre 0.8.5 for graph layout
+
+vscode-extension/    # VS Code extension: a thin TypeScript shell that
+                     # spawns the CLI and shows its HTML in webviews
 ```
 
 Parsers emit the normalized model. The renderer consumes only the model. The
@@ -524,6 +591,7 @@ make test                   # run tests
 make lint                   # lint
 make examples               # regenerate example reports
 make self                   # run pipeview on this repo's own Makefile
+make vscode                 # build + unit-test the VS Code extension
 ```
 
 ## Documentation
