@@ -1,0 +1,66 @@
+name: Pipeline
+on:
+  push:
+    branches-ignore:
+      - "tmp/**"
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        default: staging
+        options: [staging, production]
+      dry_run:
+        type: boolean
+        default: false
+
+env:
+  DEPLOY_MODE: rolling
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - run: make build
+
+  test:
+    runs-on: ubuntu-latest
+    needs: build
+    if: env.DEPLOY_MODE == 'rolling'
+    steps:
+      - run: make test
+
+  ## Only runs when the repo variable is set — unknowable offline
+  canary:
+    runs-on: ubuntu-latest
+    needs: build
+    if: vars.CANARY_ENABLED == 'true'
+    steps:
+      - run: make canary
+
+  ## Skipped on branches; downstream of canary
+  report:
+    runs-on: ubuntu-latest
+    needs: [test, canary]
+    steps:
+      - run: make report
+
+  always_cleanup:
+    runs-on: ubuntu-latest
+    needs: [test, canary]
+    if: always()
+    steps:
+      - run: make clean
+
+  only_on_failure:
+    runs-on: ubuntu-latest
+    needs: test
+    if: failure()
+    steps:
+      - run: make alert
+
+  dispatch_deploy:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' && inputs.environment == 'production' && !inputs.dry_run
+    environment: production
+    steps:
+      - run: ./deploy.sh
