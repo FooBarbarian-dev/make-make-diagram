@@ -5,6 +5,20 @@ Releases from 0.2.0 onward are cut by
 Conventional Commits merged to `main`; generated sections are prepended
 here and enriched by hand where a feature deserves the narrative.
 
+## [0.2.1](https://github.com/FooBarbarian-dev/make-make-diagram/compare/v0.2.0...v0.2.1) (2026-08-29)
+
+
+### Bug Fixes
+
+* **ci:** Add required permissions and documentation for release-please ([24a0606](https://github.com/FooBarbarian-dev/make-make-diagram/commit/24a06063e5335358aad5416d0b03155781130222))
+* **ci:** Resolve permissions error in release-please pipeline and document release setup ([36620b6](https://github.com/FooBarbarian-dev/make-make-diagram/commit/36620b695c169bf4d2a5a90465cbcc083dea2300))
+
+
+### Documentation
+
+* reorganize agent design docs into docs/agents/, add AGENTS.md ([7dd4b98](https://github.com/FooBarbarian-dev/make-make-diagram/commit/7dd4b98ce323c8a5e92faaa9ad58d47d03645b2a))
+* reorganize agent design docs into docs/agents/, add AGENTS.md ([4cf3d62](https://github.com/FooBarbarian-dev/make-make-diagram/commit/4cf3d62011ee42062fd59fb828d035c97e795b33))
+
 ## 0.2.0 (2026-08-29)
 
 **Project infrastructure.** GitHub Actions CI (ruff + pytest across
