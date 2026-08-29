@@ -677,6 +677,99 @@ def _parse_component(address: str) -> tuple[str, str, str, str] | None:
 
 
 # ---------------------------------------------------------------------------
+# Local-seed variant — the `--upstream` feature
+# ---------------------------------------------------------------------------
+
+class _LocalFilesFetcher(_FilesFetcher):
+    """Files strategy over a *local working tree*: the root and every
+    include:local in main-repo context are read from disk and never
+    fetched or materialized (the working tree is the truth, uncommitted
+    edits included). Only non-local includes fetch — with unchanged
+    `files`-strategy semantics, nested includes inside fetched
+    repositories included."""
+
+    def __init__(self, client, project: dict, ref: str,
+                 notes: list[tuple[str, str]], repo_root: str,
+                 bundled_templates: bool = True):
+        super().__init__(client, project, ref, notes,
+                         bundled_templates=bundled_templates)
+        self.repo_root = os.path.abspath(repo_root)
+        self.local_seen: set[str] = set()
+        self._local_tree_cache: list[str] | None = None
+
+    def run_local(self, root_file: str) -> FetchResult:
+        rel = os.path.relpath(
+            os.path.abspath(root_file), self.repo_root).replace(os.sep, "/")
+        self._read_and_walk(rel)
+        return FetchResult(
+            strategy="upstream",
+            host=getattr(self.client, "base_url", ""),
+            project=self.project,
+            ref=self.ref,
+            root_rel=rel,
+            files=list(self.files.values()),
+            external_map=self.external_map,
+            local_root_prefixes=sorted(self.local_root_prefixes),
+            notes=self.notes,
+        )
+
+    def _read_and_walk(self, rel_path: str) -> None:
+        if rel_path in self.local_seen or len(self.local_seen) >= MAX_FILES:
+            return
+        self.local_seen.add(rel_path)
+        abs_path = os.path.join(self.repo_root, *rel_path.split("/"))
+        try:
+            with open(abs_path, encoding="utf-8") as f:
+                content = f.read()
+        except (OSError, UnicodeDecodeError):
+            return  # the parser reports missing/unreadable files itself
+        log.debug("Walking local %s for includes", rel_path)
+        self._walk(content, self.main_path, self.ref, prefix="",
+                   allow_local=True, src=rel_path)
+
+    def _local(self, inc: dict, ctx_project: str, ctx_ref: str,
+               prefix: str) -> None:
+        if prefix:  # inside a fetched foreign repo — fetch from it
+            super()._local(inc, ctx_project, ctx_ref, prefix)
+            return
+        pattern = str(inc["local"]).lstrip("/")
+        if _WILDCARD_CHARS & set(pattern):
+            rx = _wildcard_regex(pattern)
+            matches = sorted(p for p in self._local_tree() if rx.match(p))
+        else:
+            norm = posixpath.normpath(pattern)
+            if norm.startswith(".."):
+                self._note("warning", f"Unsafe include path skipped: {pattern}")
+                return
+            matches = [norm]
+        for rel in matches:
+            self._read_and_walk(rel)
+
+    def _local_tree(self) -> list[str]:
+        if self._local_tree_cache is None:
+            out: list[str] = []
+            for dirpath, dirnames, filenames in os.walk(self.repo_root):
+                dirnames[:] = [d for d in dirnames if d != ".git"]
+                for fn in filenames:
+                    rel = os.path.relpath(
+                        os.path.join(dirpath, fn), self.repo_root)
+                    out.append(rel.replace(os.sep, "/"))
+            self._local_tree_cache = out
+        return self._local_tree_cache
+
+
+def fetch_local_externals(client, project: dict, ref: str, *,
+                          repo_root: str, root_file: str,
+                          bundled_templates: bool = True) -> FetchResult:
+    """Walk the local include tree rooted at `root_file`, fetching only
+    its non-local includes from GitLab. FetchResult.files holds nothing
+    local — materialize() writes only the `_external/` tree."""
+    fetcher = _LocalFilesFetcher(client, project, ref, [], repo_root,
+                                 bundled_templates=bundled_templates)
+    return fetcher.run_local(root_file)
+
+
+# ---------------------------------------------------------------------------
 # Materialization
 # ---------------------------------------------------------------------------
 

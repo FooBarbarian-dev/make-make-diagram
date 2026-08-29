@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -93,12 +94,63 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--upstream",
+        action="store_true",
+        help=(
+            "Resolve cross-repository includes of GitLab CI roots by "
+            "fetching them from the GitLab host the repository's own git "
+            "remote points at (the ONE way a plain `pipeview <path>` run "
+            "performs network access, and only with a token — see --token)"
+        ),
+    )
+    parser.add_argument(
+        "--upstream-remote",
+        metavar="NAME",
+        help=(
+            "Git remote to use with --upstream (default: the current "
+            "branch's tracking remote, else origin, else the sole remote)"
+        ),
+    )
+    parser.add_argument(
+        "--token",
+        help=(
+            "--upstream: API token (else $PIPEVIEW_GITLAB_TOKEN / "
+            "$GITLAB_TOKEN / $GITLAB_PRIVATE_TOKEN / the stored "
+            "`pipeview gitlab auth` config)"
+        ),
+    )
+    parser.add_argument(
+        "--ca-bundle",
+        help="--upstream: custom CA bundle for TLS verification",
+    )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="--upstream: disable TLS verification (NOT recommended)",
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=30.0,
+        help="--upstream: HTTP timeout in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help=(
+            "Log what is happening to stderr: -v shows fetch steps and "
+            "decisions, -vv also every HTTP request with timing"
+        ),
+    )
+    parser.add_argument(
+        "--log-file",
+        help="Also write a full debug-level log to this file",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"pipeview {pipeview.__version__}",
     )
 
     args = parser.parse_args(argv)
+    _setup_logging(args.verbose, args.log_file)
     formats = {f.strip() for f in args.format.split(",")}
     path = os.path.abspath(args.path)
     outdir = os.path.abspath(args.output)
@@ -131,8 +183,28 @@ def main(argv: list[str] | None = None) -> int:
     max_severity = None
 
     for root_path, root_kind in roots:
+        upstream = None
+        if args.upstream and root_kind == "gitlab_yaml":
+            from pipeview.gitlab.upstream import resolve_upstream_includes
+            upstream = resolve_upstream_includes(
+                root_path, outdir,
+                remote=args.upstream_remote,
+                token=args.token,
+                ca_bundle=args.ca_bundle,
+                insecure=args.insecure,
+                timeout=args.timeout,
+                bundled_templates=not args.no_bundled_templates,
+            )
         report = _parse_root(root_path, root_kind,
-                             bundled_templates=not args.no_bundled_templates)
+                             bundled_templates=not args.no_bundled_templates,
+                             upstream=upstream)
+        if upstream is not None:
+            # Counts alone hide the one actionable line ("no API token…") —
+            # print what --upstream itself has to say.
+            for d in upstream.diagnostics:
+                if d.severity in ("warning", "error"):
+                    print(f"  {root_path}: [{d.severity}] {d.message}",
+                          file=sys.stderr)
         report.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         report.tool_version = pipeview.__version__
 
@@ -238,16 +310,52 @@ def _classify_file(path: str) -> str | None:
     return None
 
 
-def _parse_root(path: str, kind: str, bundled_templates: bool = True) -> Report:
+def _parse_root(path: str, kind: str, bundled_templates: bool = True,
+                upstream=None) -> Report:
     if kind == "makefile":
         return parse_makefile(path)
     elif kind == "gitlab_yaml":
-        return parse_gitlab(path, bundled_templates=bundled_templates)
+        if upstream is None:
+            return parse_gitlab(path, bundled_templates=bundled_templates)
+        report = parse_gitlab(
+            path,
+            repo_root=upstream.repo_root,
+            external_resolver=upstream.resolver,
+            local_roots=upstream.local_roots,
+            bundled_templates=bundled_templates,
+        )
+        if upstream.annotation is not None:
+            report.annotations["gitlab_upstream"] = upstream.annotation
+        report.diagnostics.extend(upstream.diagnostics)
+        return report
     else:
         return Report(
             root=path,
             format=kind,
         )
+
+
+def _setup_logging(verbose: int, log_file: str | None) -> None:
+    """Same shape as the gitlab CLI's logging: -v/-vv to stderr,
+    --log-file always at debug level."""
+    logger = logging.getLogger("pipeview")
+    logger.handlers.clear()
+    if not verbose and not log_file:
+        return
+    logger.setLevel(logging.DEBUG)
+    fmt = logging.Formatter(
+        "%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%H:%M:%S")
+    if verbose:
+        handler = logging.StreamHandler(sys.stderr)
+        handler.setLevel(logging.INFO if verbose == 1 else logging.DEBUG)
+        handler.setFormatter(fmt)
+        logger.addHandler(handler)
+    if log_file:
+        os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
+        fh = logging.FileHandler(log_file, encoding="utf-8")
+        fh.setLevel(logging.DEBUG)
+        fh.setFormatter(fmt)
+        logger.addHandler(fh)
 
 
 def _output_basename(path: str, kind: str) -> str:
