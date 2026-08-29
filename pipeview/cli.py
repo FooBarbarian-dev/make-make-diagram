@@ -41,8 +41,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="pipeview",
         description=(
-            "Generate offline interactive HTML reports "
-            "for GNU Make and GitLab CI pipelines."
+            "Generate offline interactive HTML reports for GNU Make, "
+            "GitLab CI, and GitHub Actions pipelines."
         ),
         epilog=(
             "examples:\n"
@@ -53,6 +53,8 @@ def main(argv: list[str] | None = None) -> int:
             "  pipeview Makefile --format html,svg Export as HTML and SVG\n"
             "  pipeview gitlab                    Browse a GitLab instance (see\n"
             "                                     pipeview gitlab --help)\n"
+            "  pipeview github                    Browse GitHub repositories (see\n"
+            "                                     pipeview github --help)\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -92,7 +94,8 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help=(
             "Scenarios file (start one with `pipeview scenarios init`): also "
-            "write per-trigger markdown docs for each GitLab CI root, to "
+            "write per-trigger markdown docs for each GitLab CI or GitHub "
+            "Actions root, to "
             "<outdir>/<name>.trigger-docs/"
         ),
     )

@@ -24,8 +24,11 @@ INIT_TEMPLATE = """\
 #
 # Each scenario is a named What-If configuration — the same knobs the HTML
 # report's What-If tab exposes. `pipeview <path> --trigger-docs THIS-FILE`
-# (or `pipeview gitlab sync --trigger-docs THIS-FILE`) renders one markdown
-# doc per scenario, for every project in the run.
+# (or `pipeview gitlab sync` / `pipeview github sync` with
+# `--trigger-docs THIS-FILE`) renders one markdown doc per scenario, for
+# every project in the run — GitLab CI and GitHub Actions alike; a
+# scenario whose event belongs to the other provider is skipped with a
+# note in that project's index.
 #
 # Validate with:  pipeview scenarios check THIS-FILE
 # Iterate with:   pipeview scenarios preview THIS-FILE path/to/checkout
@@ -42,8 +45,18 @@ INIT_TEMPLATE = """\
 #                                                   draft, mr_flavor, mr_labels)
 #               schedule | web | api | trigger     (knobs: ref_kind, branch,
 #                                                   tag, open_mr)
+#             GitHub Actions events (skipped for GitLab projects):
+#               pr           pull request          (knobs: branch, target,
+#                                                   draft, pr_action)
+#               workflow_dispatch  manual dispatch (knobs: workflow, inputs,
+#                                                   ref_kind, branch, tag)
+#               release      release published     (knobs: tag,
+#                                                   release_action)
+#             push_branch / push_tag / schedule apply to BOTH providers.
 #             open_mr means "this branch has an open MR" and takes
-#             { target, draft, mr_flavor, mr_labels }
+#             { target, draft, mr_flavor, mr_labels }; for GitHub projects
+#             it doubles as "an open PR" (or use open_pr:
+#             { target, draft, action })
 #   variables:     optional — simulated project-level variables {NAME: value}
 #   changed_files: optional — list of changed paths, or the literal `all`
 #                  (assume every changes: pattern matches); omit it to leave

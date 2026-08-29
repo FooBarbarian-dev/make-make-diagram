@@ -1,0 +1,29 @@
+# A reusable workflow (workflow_call-only): it never runs on its own —
+# callers pass an environment name and inherit secrets. In the Graph
+# view it stays folded behind its caller's ▶ edge; in the What-If tab
+# its jobs appear as a called run nested under the caller.
+
+name: Deploy
+on:
+  workflow_call:
+    inputs:
+      environment:
+        type: string
+        required: true
+        description: Target environment name
+
+jobs:
+  ## Push the build to the requested environment
+  push_release:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./deploy.sh ${{ inputs.environment }}
+
+  ## Smoke-check the deployment
+  verify:
+    runs-on: ubuntu-latest
+    needs: push_release
+    steps:
+      - run: ./smoke.sh ${{ inputs.environment }}

@@ -1,16 +1,17 @@
 # pipeview
 
-Offline interactive HTML reports for GNU Make and GitLab CI pipelines.
+Offline interactive HTML reports for GNU Make, GitLab CI, and GitHub
+Actions pipelines.
 
 `pipeview` reads build-pipeline definition files and produces self-contained,
 fully offline, interactive HTML reports that help people understand how the
 pipeline works: what builds what, what tasks can be run, where variables come
 from, and how files include each other.
 
-It can also connect to a GitLab instance (`pipeview gitlab`), browse the
-projects you can access from a terminal UI, and generate the same reports
-straight from what GitLab serves — cross-repository `include:`s resolved
-and all.
+It can also connect to a GitLab instance (`pipeview gitlab`) or to GitHub
+(`pipeview github`), browse the projects you can access from a terminal
+UI, and generate the same reports straight from what the server serves —
+cross-repository `include:`s and reusable workflows resolved and all.
 
 ![Graph view of a GitLab CI report](docs/screenshots/graph-gitlab.png)
 *The Graph view of a GitLab CI report: the `needs:` DAG, `extends:` template
@@ -43,6 +44,18 @@ open examples/out/gitlab-ci.report.html
 This report shows a `needs:` DAG that differs from stage order, an `extends:`
 chain through templates, resolved includes plus a *ghost* one (a reference
 that can't be resolved offline, drawn dashed), and a manual production gate.
+
+For the GitHub Actions example:
+
+```bash
+pipeview examples/github-project -o examples/out
+open examples/out/github-actions.report.html
+```
+
+One report covers the repository's whole `.github/workflows/` tree: each
+workflow is a collapsible cluster, `needs:` edges form the DAG, a local
+reusable workflow folds behind its caller's ▶ edge, and a
+cross-repository `uses:` becomes a ghost with a diagnostic.
 
 ## Installation
 
@@ -95,24 +108,25 @@ pip install --no-index --find-links dist/ pipeview
 ```
 
 After install, report generation performs zero network access, ever — only
-the explicit `pipeview gitlab` subcommand talks to a network, and only to
-the GitLab host you name. Generated reports are self-contained HTML files
+the explicit `pipeview gitlab` and `pipeview github` subcommands talk to a
+network, and only to the host you name. Generated reports are self-contained HTML files
 that work from `file://` — no CDN, no remote fonts, no fetches of any kind.
 
 ## HTML report views
 
 The generated report is a single self-contained HTML file with four views
-(five for GitLab CI). The [user guide](docs/user-guide.md) walks through each
-one with screenshots.
+(five for GitLab CI and GitHub Actions). The
+[user guide](docs/user-guide.md) walks through each one with screenshots.
 
 1. **Graph** — Interactive dependency DAG with pan/zoom, click-to-inspect,
    focus mode (highlights the reachable subgraph, with direction —
    dependencies / dependents / both — and hop-depth controls), and a legend
    that doubles as the view options: edge-kind filters, node-kind toggles
    (stage lanes, templates, pattern rules, unresolved references), and
-   collapsible groups — GitLab child pipelines and recursive sub-makes fold
-   into one expandable node each, with their trigger/recursion edge attached.
-   Ghost nodes (unresolved references) appear dashed.
+   collapsible groups — GitLab child pipelines, GitHub workflows (reusable
+   ones stay folded behind their caller's edge), and recursive sub-makes
+   fold into one expandable node each, with their trigger/recursion edge
+   attached. Ghost nodes (unresolved references) appear dashed.
 
 2. **Tasks** — Runnable targets/jobs listed with name, description,
    invocation command, and flags. The "what can I run?" page.
@@ -123,15 +137,19 @@ one with screenshots.
    links. For GitLab CI, predefined `CI_*`/`GITLAB_*` variables carry curated
    docs — what each is, an example value, and when GitLab sets it — and a
    collapsible reference below the table documents the whole catalog, with
-   the names this configuration references sorted first.
+   the names this configuration references sorted first. GitHub Actions
+   reports get the same treatment for `GITHUB_*`/`RUNNER_*` variables and
+   the `github.*` expression-context fields.
 
 4. **Files** — Tree of source files with include/recursion structure,
    per-file status, and all diagnostics.
 
-5. **What-If** *(GitLab CI reports only)* — A pipeline simulator. Pick an
-   event (push, push with an open MR, tag, MR update, schedule, manual,
-   API/trigger), set the starting state (branch, MR target/draft, changed
-   files, project-level variables), and see every candidate pipeline GitLab
+5. **What-If** *(GitLab CI and GitHub Actions reports)* — A pipeline
+   simulator. Pick an event (push, push with an open MR/PR, tag, MR/PR
+   update, schedule, manual, API/trigger — or, for GitHub, pull request,
+   manual dispatch with typed inputs, release), set the starting state
+   (branch, MR/PR target/draft, changed files, project-level variables),
+   and see every candidate pipeline GitLab
    would spawn — side by side, one graph per pipeline, with per-job
    verdicts (runs / manual / delayed / not added / depends) and a
    rule-by-rule trace for each. Duplicate jobs that would run in more than
@@ -196,6 +214,12 @@ pipeview scenarios verify pipeview-scenarios.yaml . docs/ci   # drift check (rea
                                                               #   for a scheduled CI job)
 ```
 
+Scenarios work for GitLab CI and GitHub Actions configurations alike:
+shared events (`push_branch`, `push_tag`, `schedule`) apply to both, and
+a scenario whose event belongs to the other provider is skipped with a
+note in the generated index — one scenarios file can serve a mixed fleet
+(`open_mr` on a push even doubles as `open_pr` for GitHub repos).
+
 You don't have to hand-write the YAML: the What-If tab's **Export
 scenario** button copies the knobs you configured interactively as a
 ready-to-paste stanza.
@@ -208,7 +232,9 @@ version: 1
 scenarios:
   - id: push-main            # → push-main.md
     title: Push to main
-    event: push_branch       # push_branch | push_tag | mr | schedule | web | api | trigger
+    event: push_branch       # push_branch | push_tag | schedule (both CI systems)
+                             # mr | web | api | trigger (GitLab)
+                             # pr | workflow_dispatch | release (GitHub)
     branch: main
   - id: release-tag
     event: push_tag
@@ -384,6 +410,50 @@ same log to `<outdir>/pipeview-gitlab.log` instead of the screen — curses
 owns the terminal — and the status bar points there. `--log-file` always
 captures debug-level detail regardless of `-v`.
 
+## Fetching from GitHub (`pipeview github`)
+
+The GitHub twin of `pipeview gitlab` — the same commands against
+github.com or a GitHub Enterprise Server host:
+
+```bash
+# One-time: create + store a token (opens GitHub's prefilled form,
+# you paste the token back; stored 0600 in ~/.config/pipeview/github.json)
+pipeview github auth
+
+# Interactive repository browser (the same curses TUI)
+pipeview github
+
+# Headless equivalents
+pipeview github repos --search api            # list what the token can see
+pipeview github report octo-org/app --ref main
+pipeview github track octo-org/app            # remember a repo (default branch)
+pipeview github track octo-org/app@release/2  # …or pin any branch/tag
+pipeview github sync -o reports/              # report on every tracked entry
+```
+
+Tokens are looked up in order: `--token`, `$PIPEVIEW_GITHUB_TOKEN`,
+`$GITHUB_TOKEN`, `$GH_TOKEN`, then the stored config. The host defaults
+to `https://github.com`; point `--host` (or `$GITHUB_SERVER_URL`) at a
+GitHub Enterprise Server and the client uses its `/api/v3` root
+automatically.
+
+Fetching has one strategy — GitHub has no server-side merged-config API —
+the client lists `.github/workflows/` via the contents API, fetches every
+workflow, and follows cross-repository reusable-workflow calls
+(`jobs.<id>.uses: owner/repo/path@ref`) into
+`<outdir>/fetched/<owner-repo>@<ref>/_external/`, nested calls included
+(a `./` call inside another repository's workflow resolves in *that*
+repository), up to GitHub's own limits of 4 nesting levels and 20
+reusable workflows per run. The materialized tree then runs through the
+ordinary offline pipeline, so a called workflow's jobs land in the report
+as real nodes linked from their caller instead of ghosts.
+
+`sync` with two or more tracked entries writes the same cross-repository
+rollup GitLab syncs get (`rollup.report.html` + `rollup.json`, skip with
+`--no-rollup`): reusable-workflow calls between tracked repositories
+resolve into real links — ref mismatches ("targets `v2`, tracked at
+`main`") are flagged, never guessed.
+
 ## The `##` docstring convention
 
 Add a `##` comment above (or on the same line as) a target or job to document
@@ -424,10 +494,11 @@ that resolves without a network: GitLab's built-in templates are bundled
 with pipeview (see above), read from disk, and clearly labeled
 `[template]` in the report — disable with `--no-bundled-templates`.
 
-The one deliberate exception is the explicit `pipeview gitlab` subcommand,
-which talks to exactly the GitLab host you point it at, materializes what it
-fetched to disk, and then runs the same offline pipeline — the reports it
-produces are as offline as everything else.
+The one deliberate exception is the explicit `pipeview gitlab` /
+`pipeview github` subcommands, which talk to exactly the host you point
+them at, materialize what they fetched to disk, and then run the same
+offline pipeline — the reports they produce are as offline as everything
+else.
 
 ## Make enrichment caveat
 
@@ -447,11 +518,12 @@ silently skipped with an info diagnostic.
 pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--trigger-docs FILE] [--version]
 pipeview scenarios [init|check|preview|verify] …
 pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
+pipeview github [browse|auth|repos|report|track|untrack|tracked|sync] …
 ```
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `<path>` | *(required)* | File or directory to analyze |
+| `<path>` | *(required)* | File or directory to analyze (finds `Makefile`, `.gitlab-ci.yml`, and `.github/workflows/` in a directory) |
 | `-o OUTDIR` | `./pipeview-out` | Output directory |
 | `--format` | `html,json` | Comma-separated: `html`, `json`, `svg`, `dot`, `mmd` |
 | `--no-enrich` | off | Skip the Make enrichment pass |
@@ -490,15 +562,27 @@ pipeview/
     gitlab_predefined.py  # curated docs for predefined CI_*/GITLAB_* variables
     gitlab_whatif.py # compiles rules/only/except into an evaluatable program
     gitlab_whatif_eval.py # Python twin of the report's What-If evaluator
+    github_parser.py # GitHub Actions workflow parser
+    github_predefined.py  # curated docs for GITHUB_*/RUNNER_* + github.* fields
+    github_whatif.py # compiles on:/if: into an evaluatable program
+    github_whatif_eval.py # Python twin of the GitHub What-If evaluator
     enrich.py        # optional make -pqn enrichment pass
-  gitlab/            # `pipeview gitlab` — the only networked code
+  gitlab/            # `pipeview gitlab` — networked
     api.py           # stdlib GitLab REST client
     auth.py          # token resolution + prefilled-URL creation flow
     config.py        # ~/.config/pipeview/gitlab.json (hosts, tracked lists)
     fetch.py         # lint & files fetch strategies
     report.py        # fetched config -> the ordinary offline pipeline
-    rollup.py        # cross-project link resolution for `sync`
-    tui.py           # curses project browser
+    rollup.py        # cross-project link resolution for `sync` (shared
+                     # by both providers)
+    tui.py           # curses project browser (shared by both providers)
+    cli.py           # subcommand parsing
+  github/            # `pipeview github` — networked, mirrors gitlab/
+    api.py           # stdlib GitHub REST client (github.com + GHES)
+    auth.py          # token resolution + prefilled-URL creation flow
+    config.py        # ~/.config/pipeview/github.json (hosts, tracked lists)
+    fetch.py         # workflows + cross-repo reusable-workflow fetching
+    report.py        # fetched workflows -> the ordinary offline pipeline
     cli.py           # subcommand parsing
   render/
     html.py          # single-file HTML report generator
@@ -506,15 +590,17 @@ pipeview/
     exports.py       # model.json, graph.dot, graph.mmd, graph.svg
     trigger_docs.py  # per-scenario markdown docs (--trigger-docs)
     mmd.py           # mermaid escaping helpers (exports + trigger docs)
-    templates/       # report.html, rollup.html, whatif.js (inlined at
-                     # generation time)
+    templates/       # report.html, rollup.html, whatif.js,
+                     # whatif_github.js (inlined at generation time)
   vendor/
     dagre.min.js     # pinned dagre 0.8.5 for graph layout
 ```
 
 Parsers emit the normalized model. The renderer consumes only the model. The
-renderer never asks "is this Make or GitLab?" — if it needed to, the model
-schema would be wrong.
+renderer never asks "is this Make, GitLab, or GitHub?" — if it needed to,
+the model schema would be wrong. (The What-If tab selects its evaluator
+from the compiled program's provider tag — still data, not format
+branching.)
 
 ## Development
 

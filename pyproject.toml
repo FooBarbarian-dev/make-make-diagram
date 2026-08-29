@@ -5,11 +5,11 @@ build-backend = "hatchling.build"
 [project]
 name = "pipeview"
 dynamic = ["version"]
-description = "Offline interactive HTML reports for GNU Make and GitLab CI pipelines"
+description = "Offline interactive HTML reports for GNU Make, GitLab CI, and GitHub Actions pipelines"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
-keywords = ["make", "makefile", "gitlab", "ci", "pipeline", "visualization", "offline"]
+keywords = ["make", "makefile", "gitlab", "github", "actions", "ci", "pipeline", "visualization", "offline"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Environment :: Console",
