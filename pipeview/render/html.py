@@ -26,8 +26,15 @@ def render_html(report: Report, output_path: str) -> None:
         with open(whatif_path, "r", encoding="utf-8") as f:
             whatif_js = f.read()
 
+    whatif_gh_path = _TEMPLATE_DIR / "whatif_github.js"
+    whatif_gh_js = ""
+    if whatif_gh_path.is_file():
+        with open(whatif_gh_path, "r", encoding="utf-8") as f:
+            whatif_gh_js = f.read()
+
     html = template.replace("/*DAGRE_PLACEHOLDER*/", dagre_js)
     html = html.replace("/*WHATIF_PLACEHOLDER*/", whatif_js)
+    html = html.replace("/*WHATIF_GH_PLACEHOLDER*/", whatif_gh_js)
     html = html.replace("{{ROOT}}", _escape_html(report.root))
     html = html.replace("{{GENERATED_AT}}", _escape_html(report.generated_at))
     # Model JSON is spliced last so payload text can never collide with a

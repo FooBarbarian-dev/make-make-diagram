@@ -13,6 +13,7 @@ from pipeview.render.html import render_html
 
 MAKE_FIXTURES = Path(__file__).parent / "fixtures" / "make"
 GITLAB_FIXTURES = Path(__file__).parent / "fixtures" / "gitlab"
+GITHUB_FIXTURES = Path(__file__).parent / "fixtures" / "github"
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
 
@@ -24,6 +25,12 @@ def make_report():
 @pytest.fixture
 def gitlab_report():
     return parse_gitlab(str(GITLAB_FIXTURES / "minimal" / ".gitlab-ci.yml"))
+
+
+@pytest.fixture
+def github_report():
+    from pipeview.parsers.github_parser import parse_github
+    return parse_github(str(GITHUB_FIXTURES / "minimal"))
 
 
 @pytest.fixture
@@ -55,6 +62,24 @@ class TestHtmlGeneration:
         assert "PipeviewWhatIf" in content
         assert "/*WHATIF_PLACEHOLDER*/" not in content
         assert '"whatif"' in content   # gitlab reports carry the program
+
+    def test_github_whatif_engine_inlined(self, github_report, tmpdir):
+        path = os.path.join(tmpdir, "report.html")
+        render_html(github_report, path)
+        with open(path) as f:
+            content = f.read()
+        assert "PipeviewWhatIfGH" in content
+        assert "/*WHATIF_GH_PLACEHOLDER*/" not in content
+        assert '"provider": "github"' in content or \
+            '"provider":"github"' in content
+
+    def test_predefined_docs_in_github_html(self, github_report, tmpdir):
+        path = os.path.join(tmpdir, "report.html")
+        render_html(github_report, path)
+        with open(path) as f:
+            content = f.read()
+        assert "predefined_var_docs" in content
+        assert "GITHUB_REF" in content
 
     def test_whatif_text_listing_and_delta_controls(self, gitlab_report, tmpdir):
         path = os.path.join(tmpdir, "report.html")
@@ -209,6 +234,11 @@ class TestNoNetworkResources:
         report = parse_makefile(str(EXAMPLES / "torture-project" / "Makefile"))
         path = os.path.join(tmpdir, "report.html")
         render_html(report, path)
+        self._assert_no_network_refs(path)
+
+    def test_no_external_resources_github(self, github_report, tmpdir):
+        path = os.path.join(tmpdir, "report.html")
+        render_html(github_report, path)
         self._assert_no_network_refs(path)
 
     def _assert_no_network_refs(self, path: str) -> None:
