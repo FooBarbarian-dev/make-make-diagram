@@ -7,7 +7,7 @@ Verbatim snapshot of GitLab's built-in `include:template` files
 pipeview uses these as an offline fallback when resolving
 `include: template:` entries, because GitLab's REST template API cannot
 serve most of them (it only exposes the flattened "dropdown" keys — see
-`docs/superpowers/specs/2026-08-25-gitlab-template-fallback-design.md`).
+`docs/agents/specs/2026-08-25-gitlab-template-fallback-design.md`).
 
 The files are MIT-licensed (the gitlab repository's LICENSE covers
 everything outside `doc/`, `ee/` and `jh/`); the license text at this ref

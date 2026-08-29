@@ -1,5 +1,5 @@
 """Regression tests born from the parser conformance audit
-(docs/parser-audit.md). Each class pins a failure that existed before the
+(docs/agents/parser-audit.md). Each class pins a failure that existed before the
 audit-fix pass; the two `Reported*` classes reproduce the field reports that
 motivated the audit verbatim.
 """

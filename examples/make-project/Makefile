@@ -13,7 +13,7 @@ OBJS := $(SRCS:.c=.o)
 # Exported variables reach recipe environments (and sub-makes). The
 # directive composes with any assignment flavor — the report shows these
 # with an "exported" chip. (This is the construct from the field report
-# that motivated the parser audit; see docs/parser-audit.md.)
+# that motivated the parser audit; see docs/agents/parser-audit.md.)
 export BUILD_PROFILE ?= release
 export VERBOSE_LOGS = false
 
