@@ -2,9 +2,11 @@
 
 Editor-agnostic pipeview features for editors that speak LSP (the Zed
 extension is the first client): parser diagnostics published on
-open/save, hover docs for predefined GitLab CI variables, document
-links for include:local entries, and code actions that generate the
-pipeline report and open it in the default browser — the report is
+open/save — for Makefiles, GitLab CI trees, and GitHub Actions
+workflow directories alike — hover docs for predefined CI variables
+(the GitLab and GitHub catalogs), document links for include:local and
+local `uses:` references, and code actions that generate the pipeline
+report and open it in the default browser — the report is
 self-contained file:// HTML, so any browser is a full viewer.
 
 Stdlib-only JSON-RPC 2.0 with Content-Length framing. Protocol stdout
@@ -32,8 +34,14 @@ from pathlib import Path
 from urllib.parse import unquote, urlparse
 
 from pipeview.cli import main as _cli_main
+from pipeview.parsers.github_parser import parse_github
+from pipeview.parsers.github_predefined import (
+    PREDEFINED_VAR_DOCS as GITHUB_VAR_DOCS,
+)
 from pipeview.parsers.gitlab_parser import parse_gitlab
-from pipeview.parsers.gitlab_predefined import PREDEFINED_VAR_DOCS
+from pipeview.parsers.gitlab_predefined import (
+    PREDEFINED_VAR_DOCS as GITLAB_VAR_DOCS,
+)
 from pipeview.parsers.make_parser import parse_makefile
 
 log = logging.getLogger(__name__)
@@ -48,6 +56,11 @@ CMD_OPEN_REPORT_OFFLINE = "pipeview.openReportOffline"
 
 _LOCAL_INCLUDE_RE = re.compile(
     r"""(?:-\s*)?local:\s*(['"]?)(?P<path>[^'"#\s]+)\1"""
+)
+# GitHub local references: `uses: ./.github/workflows/x.yml` (reusable
+# workflow) or `uses: ./path/to/action` (local composite action).
+_USES_LOCAL_RE = re.compile(
+    r"""uses:\s*(['"]?)(?P<path>\./[^'"\s#@]+)\1"""
 )
 _WORD_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
@@ -127,9 +140,10 @@ def path_to_uri(path: str) -> str:
 def find_root(path: str) -> tuple[str, str] | None:
     """(root_path, kind) the buffer at `path` belongs to, or None.
 
-    Makefiles and .gitlab-ci.yml are roots themselves; *.mk and other
-    YAML files belong to the nearest ancestor directory holding one.
-    Unrelated YAML (no .gitlab-ci.yml above it) gets None — the server
+    Makefiles and .gitlab-ci.yml are roots themselves; a YAML file in
+    .github/workflows/ belongs to that directory (the GitHub Actions
+    root); *.mk and other YAML files belong to the nearest ancestor
+    directory holding a root. Unrelated YAML gets None — the server
     stays silent on it.
     """
     base = os.path.basename(path)
@@ -137,6 +151,11 @@ def find_root(path: str) -> tuple[str, str] | None:
         return path, "makefile"
     if base == ".gitlab-ci.yml":
         return path, "gitlab_yaml"
+    if base.endswith((".yml", ".yaml")):
+        d = os.path.dirname(os.path.abspath(path))
+        if (os.path.basename(d) == "workflows"
+                and os.path.basename(os.path.dirname(d)) == ".github"):
+            return d, "github_workflows"
     if base.endswith(".mk"):
         names, kind = _MAKE_NAMES, "makefile"
     elif base.endswith((".yml", ".yaml")):
@@ -289,15 +308,22 @@ class LspServer:
         try:
             if kind == "makefile":
                 report = parse_makefile(root_path)  # never enriched here
+            elif kind == "github_workflows":
+                report = parse_github(root_path)
             else:
                 report = parse_gitlab(root_path)
         except Exception:
             log.exception("analysis of %s failed", root_path)
             return
-        root_dir = os.path.dirname(root_path)
+        # Diagnostic source paths are relative to the root's directory —
+        # which is the root itself for the (directory) workflows root.
+        root_dir = root_path if os.path.isdir(root_path) \
+            else os.path.dirname(root_path)
+        # Sourceless diagnostics pin to a real file, never a directory.
+        pin = root_path if os.path.isfile(root_path) else uri_to_path(uri)
         per_file: dict[str, list[dict]] = {}
         for d in report.diagnostics:
-            fp, line = root_path, 0
+            fp, line = pin, 0
             if d.source and d.source.file:
                 candidate = d.source.file
                 if not os.path.isabs(candidate):
@@ -343,13 +369,17 @@ class LspServer:
             return None
         line = lines[pos["line"]]
         char = utf16_to_index(line, pos["character"])
+        root = find_root(uri_to_path(uri))
+        github = root is not None and root[1] == "github_workflows"
+        catalog = GITHUB_VAR_DOCS if github else GITLAB_VAR_DOCS
+        provider = "GitHub Actions" if github else "GitLab CI"
         for m in _WORD_RE.finditer(line):
             if m.start() <= char <= m.end():
-                doc = PREDEFINED_VAR_DOCS.get(m.group(0))
+                doc = catalog.get(m.group(0))
                 if doc is None:
                     return None
                 parts = [
-                    f"**{m.group(0)}** — predefined GitLab CI variable",
+                    f"**{m.group(0)}** — predefined {provider} variable",
                     doc["summary"],
                     f"- Example: `{doc['example']}`",
                     f"- Set: {doc['set_when']}",
@@ -379,17 +409,37 @@ class LspServer:
             return []
         path = uri_to_path(uri)
         root = find_root(path)
+        if root is not None and root[1] == "github_workflows":
+            # `uses: ./…` resolves against the repository root
+            repo_root = os.path.dirname(os.path.dirname(root[0]))
+            return self._scan_links(text, _USES_LOCAL_RE, repo_root,
+                                    action_dirs=True)
         root_dir = os.path.dirname(root[0] if root else path)
+        return self._scan_links(text, _LOCAL_INCLUDE_RE, root_dir)
+
+    def _scan_links(self, text: str, pattern: re.Pattern, base: str,
+                    action_dirs: bool = False) -> list[dict]:
         links = []
         for i, line in enumerate(text.split("\n")):
-            m = _LOCAL_INCLUDE_RE.search(line)
-            # a '#' before the match means the include is commented out
+            m = pattern.search(line)
+            # a '#' before the match means the reference is commented out
             if not m or "#" in line[: m.start()]:
                 continue
-            target = os.path.normpath(
-                os.path.join(root_dir, m.group("path").lstrip("/")))
+            rel = m.group("path")
+            if rel.startswith("./"):
+                rel = rel[2:]
+            target = os.path.normpath(os.path.join(base, rel.lstrip("/")))
             if not os.path.isfile(target):
-                continue
+                if not action_dirs or not os.path.isdir(target):
+                    continue
+                # a local composite action: the directory's action.yml
+                for name in ("action.yml", "action.yaml"):
+                    candidate = os.path.join(target, name)
+                    if os.path.isfile(candidate):
+                        target = candidate
+                        break
+                else:
+                    continue
             links.append({
                 "range": {
                     "start": {"line": i,
@@ -398,7 +448,7 @@ class LspServer:
                             "character": index_to_utf16(line, m.end("path"))},
                 },
                 "target": path_to_uri(target),
-                "tooltip": "Open included file",
+                "tooltip": "Open referenced file",
             })
         return links
 

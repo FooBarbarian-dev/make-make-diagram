@@ -31,14 +31,15 @@ features arrive through different organs:
 
 | Feature | CLI | VS Code | Zed |
 |---|---|---|---|
-| Repo report, upstream reference ON by default | `--upstream` (opt-in) | command → webview | code action → browser |
-| Report for one file | path argument | context menus | code action in that buffer |
+| Repo report (Make, GitLab CI, GitHub Actions roots discovered) | `pipeview <path>` | command → webview(s) | code action → browser |
+| Upstream reference ON by default (GitLab roots) | `--upstream` (opt-in) | on by default | on by default |
+| Report for one file / workflow | path argument | context menus | code action in that buffer |
 | Graph / Tasks / Variables / Files / What-If | HTML report | same HTML, webview | same HTML, browser |
-| Remote project report, sync + rollup | `pipeview gitlab` | input-box commands | terminal (`pipeview gitlab …`) |
-| GitLab token setup | `pipeview gitlab auth` | secret storage + terminal | terminal; same env/config chain |
+| Remote project report, sync + rollup | `pipeview gitlab` / `pipeview github` | input-box commands (both providers) | terminal (`pipeview gitlab/github …`) |
+| Token setup (GitLab & GitHub) | `… auth` subcommands | secret storage + terminal | terminal; same env/config chain |
 | Inline diagnostics on save | exit codes / stderr | output channel | LSP diagnostics |
-| Predefined `CI_*` variable docs | Variables tab | Variables tab | LSP hover |
-| `include:local` navigation | Files tab | Files tab | LSP document links |
+| Predefined variable docs (`CI_*` / `GITHUB_*`) | Variables tab | Variables tab | LSP hover, per-provider catalog |
+| `include:local` / local `uses:` navigation | Files tab | Files tab | LSP document links |
 
 The last three rows are `pipeview lsp` features that Zed gets first;
 pointing the VS Code extension at the same server is the designated

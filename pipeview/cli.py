@@ -321,6 +321,12 @@ def _discover_roots(path: str) -> list[tuple[str, str]]:
         if os.path.isdir(workflows_dir):
             roots.append((workflows_dir, "github_workflows"))
 
+        # Being handed .github/workflows itself also counts — editors
+        # (pipeview lsp) name the root that way.
+        norm = os.path.abspath(path).replace(os.sep, "/")
+        if norm.endswith("/.github/workflows"):
+            roots.append((path, "github_workflows"))
+
     return roots
 
 

@@ -161,6 +161,19 @@ class TestFindRoot:
         assert find_root(str(tmp_path / "mk" / "vars.mk")) == \
             (str(tmp_path / "Makefile"), "makefile")
 
+    def test_workflow_file_finds_workflows_dir(self, tmp_path):
+        write_tree(tmp_path, {".github/workflows/ci.yml": "on: push\n"})
+        assert find_root(str(tmp_path / ".github" / "workflows" / "ci.yml")) \
+            == (str(tmp_path / ".github" / "workflows"), "github_workflows")
+
+    def test_workflow_beats_gitlab_walk_up(self, tmp_path):
+        # A repo can carry both CI systems: workflow files belong to the
+        # GitHub root even when .gitlab-ci.yml exists above them.
+        write_tree(tmp_path, {".gitlab-ci.yml": "a:\n",
+                              ".github/workflows/ci.yml": "on: push\n"})
+        _, kind = find_root(str(tmp_path / ".github" / "workflows" / "ci.yml"))
+        assert kind == "github_workflows"
+
 
 # ---------------------------------------------------------------------------
 # Lifecycle + diagnostics
@@ -357,6 +370,107 @@ class TestCodeActions:
             "context": {"diagnostics": []},
         })
         assert [a["command"]["command"] for a in actions] == [CMD_OPEN_REPORT]
+
+
+# ---------------------------------------------------------------------------
+# GitHub Actions integration
+# ---------------------------------------------------------------------------
+
+WORKFLOW_OK = """\
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: [{run: make}]
+"""
+
+WORKFLOW_BAD_NEEDS = """\
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps: [{run: make}]
+  test:
+    needs: [ghost]
+    runs-on: ubuntu-latest
+    steps: [{run: make test}]
+"""
+
+
+class TestGitHubIntegration:
+    def test_diagnostics_land_on_workflow_file(self, tmp_path):
+        write_tree(tmp_path, {".github/workflows/ci.yml": WORKFLOW_BAD_NEEDS})
+        client = Client()
+        uri = client.open(tmp_path / ".github" / "workflows" / "ci.yml")
+        diags = client.diagnostics_for(uri)
+        assert diags and any("ghost" in d["message"] for d in diags)
+
+    def test_hover_uses_github_catalog(self, tmp_path):
+        write_tree(tmp_path, {".github/workflows/ci.yml":
+                              'on: push\n# echo "$GITHUB_REPOSITORY"\n'})
+        client = Client()
+        uri = client.open(tmp_path / ".github" / "workflows" / "ci.yml")
+        hover = client.request("textDocument/hover", {
+            "textDocument": {"uri": uri},
+            "position": {"line": 1, "character": 12},
+        })
+        assert "GITHUB_REPOSITORY" in hover["contents"]["value"]
+        assert "GitHub Actions" in hover["contents"]["value"]
+        # ...and the GitLab-only variable is unknown here
+        assert client.request("textDocument/hover", {
+            "textDocument": {"uri": uri},
+            "position": {"line": 0, "character": 1},
+        }) is None
+
+    def test_local_uses_become_links(self, tmp_path):
+        write_tree(tmp_path, {
+            ".github/workflows/ci.yml":
+                "on: push\njobs:\n  reuse:\n"
+                "    uses: ./.github/workflows/reuse.yml\n"
+                "  act:\n    steps:\n      - uses: ./tools/lint\n",
+            ".github/workflows/reuse.yml": "on: workflow_call\n",
+            "tools/lint/action.yml": "runs: {using: composite}\n",
+        })
+        client = Client()
+        uri = client.open(tmp_path / ".github" / "workflows" / "ci.yml")
+        links = client.request("textDocument/documentLink",
+                               {"textDocument": {"uri": uri}})
+        targets = sorted(link["target"] for link in links)
+        assert len(targets) == 2
+        assert targets[0].endswith("reuse.yml")
+        assert targets[1].endswith("tools/lint/action.yml")
+
+    def test_code_action_single_no_upstream_variant(self, tmp_path):
+        write_tree(tmp_path, {".github/workflows/ci.yml": WORKFLOW_OK})
+        client = Client()
+        uri = client.open(tmp_path / ".github" / "workflows" / "ci.yml")
+        actions = client.request("textDocument/codeAction", {
+            "textDocument": {"uri": uri},
+            "range": {"start": {"line": 0, "character": 0},
+                      "end": {"line": 0, "character": 0}},
+            "context": {"diagnostics": []},
+        })
+        assert [a["command"]["command"] for a in actions] == [CMD_OPEN_REPORT]
+
+    def test_report_generated_and_opened(self, tmp_path, monkeypatch):
+        write_tree(tmp_path, {".github/workflows/ci.yml": WORKFLOW_OK})
+        opened = []
+        monkeypatch.setattr(lsp_mod.webbrowser, "open",
+                            lambda url: opened.append(url))
+        outdir = str(tmp_path / "out")
+        client = Client({"outputDir": outdir})
+        uri = client.open(tmp_path / ".github" / "workflows" / "ci.yml")
+        client.request("workspace/executeCommand", {
+            "command": CMD_OPEN_REPORT, "arguments": [uri]})
+        html = os.path.join(outdir, "github-actions.report.html")
+        assert os.path.isfile(html)
+        assert opened == [path_to_uri(html)]
+        # a github root never fetches, whatever the upstream setting says
+        server = client.server
+        argv = server.report_argv(
+            str(tmp_path / ".github" / "workflows"), "github_workflows",
+            upstream=True)
+        assert "--upstream" not in argv
 
 
 # ---------------------------------------------------------------------------

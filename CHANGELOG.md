@@ -7,6 +7,18 @@ here and enriched by hand where a feature deserves the narrative.
 
 ## Unreleased
 
+**GitHub Actions in the editor integrations.** The GitHub Actions
+support that landed on `main` flows through both editors: repo reports
+include the `.github/workflows/` root (a workflows directory is now
+itself a valid `pipeview <path>` target), `pipeview lsp` treats workflow
+files as first-class — inline diagnostics across the workflows
+directory, hover docs from the `GITHUB_*`/`RUNNER_*` catalog, clickable
+local `uses:` references (reusable workflows and composite actions),
+and the report code action — and the VS Code extension gains the GitHub
+counterparts of its GitLab commands (remote report, sync, terminal
+auth, token in secret storage as `PIPEVIEW_GITHUB_TOKEN`). The
+`editors/README.md` feature matrix now spans both providers.
+
 **Release automation for the editor extensions.** The VS Code and Zed
 extensions become their own release-please components: commits touching
 `editors/vscode/` or `editors/zed/` route to per-extension release PRs,

@@ -185,3 +185,15 @@ server's own environment.
 - VS Code consuming `pipeview lsp` (designated follow-up).
 - Zed slash commands / context servers.
 - Watch-mode report regeneration.
+
+## As-built notes
+
+- Landed as designed, with one addition after `main` gained GitHub
+  Actions support mid-branch: `pipeview lsp` also treats
+  `.github/workflows/` as a first-class root (diagnostics across the
+  directory, hover from the GitHub predefined-variable catalog, local
+  `uses:` document links, report code action), and `_discover_roots`
+  accepts the workflows directory itself as a target so the LSP can
+  name it. The editors feature matrix now spans both providers.
+- The `--upstream` code action variants remain GitLab-only by
+  construction (`report_argv` gates on the root kind).
