@@ -714,7 +714,15 @@ class _LocalFilesFetcher(_FilesFetcher):
         )
 
     def _read_and_walk(self, rel_path: str) -> None:
-        if rel_path in self.local_seen or len(self.local_seen) >= MAX_FILES:
+        if rel_path in self.local_seen:
+            return
+        if len(self.local_seen) >= MAX_FILES:
+            if not self.truncated:
+                self.truncated = True
+                self._note("warning", (
+                    f"Stopped walking local includes after {MAX_FILES} "
+                    "files (GitLab's own include ceiling) — the include "
+                    "tree may be incomplete"))
             return
         self.local_seen.add(rel_path)
         abs_path = os.path.join(self.repo_root, *rel_path.split("/"))

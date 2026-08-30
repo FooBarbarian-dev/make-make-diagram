@@ -12,7 +12,6 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 import sys
 import traceback
@@ -20,6 +19,7 @@ import traceback
 from pipeview.gitlab import auth as auth_mod
 from pipeview.gitlab.api import GitLabClient, GitLabError
 from pipeview.gitlab.config import GitLabConfig
+from pipeview.logs import configure
 
 _HOST_ENV_VARS = ("PIPEVIEW_GITLAB_HOST", "GITLAB_HOST", "CI_SERVER_URL")
 
@@ -82,33 +82,16 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _setup_logging(args, command: str) -> str | None:
-    """Configure the pipeview logger tree per -v/--log-file. Returns the
-    effective log-file path (browse defaults to one — curses owns the
-    terminal, so stderr logging would corrupt the screen)."""
+    """Configure the pipeview logger tree per -v/--log-file (shared with
+    the main CLI via pipeview.logs). Returns the effective log-file path
+    (browse defaults to one — curses owns the terminal, so stderr
+    logging would corrupt the screen)."""
     log_file = args.log_file
     if command == "browse" and args.verbose and not log_file:
         log_file = os.path.join(args.output, "pipeview-gitlab.log")
-
-    logger = logging.getLogger("pipeview")
-    logger.handlers.clear()
+    configure(args.verbose, log_file, stderr=command != "browse")
     if not args.verbose and not log_file:
         return None
-    logger.setLevel(logging.DEBUG)
-    fmt = logging.Formatter(
-        "%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%H:%M:%S")
-
-    if args.verbose and command != "browse":
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setLevel(logging.INFO if args.verbose == 1 else logging.DEBUG)
-        handler.setFormatter(fmt)
-        logger.addHandler(handler)
-
-    if log_file:
-        os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(logging.DEBUG)   # a file can afford full detail
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
     return log_file
 
 

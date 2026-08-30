@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import argparse
-import logging
 import os
 import sys
 from datetime import datetime, timezone
@@ -157,7 +156,8 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     args = parser.parse_args(argv)
-    _setup_logging(args.verbose, args.log_file)
+    from pipeview.logs import configure as _configure_logging
+    _configure_logging(args.verbose, args.log_file)
     formats = {f.strip() for f in args.format.split(",")}
     path = os.path.abspath(args.path)
     outdir = os.path.abspath(args.output)
@@ -342,27 +342,6 @@ def _parse_root(path: str, kind: str, bundled_templates: bool = True,
         )
 
 
-def _setup_logging(verbose: int, log_file: str | None) -> None:
-    """Same shape as the gitlab CLI's logging: -v/-vv to stderr,
-    --log-file always at debug level."""
-    logger = logging.getLogger("pipeview")
-    logger.handlers.clear()
-    if not verbose and not log_file:
-        return
-    logger.setLevel(logging.DEBUG)
-    fmt = logging.Formatter(
-        "%(asctime)s %(levelname)-7s %(name)s: %(message)s", "%H:%M:%S")
-    if verbose:
-        handler = logging.StreamHandler(sys.stderr)
-        handler.setLevel(logging.INFO if verbose == 1 else logging.DEBUG)
-        handler.setFormatter(fmt)
-        logger.addHandler(handler)
-    if log_file:
-        os.makedirs(os.path.dirname(os.path.abspath(log_file)), exist_ok=True)
-        fh = logging.FileHandler(log_file, encoding="utf-8")
-        fh.setLevel(logging.DEBUG)
-        fh.setFormatter(fmt)
-        logger.addHandler(fh)
 
 
 def _output_basename(path: str, kind: str) -> str:

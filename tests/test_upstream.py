@@ -168,6 +168,25 @@ class TestDetectUpstream:
         with pytest.raises(UpstreamError, match="cannot infer"):
             detect_upstream(str(repo))
 
+    def test_credentials_stripped_from_url(self, repo):
+        # Token-in-URL remotes are common in CI checkouts; Upstream.url
+        # ends up in shareable report artifacts and must never carry them.
+        _git(repo, "remote", "add", "origin",
+             "https://oauth2:glpat-sekret@gitlab.example.com/group/app.git")
+        up = detect_upstream(str(repo))
+        assert "sekret" not in up.url
+        assert up.url == "https://gitlab.example.com/group/app.git"
+        assert up.project_path == "group/app"
+
+    def test_credentials_stripped_from_error(self, repo):
+        # Unparseable (single path segment), credentials embedded: the
+        # error message becomes a report diagnostic — no token in it.
+        _git(repo, "remote", "add", "origin",
+             "https://user:glpat-sekret@gitlab.example.com/app")
+        with pytest.raises(UpstreamError, match="cannot infer") as exc:
+            detect_upstream(str(repo))
+        assert "sekret" not in str(exc.value)
+
 
 # ---------------------------------------------------------------------------
 # Local-seed fetch: local truth, remote externals

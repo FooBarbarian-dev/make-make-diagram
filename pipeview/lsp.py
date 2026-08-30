@@ -79,7 +79,11 @@ def read_message(stream) -> dict | None:
     try:
         return json.loads(body.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError):
-        return None
+        # The frame was consumed whole, so the stream is still in sync —
+        # skip the unparseable body rather than treating it as EOF (only
+        # framing damage, where our position is unknown, ends the loop).
+        log.warning("skipping unparseable message body (%d bytes)", length)
+        return {}
 
 
 def write_message(stream, message: dict) -> None:
@@ -92,6 +96,21 @@ def write_message(stream, message: dict) -> None:
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
+
+def utf16_to_index(line: str, col: int) -> int:
+    """Python string index for a UTF-16 code-unit column (LSP positions
+    default to UTF-16, and this server never negotiates otherwise)."""
+    units = 0
+    for i, ch in enumerate(line):
+        if units >= col:
+            return i
+        units += 2 if ord(ch) > 0xFFFF else 1
+    return len(line)
+
+
+def index_to_utf16(line: str, index: int) -> int:
+    return sum(2 if ord(ch) > 0xFFFF else 1 for ch in line[:index])
+
 
 def uri_to_path(uri: str) -> str:
     parsed = urlparse(uri)
@@ -161,6 +180,7 @@ class LspServer:
         # analysis root -> uris we last published diagnostics for, so a
         # re-analysis clears its own stale uris and nobody else's
         self._published: dict[str, set[str]] = {}
+        self._shutdown_received = False
         self.exited = False
         self.exit_code = 0
 
@@ -192,7 +212,7 @@ class LspServer:
         return {
             "initialize": self._initialize,
             "initialized": lambda p: None,
-            "shutdown": lambda p: None,
+            "shutdown": self._shutdown,
             "exit": self._exit,
             "$/cancelRequest": lambda p: None,
             "textDocument/didOpen": self._did_open,
@@ -227,8 +247,14 @@ class LspServer:
                            "version": pipeview.__version__},
         }
 
+    def _shutdown(self, params: dict):
+        self._shutdown_received = True
+        return None
+
     def _exit(self, params: dict):
         self.exited = True
+        # The spec: exit without a prior shutdown request is an error exit.
+        self.exit_code = 0 if self._shutdown_received else 1
         return None
 
     # -- document sync ------------------------------------------------------
@@ -316,8 +342,9 @@ class LspServer:
         if pos["line"] >= len(lines):
             return None
         line = lines[pos["line"]]
+        char = utf16_to_index(line, pos["character"])
         for m in _WORD_RE.finditer(line):
-            if m.start() <= pos["character"] <= m.end():
+            if m.start() <= char <= m.end():
                 doc = PREDEFINED_VAR_DOCS.get(m.group(0))
                 if doc is None:
                     return None
@@ -335,8 +362,10 @@ class LspServer:
                     "contents": {"kind": "markdown",
                                  "value": "\n\n".join(parts)},
                     "range": {
-                        "start": {"line": pos["line"], "character": m.start()},
-                        "end": {"line": pos["line"], "character": m.end()},
+                        "start": {"line": pos["line"],
+                                  "character": index_to_utf16(line, m.start())},
+                        "end": {"line": pos["line"],
+                                "character": index_to_utf16(line, m.end())},
                     },
                 }
         return None
@@ -354,7 +383,8 @@ class LspServer:
         links = []
         for i, line in enumerate(text.split("\n")):
             m = _LOCAL_INCLUDE_RE.search(line)
-            if not m:
+            # a '#' before the match means the include is commented out
+            if not m or "#" in line[: m.start()]:
                 continue
             target = os.path.normpath(
                 os.path.join(root_dir, m.group("path").lstrip("/")))
@@ -362,8 +392,10 @@ class LspServer:
                 continue
             links.append({
                 "range": {
-                    "start": {"line": i, "character": m.start("path")},
-                    "end": {"line": i, "character": m.end("path")},
+                    "start": {"line": i,
+                              "character": index_to_utf16(line, m.start("path"))},
+                    "end": {"line": i,
+                            "character": index_to_utf16(line, m.end("path"))},
                 },
                 "target": path_to_uri(target),
                 "tooltip": "Open included file",
@@ -406,13 +438,19 @@ class LspServer:
         buf = io.StringIO()
         # cli.main prints to stdout — the LSP channel. Capture it.
         with contextlib.redirect_stdout(buf):
-            code = _cli_main(argv)
+            try:
+                code = _cli_main(argv)
+            except SystemExit as e:
+                # argparse rejects an argv it can't parse (e.g. an
+                # outputDir starting with '-') via SystemExit, which must
+                # not take the server down with it.
+                code = e.code if isinstance(e.code, int) else 2
         from pipeview.cli import _output_basename
         outdir = argv[argv.index("-o") + 1]
         html = os.path.join(outdir,
                             f"{_output_basename(root_path, kind)}.report.html")
         if os.path.isfile(html):
-            webbrowser.open(path_to_uri(html))
+            _open_in_browser(path_to_uri(html))
             if code == 0:
                 self._show_message(3, f"pipeview: report opened ({html})")
             else:
@@ -446,6 +484,25 @@ class LspServer:
             "method": "window/showMessage",
             "params": {"type": type_, "message": message},
         })
+
+
+def _open_in_browser(url: str) -> None:
+    """webbrowser's children inherit fd 1 — the LSP protocol channel —
+    and browsers print to it ("Opening in existing browser session.").
+    Point fd 1 at devnull around the launch so their chatter cannot
+    corrupt the framing; redirect_stdout alone only covers Python-level
+    writes, not the file descriptor."""
+    saved = os.dup(1)
+    try:
+        devnull = os.open(os.devnull, os.O_WRONLY)
+        try:
+            os.dup2(devnull, 1)
+        finally:
+            os.close(devnull)
+        webbrowser.open(url)
+    finally:
+        os.dup2(saved, 1)
+        os.close(saved)
 
 
 def _action(title: str, command: str, uri: str) -> dict:

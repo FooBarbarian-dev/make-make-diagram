@@ -41,7 +41,7 @@ class Upstream:
     host: str           # API base URL, e.g. https://gitlab.example.com
     project_path: str   # group/sub/app
     remote_name: str    # git remote the URL came from
-    url: str            # the remote URL as configured
+    url: str            # the remote URL, userinfo/credentials stripped
     toplevel: str       # absolute path of the repository root
     branch: str         # current branch name, or "HEAD" when detached
 
@@ -63,6 +63,18 @@ class UpstreamResolution:
 
 # scp-style ssh: [user@]host:path — no scheme, host part has no slashes.
 _SCP_RE = re.compile(r"^(?:[^@/:]+@)?(?P<host>[^@/:]+):(?P<path>[^:]+)$")
+
+
+def strip_userinfo(url: str) -> str:
+    """The URL without any user[:password]@ part. Token-in-URL remotes are
+    common in CI checkouts, and Upstream.url ends up in shareable report
+    artifacts and diagnostics — never carry credentials there. (scp-style
+    URLs keep their ssh user: that syntax cannot carry a password.)"""
+    if "://" not in url:
+        return url
+    scheme, sep, rest = url.partition("://")
+    host_part, slash, path = rest.partition("/")
+    return f"{scheme}{sep}{host_part.rpartition('@')[2]}{slash}{path}"
 
 
 def parse_remote_url(url: str) -> tuple[str, str] | None:
@@ -179,13 +191,14 @@ def detect_upstream(repo_dir: str, remote: str | None = None) -> Upstream:
     parsed = parse_remote_url(url)
     if parsed is None:
         raise UpstreamError(
-            f"cannot infer a GitLab host from remote {chosen!r} ({url!r})"
+            f"cannot infer a GitLab host from remote {chosen!r} "
+            f"({strip_userinfo(url)!r})"
         )
     host, project_path = parsed
 
     branch = _git(repo_dir, "rev-parse", "--abbrev-ref", "HEAD") or "HEAD"
     return Upstream(host=host, project_path=project_path, remote_name=chosen,
-                    url=url, toplevel=toplevel, branch=branch)
+                    url=strip_userinfo(url), toplevel=toplevel, branch=branch)
 
 
 # ---------------------------------------------------------------------------

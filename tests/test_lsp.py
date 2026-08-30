@@ -19,9 +19,11 @@ from pipeview.lsp import (
     LspServer,
     default_outdir,
     find_root,
+    index_to_utf16,
     path_to_uri,
     read_message,
     uri_to_path,
+    utf16_to_index,
     write_message,
 )
 
@@ -115,9 +117,26 @@ class TestFraming:
     def test_truncated_body_returns_none(self):
         assert read_message(io.BytesIO(b"Content-Length: 99\r\n\r\n{}")) is None
 
+    def test_malformed_body_skipped_not_eof(self):
+        # The frame was consumed whole, so the stream stays in sync: the
+        # bad body must not end the serve loop like an EOF would.
+        buf = io.BytesIO()
+        buf.write(b"Content-Length: 8\r\n\r\nnot-json")
+        write_message(buf, {"jsonrpc": "2.0", "method": "after", "params": {}})
+        buf.seek(0)
+        assert read_message(buf) == {}
+        assert read_message(buf)["method"] == "after"
+
     def test_uri_path_round_trip(self, tmp_path):
         p = str(tmp_path / "a dir" / "x.yml")
         assert uri_to_path(path_to_uri(p)) == p
+
+    def test_utf16_offset_round_trip(self):
+        line = 'x: "🚀 $CI_COMMIT_SHA"'
+        idx = line.index("CI_COMMIT_SHA")
+        col = index_to_utf16(line, idx)
+        assert col == idx + 1          # the emoji is 2 UTF-16 units
+        assert utf16_to_index(line, col) == idx
 
 
 class TestFindRoot:
@@ -166,11 +185,19 @@ class TestLifecycle:
         assert client.server.dispatch(
             {"jsonrpc": "2.0", "method": "nope/nope", "params": {}}) is None
 
-    def test_exit(self):
+    def test_exit_after_shutdown_is_clean(self):
         client = Client()
         client.request("shutdown", {})
         client.notify("exit", {})
         assert client.server.exited
+        assert client.server.exit_code == 0
+
+    def test_exit_without_shutdown_is_error(self):
+        # LSP: exit without a prior shutdown request must exit with 1.
+        client = Client()
+        client.notify("exit", {})
+        assert client.server.exited
+        assert client.server.exit_code == 1
 
 
 class TestDiagnostics:
@@ -246,6 +273,19 @@ class TestHover:
         })
         assert hover is None
 
+    def test_hover_position_is_utf16(self, tmp_path):
+        # An astral-plane char before the variable shifts UTF-16 columns
+        # by one relative to Python indices.
+        line = '  script: [echo "🚀 $CI_COMMIT_SHA"]'
+        client, uri = self._client_with_doc(tmp_path, "job:\n" + line)
+        idx = line.index("CI_COMMIT_SHA")
+        hover = client.request("textDocument/hover", {
+            "textDocument": {"uri": uri},
+            "position": {"line": 1, "character": index_to_utf16(line, idx)},
+        })
+        assert "CI_COMMIT_SHA" in hover["contents"]["value"]
+        assert hover["range"]["start"]["character"] == idx + 1
+
 
 class TestDocumentLinks:
     def test_local_include_becomes_link(self, tmp_path):
@@ -264,6 +304,16 @@ class TestDocumentLinks:
     def test_missing_target_no_link(self, tmp_path):
         write_tree(tmp_path, {".gitlab-ci.yml":
                               "include:\n  - local: ci/nope.yml\n"})
+        client = Client()
+        uri = client.open(tmp_path / ".gitlab-ci.yml")
+        assert client.request("textDocument/documentLink",
+                              {"textDocument": {"uri": uri}}) == []
+
+    def test_commented_out_include_no_link(self, tmp_path):
+        write_tree(tmp_path, {
+            ".gitlab-ci.yml": "include:\n  # - local: ci/build.yml\n",
+            "ci/build.yml": "b:\n  script: [x]\n",
+        })
         client = Client()
         uri = client.open(tmp_path / ".gitlab-ci.yml")
         assert client.request("textDocument/documentLink",
@@ -349,6 +399,21 @@ class TestExecuteCommand:
         out = default_outdir(root)
         assert not out.startswith(str(tmp_path))
         assert "pipeview" in out
+
+    def test_argparse_rejection_does_not_kill_server(self, tmp_path,
+                                                     monkeypatch):
+        # An outputDir starting with '-' makes argparse SystemExit inside
+        # the in-process CLI call; the server must survive and report.
+        write_tree(tmp_path, {".gitlab-ci.yml": GITLAB_OK})
+        monkeypatch.setattr(lsp_mod.webbrowser, "open",
+                            lambda url: pytest.fail("opened despite failure"))
+        client = Client({"outputDir": "-reports"})
+        uri = client.open(tmp_path / ".gitlab-ci.yml")
+        client.request("workspace/executeCommand", {
+            "command": CMD_OPEN_REPORT_OFFLINE, "arguments": [uri]})
+        assert any(m["type"] == 1 and "failed" in m["message"]
+                   for m in client.messages())
+        assert not client.server.exited
 
     def test_failure_reports_error_message(self, tmp_path, monkeypatch):
         write_tree(tmp_path, {".gitlab-ci.yml": GITLAB_OK})
