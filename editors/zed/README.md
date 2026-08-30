@@ -6,13 +6,19 @@ language server (`pipeview lsp`):
 
 - **Inline diagnostics** on open/save: pipeview's parser findings —
   broken includes, unknown `needs:` targets, variable problems — appear
-  on the lines that cause them, across the whole include tree. Analysis
-  is fully offline and never runs Make enrichment (no `$(shell)`
-  execution from the editor loop).
-- **Hover docs** for predefined `CI_*`/`GITLAB_*` variables — the same
-  curated catalog as the report's Variables tab: what each is, an
-  example value, when GitLab sets it.
-- **Clickable `include:local` entries** (document links).
+  on the lines that cause them, across the whole include tree. Works
+  for GitLab CI trees, GitHub Actions workflow directories
+  (`.github/workflows/`), and Makefiles alike. Analysis is fully
+  offline and never runs Make enrichment (no `$(shell)` execution from
+  the editor loop).
+- **Hover docs** for predefined variables — the curated
+  `CI_*`/`GITLAB_*` catalog in GitLab files and the
+  `GITHUB_*`/`RUNNER_*` catalog in workflow files, same content as the
+  report's Variables tab: what each is, an example value, when it is
+  set.
+- **Clickable references**: `include:local` entries in GitLab files,
+  local `uses: ./…` reusable workflows and composite actions in GitHub
+  workflow files (document links).
 - **Pipeline reports**: a code action (`cmd-.` / `ctrl-.`) —
   *Pipeview: open pipeline report (browser)* — generates the full
   interactive report (Graph, Tasks, Variables, Files, What-If) and
