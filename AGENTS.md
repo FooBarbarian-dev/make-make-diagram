@@ -18,7 +18,14 @@ make test                 # python -m pytest tests/ -v
 make lint                 # ruff check .
 make build                # python -m build  → sdist + wheel in dist/
 make examples             # regenerate example reports into examples/out/
+make vscode               # build + unit-test the VS Code extension (node)
+make zed                  # build the Zed extension (rust, wasm32-wasip2)
 ```
+
+Editor integrations live under `editors/` (see `editors/README.md` for
+the parity rule: features belong to the core — CLI, report HTML, or
+`pipeview lsp` — never to extension code, and the feature matrix there
+is updated with every feature).
 
 Some tests shell out to `make` (enrichment tests) and `node` (What-If
 evaluator parity tests) and self-skip when those are missing. A full run
@@ -35,7 +42,9 @@ The suite is fast (~5s); run it and `ruff check .` before every commit.
    and generated reports work from `file://` — no CDN, no remote fonts, no
    fetches. An automated test scans generated reports for `http(s)://`
    resource references. Only code under `pipeview/gitlab/` may touch the
-   network, and only when the user runs `pipeview gitlab`.
+   network, and only when the user explicitly asks: `pipeview gitlab`, or
+   the opt-in `--upstream` flag (which fetches only cross-repository
+   includes, before the offline parse step).
 3. **Honesty rules.** Anything unknowable is reported as *depends* /
    *ghost* / a named diagnostic — never guessed. Unknown constructs
    degrade the smallest possible unit (value → job/rule → file). If real
@@ -94,17 +103,26 @@ on merges to `main` — see `.github/workflows/release.yml`.
   PR titles count): `feat: …` (minor bump), `fix: …` (patch),
   `feat!: …` or a `BREAKING CHANGE:` footer (major), and
   `docs:`/`ci:`/`chore:`/`refactor:`/`test:` for non-release-worthy work.
-- release-please maintains a running release PR; merging that PR bumps the
-  version, updates `CHANGELOG.md`, tags `vX.Y.Z`, creates the GitHub
-  Release with notes, and CI attaches the sdist + wheel to it.
-- **Never hand-bump versions.** The version lives in two places that must
-  match — `pyproject.toml` and `pipeview/__init__.py` (`__version__`) —
-  and release-please updates both. A test asserts they agree.
+- release-please maintains a running release PR per component; merging one
+  bumps that component's version, updates its changelog, tags the release,
+  creates the GitHub Release with notes, and CI attaches the artifacts.
+  Components (see `docs/release-pipelines.md`): the core (`.`, tag
+  `vX.Y.Z`, sdist + wheel), the VS Code extension (`editors/vscode`, tag
+  `vscode-vX.Y.Z`, packaged `.vsix`), and the Zed extension
+  (`editors/zed`, tag `zed-vX.Y.Z`, built wasm). Commits route to a
+  component by the files they touch.
+- **Never hand-bump versions.** The core version lives in two places that
+  must match — `pyproject.toml` and `pipeview/__init__.py`
+  (`__version__`) — and release-please updates both (a test asserts they
+  agree); likewise it owns `editors/vscode/package.json` and the Zed
+  extension's `Cargo.toml` + `extension.toml` (kept in sync via the
+  `x-release-please-version` annotation).
 
 ## CI
 
 `.github/workflows/ci.yml` runs on every PR and push to `main`: ruff,
 pytest across Python 3.10–3.13 (Ubuntu runners provide `make` and `node`),
-and a package build check. Everything CI runs is reproducible locally with
-the commands at the top of this file — a change is not done until all of
-it passes.
+a package build check, the VS Code extension build + unit tests +
+packaging, and the Zed extension wasm build. Everything CI runs is
+reproducible locally with the commands at the top of this file — a change
+is not done until all of it passes.

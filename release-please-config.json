@@ -8,6 +8,21 @@
       "changelog-path": "CHANGELOG.md",
       "include-component-in-tag": false,
       "include-v-in-tag": true
+    },
+    "editors/vscode": {
+      "release-type": "node",
+      "package-name": "pipeview-vscode",
+      "component": "vscode",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true
+    },
+    "editors/zed": {
+      "release-type": "rust",
+      "package-name": "zed_pipeview",
+      "component": "zed",
+      "include-component-in-tag": true,
+      "include-v-in-tag": true,
+      "extra-files": ["extension.toml"]
     }
   }
 }

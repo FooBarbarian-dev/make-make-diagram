@@ -616,11 +616,14 @@ make build                  # build sdist + wheel into dist/
 make examples               # regenerate example reports
 make self                   # run pipeview on this repo's own Makefile
 make vscode                 # build + unit-test the VS Code extension
+make zed                    # build the Zed extension (wasm32-wasip2)
 ```
 
-CI runs lint, the test suite (Python 3.10–3.13), and a package build
-check on every pull request. Working conventions — architecture
-invariants, testing rules, docs layout — live in [AGENTS.md](AGENTS.md).
+CI runs lint, the test suite (Python 3.10–3.13), a package build check,
+and the editor-extension builds (VS Code unit tests + `.vsix` packaging,
+Zed wasm build) on every pull request. Working conventions —
+architecture invariants, testing rules, docs layout — live in
+[AGENTS.md](AGENTS.md).
 
 ### Releases
 
@@ -633,6 +636,13 @@ release, and publishes a GitHub Release with the sdist and wheel
 attached — grab either from the
 [releases page](https://github.com/FooBarbarian-dev/make-make-diagram/releases)
 and `pip install` it directly, no clone needed.
+
+The editor extensions release as their own components of the same
+manifest (commits route by path — see
+[docs/release-pipelines.md](docs/release-pipelines.md)): the VS Code
+extension tags `vscode-vX.Y.Z` with the packaged `.vsix` attached
+(installable via *Extensions: Install from VSIX…*), and the Zed
+extension tags `zed-vX.Y.Z` with the built wasm attached for reference.
 
 ## Documentation
 

@@ -7,6 +7,14 @@ here and enriched by hand where a feature deserves the narrative.
 
 ## Unreleased
 
+**Release automation for the editor extensions.** The VS Code and Zed
+extensions become their own release-please components: commits touching
+`editors/vscode/` or `editors/zed/` route to per-extension release PRs,
+tagged `vscode-vX.Y.Z` / `zed-vX.Y.Z`, with the packaged `.vsix` (and
+the built wasm, for reference) attached to their GitHub Releases. CI
+gains extension jobs (VS Code build + unit tests + packaging, Zed wasm
+build). See `docs/release-pipelines.md` for the component table.
+
 **Zed extension, `pipeview lsp`, and the `editors/` layout** (see
 `docs/agents/specs/2026-08-29-zed-extension-and-editor-layout-design.md`).
 
