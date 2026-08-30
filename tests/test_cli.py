@@ -10,6 +10,7 @@ from pipeview.model import SCHEMA_VERSION
 
 MAKE_FIXTURES = Path(__file__).parent / "fixtures" / "make"
 GITLAB_FIXTURES = Path(__file__).parent / "fixtures" / "gitlab"
+GITHUB_FIXTURES = Path(__file__).parent / "fixtures" / "github"
 EXAMPLES = Path(__file__).parent.parent / "examples"
 
 
@@ -170,6 +171,45 @@ class TestExamples:
         )
         assert result.returncode == 0
         assert os.path.isfile(os.path.join(tmpdir, "Makefile.report.html"))
+
+
+class TestCliGithub:
+    def test_directory_discovery_github(self, tmpdir):
+        code = main([
+            str(GITHUB_FIXTURES / "minimal"),
+            "-o", tmpdir,
+        ])
+        assert code == 0
+        assert os.path.isfile(os.path.join(tmpdir, "github-actions.report.html"))
+        data = json.loads(
+            Path(tmpdir, "github-actions.model.json").read_text())
+        assert data["format"] == "github_actions"
+
+    def test_single_workflow_file(self, tmpdir):
+        code = main([
+            str(GITHUB_FIXTURES / "minimal" / ".github" / "workflows" / "ci.yml"),
+            "-o", tmpdir,
+        ])
+        assert code == 0
+        assert os.path.isfile(os.path.join(tmpdir, "ci_yml.report.html"))
+
+    def test_workflow_outside_dot_github_is_sniffed(self, tmpdir):
+        src = (GITHUB_FIXTURES / "minimal" / ".github" / "workflows"
+               / "ci.yml").read_text()
+        loose = Path(tmpdir, "loose.yml")
+        loose.write_text(src)
+        out = os.path.join(tmpdir, "out")
+        code = main([str(loose), "-o", out])
+        assert code == 0
+        data = json.loads(Path(out, "loose_yml.model.json").read_text())
+        assert data["format"] == "github_actions"
+
+    def test_invalid_workflows_exit_1(self, tmpdir):
+        code = main([
+            str(GITHUB_FIXTURES / "invalid"),
+            "-o", tmpdir,
+        ])
+        assert code == 1
 
 
 class TestExitCodes:

@@ -1,0 +1,18 @@
+# Path-filtered: runs only when something under docs/ changes. In the
+# What-If tab this run shows as *depends* until you fill in the
+# changed-files list (or assume every pattern matches).
+
+name: Docs
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+
+jobs:
+  ## Build and publish the documentation site
+  build_docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make docs

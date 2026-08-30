@@ -1,0 +1,24 @@
+name: CI
+on: [push]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make build
+
+  ## Deploy via the shared reusable workflow
+  deploy:
+    needs: build
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+    secrets: inherit
+
+  ## Calls a workflow in another repository (unresolvable offline)
+  notify:
+    needs: build
+    uses: octo-org/shared/.github/workflows/notify.yml@v2
+    with:
+      channel: builds

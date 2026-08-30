@@ -1245,6 +1245,8 @@ def evaluate_event(report: dict, config: dict) -> dict | None:
     whatif = (report.get("annotations") or {}).get("whatif")
     if not whatif:
         return None
+    if whatif.get("provider"):   # a GitHub program — not ours to interpret
+        return None
     version = whatif.get("version")
     if version != WHATIF_VERSION:
         raise WhatifVersionError(
