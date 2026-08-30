@@ -43,8 +43,10 @@ jobs:
       # What-If parity tests need (they self-skip when missing — fail
       # loudly here instead so CI never silently loses coverage).
       - name: Check test prerequisites
+        # No pipes here: the default shell has no pipefail, and a pipe
+        # would let a missing binary slip through with head's exit 0.
         run: |
-          make --version | head -1
+          make --version
           node --version
       - run: python -m pip install -e ".[dev]"
       - run: python -m pytest tests/
