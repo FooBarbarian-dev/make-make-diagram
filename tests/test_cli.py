@@ -26,6 +26,19 @@ class TestCliBasic:
         assert exc_info.value.code == 0
         assert "pipeview" in capsys.readouterr().out
 
+    def test_version_matches_pyproject(self):
+        # The version lives in two places — pyproject.toml (what pip
+        # installs) and pipeview.__version__ (what --version prints).
+        # release-please bumps both; a hand edit to one breaks here.
+        import re
+
+        import pipeview
+
+        pyproject = (Path(__file__).parent.parent / "pyproject.toml").read_text()
+        m = re.search(r'^version = "([^"]+)"$', pyproject, re.MULTILINE)
+        assert m, "pyproject.toml has no version field"
+        assert m.group(1) == pipeview.__version__
+
     def test_no_args(self):
         with pytest.raises(SystemExit) as exc_info:
             main([])

@@ -1,5 +1,9 @@
 # pipeview
 
+[![CI](https://github.com/FooBarbarian-dev/make-make-diagram/actions/workflows/ci.yml/badge.svg)](https://github.com/FooBarbarian-dev/make-make-diagram/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/FooBarbarian-dev/make-make-diagram?include_prereleases)](https://github.com/FooBarbarian-dev/make-make-diagram/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 Offline interactive HTML reports for GNU Make and GitLab CI pipelines.
 
 `pipeview` reads build-pipeline definition files and produces self-contained,
@@ -608,10 +612,27 @@ schema would be wrong.
 pip install -e ".[dev]"
 make test                   # run tests
 make lint                   # lint
+make build                  # build sdist + wheel into dist/
 make examples               # regenerate example reports
 make self                   # run pipeview on this repo's own Makefile
 make vscode                 # build + unit-test the VS Code extension
 ```
+
+CI runs lint, the test suite (Python 3.10–3.13), and a package build
+check on every pull request. Working conventions — architecture
+invariants, testing rules, docs layout — live in [AGENTS.md](AGENTS.md).
+
+### Releases
+
+Versioning and releases are automated with
+[release-please](https://github.com/googleapis/release-please): merges to
+`main` using [Conventional Commit](https://www.conventionalcommits.org/)
+messages (`feat:`, `fix:`, `feat!:`, …) accumulate into a release PR, and
+merging that PR bumps the version, updates the changelog, tags the
+release, and publishes a GitHub Release with the sdist and wheel
+attached — grab either from the
+[releases page](https://github.com/FooBarbarian-dev/make-make-diagram/releases)
+and `pip install` it directly, no clone needed.
 
 ## Documentation
 
@@ -620,6 +641,11 @@ make vscode                 # build + unit-test the VS Code extension
   chasing a GitLab duplicate-pipeline problem through the What-If tab.
 - **[examples/](examples/README.md)** — runnable demo projects with notes on
   what each report shows.
+- **[docs/agents/](docs/agents/README.md)** — design specs and engineering
+  audits that record why the code is the way it is (referenced from the
+  changelog and code comments).
+- **[AGENTS.md](AGENTS.md)** — how to work on this project: setup,
+  invariants, testing conventions, and the release process.
 
 ## License
 

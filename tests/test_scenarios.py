@@ -1,7 +1,7 @@
 """Scenario file loader: schema validation, degradation, and check lint.
 
 The scenarios file is the input to trigger-docs generation (see
-docs/superpowers/specs/2026-08-27-trigger-docs-design.md). The loader's
+docs/agents/specs/2026-08-27-trigger-docs-design.md). The loader's
 failure philosophy matches the parsers': one bad scenario degrades one
 scenario, never the file; only file-level problems empty the result.
 """

@@ -1,0 +1,78 @@
+name: Release
+
+# Two ways in:
+#   1. push to main  → release-please maintains a running "release PR" that
+#      accumulates Conventional Commits. Merging that PR bumps the version,
+#      updates CHANGELOG.md, tags vX.Y.Z, and creates the GitHub Release
+#      with generated notes — then the publish job below attaches the
+#      built sdist + wheel to it.
+#   2. manual dispatch → publishes the version currently in
+#      pipeview/__init__.py (creates the tag + release if they don't
+#      exist). Used once to bootstrap v0.2.0, and as an escape hatch.
+#
+# Requires (repo Settings → Actions → General → Workflow permissions):
+#   - "Read and write permissions"
+#   - "Allow GitHub Actions to create and approve pull requests"
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      release_created: ${{ steps.rp.outputs.release_created || steps.rp.outputs['.--release_created'] }}
+      tag_name: ${{ steps.rp.outputs.tag_name || steps.rp.outputs['.--tag_name'] }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: rp
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Build sdist + wheel and attach them to the GitHub Release. Runs when
+  # release-please just cut a release, or on manual dispatch (bootstrap).
+  publish:
+    needs: release-please
+    if: >-
+      always() &&
+      (needs.release-please.outputs.release_created == 'true' ||
+       github.event_name == 'workflow_dispatch')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.release-please.outputs.tag_name || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - name: Attach packages to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag='${{ needs.release-please.outputs.tag_name }}'
+          if [ -z "$tag" ]; then
+            tag="v$(python -c 'import pipeview; print(pipeview.__version__)')"
+          fi
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            # Bootstrap path: create the tag + release with generated notes.
+            gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" \
+              --title "$tag" --generate-notes
+          fi

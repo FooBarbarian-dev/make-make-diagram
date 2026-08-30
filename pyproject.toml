@@ -4,7 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "pipeview"
-dynamic = ["version"]
+# Managed by release-please — must match pipeview/__init__.py __version__
+# (a test enforces this). Do not bump by hand.
+version = "0.2.1"
 description = "Offline interactive HTML reports for GNU Make and GitLab CI pipelines"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -30,9 +32,6 @@ pipeview = "pipeview.cli:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
-
-[tool.hatch.version]
-path = "pipeview/__init__.py"
 
 [tool.ruff]
 line-length = 100
