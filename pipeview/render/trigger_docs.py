@@ -3,7 +3,7 @@
 Turns evaluated What-If scenarios into per-scenario markdown docs plus a
 `pipeline-triggers.md` index — GitLab-flavored markdown with native
 mermaid blocks, written to be committed into a project's own repo (see
-docs/superpowers/specs/2026-08-27-trigger-docs-design.md).
+docs/agents/specs/2026-08-27-trigger-docs-design.md).
 
 Honesty and determinism rules:
 - *depends* verdicts stay unknown, with the missing fact named — never

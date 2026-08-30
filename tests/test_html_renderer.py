@@ -274,7 +274,7 @@ class TestNoNetworkResources:
 class TestTortureExample:
     """The overflow torture fixture must parse and carry its long tokens
     through to the rendered report (the visual overflow check itself runs
-    in a browser; see docs/ux-audit.md)."""
+    in a browser; see docs/agents/ux-audit.md)."""
 
     def test_torture_report_renders_long_tokens(self, tmpdir):
         report = parse_makefile(str(EXAMPLES / "torture-project" / "Makefile"))

@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "457d3ab9af0ad62f5ea5252f582e73e53797a20a",
+  "packages": {
+    ".": {
+      "release-type": "python",
+      "package-name": "pipeview",
+      "changelog-path": "CHANGELOG.md",
+      "include-component-in-tag": false,
+      "include-v-in-tag": true
+    }
+  }
+}

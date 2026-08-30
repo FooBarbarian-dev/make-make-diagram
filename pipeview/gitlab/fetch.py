@@ -1,6 +1,6 @@
 """Fetch a project's CI configuration from GitLab.
 
-Two strategies (see docs/superpowers/specs/2026-08-25-gitlab-remote-fetch-design.md):
+Two strategies (see docs/agents/specs/2026-08-25-gitlab-remote-fetch-design.md):
 
 - "lint": one call to the project-scoped CI Lint endpoint
   (GET /projects/:id/ci/lint), whose `merged_yaml` is the complete

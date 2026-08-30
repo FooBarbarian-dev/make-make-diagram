@@ -3,7 +3,7 @@
 A scenario is a named What-If configuration — the same knobs the report's
 What-If tab exposes, spelled in snake_case, keyed by an id that becomes the
 generated doc's filename (see
-docs/superpowers/specs/2026-08-27-trigger-docs-design.md).
+docs/agents/specs/2026-08-27-trigger-docs-design.md).
 
 Failure philosophy matches the parsers: one bad scenario degrades one
 scenario (a diagnostic plus a skip), never the file; only file-level

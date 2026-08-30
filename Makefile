@@ -10,6 +10,10 @@ dev:
 test:
 	python -m pytest tests/ -v
 
+## Build sdist + wheel into dist/
+build:
+	python -m build
+
 ## Lint the codebase
 lint:
 	ruff check .
@@ -26,4 +30,4 @@ examples: install
 self: install
 	pipeview Makefile -o examples/out
 
-.PHONY: install dev test lint examples self
+.PHONY: install dev test build lint examples self
