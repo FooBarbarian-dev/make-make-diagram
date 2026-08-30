@@ -20,12 +20,16 @@ def main(argv: list[str] | None = None) -> int:
     if argv is None:
         argv = sys.argv[1:]
 
-    # `pipeview gitlab …` routes to the remote subcommand — the only part of
-    # pipeview that performs network access. A local directory literally
-    # named "gitlab" is still reachable as `pipeview ./gitlab`.
+    # `pipeview gitlab …` / `pipeview github …` route to the remote
+    # subcommands — the only parts of pipeview that perform network access.
+    # A local directory literally named "gitlab" is still reachable as
+    # `pipeview ./gitlab`.
     if argv and argv[0] == "gitlab":
         from pipeview.gitlab.cli import main as gitlab_main
         return gitlab_main(argv[1:])
+    if argv and argv[0] == "github":
+        from pipeview.github.cli import main as github_main
+        return github_main(argv[1:])
 
     # `pipeview scenarios …` routes to the trigger-docs scenario helpers —
     # offline, like everything outside `gitlab`. A local directory literally
@@ -44,8 +48,8 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="pipeview",
         description=(
-            "Generate offline interactive HTML reports "
-            "for GNU Make and GitLab CI pipelines."
+            "Generate offline interactive HTML reports for GNU Make, "
+            "GitLab CI, and GitHub Actions pipelines."
         ),
         epilog=(
             "examples:\n"
@@ -56,6 +60,8 @@ def main(argv: list[str] | None = None) -> int:
             "  pipeview Makefile --format html,svg Export as HTML and SVG\n"
             "  pipeview gitlab                    Browse a GitLab instance (see\n"
             "                                     pipeview gitlab --help)\n"
+            "  pipeview github                    Browse GitHub repositories (see\n"
+            "                                     pipeview github --help)\n"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -95,7 +101,8 @@ def main(argv: list[str] | None = None) -> int:
         metavar="FILE",
         help=(
             "Scenarios file (start one with `pipeview scenarios init`): also "
-            "write per-trigger markdown docs for each GitLab CI root, to "
+            "write per-trigger markdown docs for each GitLab CI or GitHub "
+            "Actions root, to "
             "<outdir>/<name>.trigger-docs/"
         ),
     )
@@ -232,14 +239,15 @@ def main(argv: list[str] | None = None) -> int:
             export_svg(report, os.path.join(outdir, f"{basename}.graph.svg"))
 
         if trigger_scenarios:
-            if root_kind == "gitlab_yaml":
+            if root_kind in ("gitlab_yaml", "github_workflows"):
                 docs_floor = max(docs_floor, _emit_trigger_docs(
                     report, trigger_scenarios, trigger_skipped,
                     os.path.join(outdir, f"{basename}.trigger-docs"),
                     root_path, args))
             else:
-                print(f"  {root_path}: trigger docs apply to GitLab CI "
-                      "configurations — skipped", file=sys.stderr)
+                print(f"  {root_path}: trigger docs apply to GitLab CI and "
+                      "GitHub Actions configurations — skipped",
+                      file=sys.stderr)
 
         if report.diagnostics:
             any_diagnostics = True
@@ -266,7 +274,13 @@ def _emit_trigger_docs(report: Report, scenarios, skipped: list[str],
         generate_trigger_docs,
         write_docs_folder,
     )
-    provenance = {"project": os.path.basename(root_path), "ref": "",
+    project = os.path.basename(root_path)
+    norm = os.path.abspath(root_path).replace(os.sep, "/")
+    if norm.endswith("/.github/workflows"):
+        # the workflows dir is the root; the repo directory is the name
+        project = os.path.basename(norm[: -len("/.github/workflows")]) \
+            or project
+    provenance = {"project": project, "ref": "",
                   "commit": "", "version": pipeview.__version__}
     cmd = f"pipeview {args.path} --trigger-docs {args.trigger_docs} -o {args.output}"
     files = generate_trigger_docs(report.to_dict(), scenarios, skipped,
@@ -303,6 +317,10 @@ def _discover_roots(path: str) -> list[tuple[str, str]]:
         if os.path.isfile(gitlab_path):
             roots.append((gitlab_path, "gitlab_yaml"))
 
+        workflows_dir = os.path.join(path, ".github", "workflows")
+        if os.path.isdir(workflows_dir):
+            roots.append((workflows_dir, "github_workflows"))
+
     return roots
 
 
@@ -313,8 +331,27 @@ def _classify_file(path: str) -> str | None:
     if basename == ".gitlab-ci.yml" or (path.endswith(".yml") and "gitlab" in basename.lower()):
         return "gitlab_yaml"
     if path.endswith(".yml") or path.endswith(".yaml"):
+        norm = os.path.abspath(path).replace(os.sep, "/")
+        if "/.github/workflows/" in norm or _looks_like_github_workflow(path):
+            return "github_workflows"
         return "gitlab_yaml"
     return None
+
+
+def _looks_like_github_workflow(path: str) -> bool:
+    """Content sniff for a workflow file outside .github/workflows: a
+    top-level mapping with jobs: and on: (unquoted `on` reads as YAML
+    True) and no GitLab-only markers."""
+    try:
+        import yaml
+        with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
+            data = yaml.safe_load(f.read())
+    except Exception:
+        return False
+    if not isinstance(data, dict):
+        return False
+    keys = {("on" if k is True else k) for k in data}
+    return "jobs" in keys and "on" in keys and "stages" not in keys
 
 
 def _parse_root(path: str, kind: str, bundled_templates: bool = True,
@@ -335,6 +372,9 @@ def _parse_root(path: str, kind: str, bundled_templates: bool = True,
             report.annotations["gitlab_upstream"] = upstream.annotation
         report.diagnostics.extend(upstream.diagnostics)
         return report
+    elif kind == "github_workflows":
+        from pipeview.parsers.github_parser import parse_github
+        return parse_github(path)
     else:
         return Report(
             root=path,
@@ -345,6 +385,10 @@ def _parse_root(path: str, kind: str, bundled_templates: bool = True,
 
 
 def _output_basename(path: str, kind: str) -> str:
+    if kind == "github_workflows":
+        if os.path.isdir(path):
+            return "github-actions"
+        return os.path.basename(path).replace(".", "_")
     basename = os.path.basename(path)
     if basename == ".gitlab-ci.yml":
         return "gitlab-ci"

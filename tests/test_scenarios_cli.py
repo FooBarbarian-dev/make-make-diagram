@@ -83,7 +83,7 @@ class TestPreview:
         code = main(["scenarios", "preview", SCENARIOS,
                      str(TESTS / "fixtures" / "make" / "minimal")])
         assert code == 2
-        assert "no GitLab CI configuration" in capsys.readouterr().err
+        assert "no GitLab CI or GitHub Actions configuration" in capsys.readouterr().err
 
 
 class TestLocalTriggerDocs:
@@ -122,7 +122,7 @@ class TestLocalTriggerDocs:
         code = main([str(TESTS / "fixtures" / "make" / "minimal"), "-o", outdir,
                      "--trigger-docs", SCENARIOS])
         assert code == 0
-        assert "apply to GitLab CI configurations" in capsys.readouterr().err
+        assert "apply to GitLab CI and GitHub Actions configurations" in capsys.readouterr().err
         assert not any(n.endswith(".trigger-docs")
                        for n in os.listdir(outdir))
 

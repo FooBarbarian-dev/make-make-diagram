@@ -4,11 +4,12 @@ Guidance for coding agents (and humans) contributing to this repository.
 
 ## What this is
 
-`pipeview` is a Python package (3.10+, only runtime dependency PyYAML) that
-parses GNU Make and GitLab CI pipeline definitions into a normalized model
-and renders self-contained, fully offline, interactive HTML reports. The
-`pipeview gitlab` subcommand is the one networked piece: it fetches CI
-config from a GitLab instance, then runs the same offline pipeline.
+`pipeview` is a Python package (3.10+, only runtime dependency PyYAML)
+that parses GNU Make, GitLab CI, and GitHub Actions pipeline definitions
+into a normalized model and renders self-contained, fully offline,
+interactive HTML reports. The `pipeview gitlab` and `pipeview github`
+subcommands are the networked pieces: they fetch CI config from the
+instance, then run the same offline pipeline.
 
 ## Setup and everyday commands
 
@@ -41,10 +42,11 @@ The suite is fast (~5s); run it and `ruff check .` before every commit.
 2. **Offline guarantee.** Report generation performs zero network access,
    and generated reports work from `file://` — no CDN, no remote fonts, no
    fetches. An automated test scans generated reports for `http(s)://`
-   resource references. Only code under `pipeview/gitlab/` may touch the
-   network, and only when the user explicitly asks: `pipeview gitlab`, or
-   the opt-in `--upstream` flag (which fetches only cross-repository
-   includes, before the offline parse step).
+   resource references. Only code under `pipeview/gitlab/` and
+   `pipeview/github/` may touch the network, and only when the user
+   explicitly asks: `pipeview gitlab`, `pipeview github`, or the opt-in
+   `--upstream` flag (which fetches only cross-repository includes,
+   before the offline parse step).
 3. **Honesty rules.** Anything unknowable is reported as *depends* /
    *ghost* / a named diagnostic — never guessed. Unknown constructs
    degrade the smallest possible unit (value → job/rule → file). If real

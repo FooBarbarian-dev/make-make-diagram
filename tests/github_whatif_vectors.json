@@ -1,0 +1,421 @@
+{
+  "_comment": "Parity contract between templates/whatif_github.js and pipeview/parsers/github_whatif_eval.py. expr entries: src is compiled with parse_condition() by the Python side and handed to both evaluators as an AST; ctx supplies the world (contexts/envChain/overrides/needsState/needResults/matrixVars/hasInputs/controlled). expect uses the string 'unknown' for tri-state null. scenario entries name a fixture under tests/fixtures/github and use the shared checkers in tests/whatif_checks.py.",
+  "expr": [
+    {
+      "name": "string 'false' is truthy",
+      "src": "'false'",
+      "ctx": {"contexts": {}},
+      "expect": true
+    },
+    {
+      "name": "github.ref full comparison matches",
+      "src": "github.ref == 'refs/heads/main'",
+      "ctx": {"contexts": {"github.ref": "refs/heads/main"}},
+      "expect": true
+    },
+    {
+      "name": "github.ref vs bare branch name never matches",
+      "src": "github.ref == 'main'",
+      "ctx": {"contexts": {"github.ref": "refs/heads/main"}},
+      "expect": false
+    },
+    {
+      "name": "string equality is case-insensitive",
+      "src": "github.ref_name == 'MAIN'",
+      "ctx": {"contexts": {"github.ref_name": "main"}},
+      "expect": true
+    },
+    {
+      "name": "numeric string coerces for relational compare",
+      "src": "'5' > 3",
+      "ctx": {"contexts": {}},
+      "expect": true
+    },
+    {
+      "name": "non-numeric string in relational compare is false",
+      "src": "'abc' > 3",
+      "ctx": {"contexts": {}},
+      "expect": false
+    },
+    {
+      "name": "null loosely equals empty string",
+      "src": "github.base_ref == ''",
+      "ctx": {"contexts": {},
+              "controlled": {"names": ["github.base_ref"], "prefixes": []}},
+      "expect": true
+    },
+    {
+      "name": "hex and exponent number literals",
+      "src": "0x1A == 26 && 1e2 == 100",
+      "ctx": {"contexts": {}},
+      "expect": true
+    },
+    {
+      "name": "contains is a case-insensitive substring test",
+      "src": "contains('Hello World', 'o w')",
+      "ctx": {"contexts": {}},
+      "expect": true
+    },
+    {
+      "name": "contains over a fromJSON array uses loose equality",
+      "src": "contains(fromJSON('[\"a\",\"b\"]'), 'A')",
+      "ctx": {"contexts": {}},
+      "expect": true
+    },
+    {
+      "name": "startsWith against the ref",
+      "src": "startsWith(github.ref, 'refs/tags/')",
+      "ctx": {"contexts": {"github.ref": "refs/heads/main"}},
+      "expect": false
+    },
+    {
+      "name": "secrets are unknown",
+      "src": "secrets.DEPLOY_KEY != ''",
+      "ctx": {"contexts": {}},
+      "expect": "unknown"
+    },
+    {
+      "name": "vars are unknown until pinned",
+      "src": "vars.CANARY == 'true'",
+      "ctx": {"contexts": {}},
+      "expect": "unknown"
+    },
+    {
+      "name": "an override pins a vars value",
+      "src": "vars.CANARY == 'true'",
+      "ctx": {"contexts": {}, "overrides": {"vars.canary": "true"}},
+      "expect": true
+    },
+    {
+      "name": "boolean input negation",
+      "src": "!inputs.dry_run",
+      "ctx": {"contexts": {"inputs.dry_run": false}, "hasInputs": true},
+      "expect": true
+    },
+    {
+      "name": "unknown AND definite false is false",
+      "src": "vars.X == '1' && github.ref == 'refs/heads/dev'",
+      "ctx": {"contexts": {"github.ref": "refs/heads/main"}},
+      "expect": false
+    },
+    {
+      "name": "unknown OR definite true is true",
+      "src": "vars.X == '1' || github.ref == 'refs/heads/main'",
+      "ctx": {"contexts": {"github.ref": "refs/heads/main"}},
+      "expect": true
+    },
+    {
+      "name": "unknown AND true stays unknown",
+      "src": "vars.X == '1' && github.ref == 'refs/heads/main'",
+      "ctx": {"contexts": {"github.ref": "refs/heads/main"}},
+      "expect": "unknown"
+    },
+    {
+      "name": "env lookup is case-insensitive",
+      "src": "env.deploy_mode == 'rolling'",
+      "ctx": {"contexts": {}, "envChain": {"DEPLOY_MODE": "rolling"}},
+      "expect": true
+    },
+    {
+      "name": "env built from an expression is unknown",
+      "src": "env.TARGET == 'prod'",
+      "ctx": {"contexts": {},
+              "envChain": {"TARGET": "${{ inputs.environment }}"}},
+      "expect": "unknown"
+    },
+    {
+      "name": "undeclared env vars are empty, not unknown",
+      "src": "env.NOT_SET == ''",
+      "ctx": {"contexts": {}, "envChain": {}},
+      "expect": true
+    },
+    {
+      "name": "success() reflects the needs state",
+      "src": "success()",
+      "ctx": {"contexts": {}, "needsState": false},
+      "expect": false
+    },
+    {
+      "name": "always() is true even past skipped needs",
+      "src": "always()",
+      "ctx": {"contexts": {}, "needsState": false},
+      "expect": true
+    },
+    {
+      "name": "failure() is false on the assumed happy path",
+      "src": "failure()",
+      "ctx": {"contexts": {}, "needsState": true},
+      "expect": false
+    },
+    {
+      "name": "needs result context",
+      "src": "needs.build.result == 'success'",
+      "ctx": {"contexts": {}, "needResults": {"build": "success"}},
+      "expect": true
+    },
+    {
+      "name": "format builds strings",
+      "src": "format('{0}-{1}', 'a', 'b') == 'A-B'",
+      "ctx": {"contexts": {}},
+      "expect": true
+    },
+    {
+      "name": "controlled-but-absent PR context is empty, not unknown",
+      "src": "github.event.pull_request.draft",
+      "ctx": {"contexts": {},
+              "controlled": {"names": [],
+                             "prefixes": ["github.event.pull_request."]}},
+      "expect": false
+    },
+    {
+      "name": "uncontrolled github context is unknown",
+      "src": "github.repository == 'octo-org/widget'",
+      "ctx": {"contexts": {},
+              "controlled": {"names": [], "prefixes": []}},
+      "expect": "unknown"
+    },
+    {
+      "name": "hashFiles is unknown",
+      "src": "hashFiles('**/package-lock.json') != ''",
+      "ctx": {"contexts": {}},
+      "expect": "unknown"
+    },
+    {
+      "name": "matrix context resolves per instance",
+      "src": "matrix.os == 'ubuntu-latest'",
+      "ctx": {"contexts": {}, "matrixVars": {"os": "ubuntu-latest"}},
+      "expect": true
+    },
+    {
+      "name": "template mixed with text is opaque",
+      "src": "${{ false }} || true",
+      "ctx": {"contexts": {}},
+      "expect": "unknown"
+    }
+  ],
+  "scenarios": [
+    {
+      "name": "push with an open PR duplicates the dual-trigger workflow",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "push_branch", "branch": "feature/x",
+                 "openPR": true, "target": "main"},
+      "expect": {
+        "candidates": {
+          "ci.yml:push": {
+            "created": true,
+            "jobs": {"ci.yml::build": "runs", "ci.yml::test": "runs",
+                     "ci.yml::deploy": "skipped"}
+          },
+          "ci.yml:pull_request": {
+            "created": true,
+            "jobs": {"ci.yml::build": "runs", "ci.yml::test": "runs"}
+          }
+        },
+        "duplicates": ["ci.yml::build", "ci.yml::test"]
+      }
+    },
+    {
+      "name": "github.ref vs bare name never deploys, even on main",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "ci.yml:push": {
+            "created": true,
+            "jobs": {"ci.yml::deploy": "skipped"}
+          }
+        }
+      }
+    },
+    {
+      "name": "schedule fires only the scheduled workflow",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "schedule"},
+      "expect": {
+        "candidates": {
+          "nightly.yml:schedule": {
+            "created": true,
+            "jobs": {"nightly.yml::soak": "runs"}
+          }
+        }
+      }
+    },
+    {
+      "name": "dispatch input steers the job condition",
+      "fixture": "whatif_dup",
+      "config": {"scenario": "workflow_dispatch",
+                 "inputs": {"suite": "quick"}},
+      "expect": {
+        "candidates": {
+          "nightly.yml:workflow_dispatch": {
+            "created": true,
+            "jobs": {"nightly.yml::soak": "skipped"}
+          }
+        }
+      }
+    },
+    {
+      "name": "matrix expands and the tag filter gates the run",
+      "fixture": "matrix",
+      "config": {"scenario": "push_tag", "tag": "v2.3.4"},
+      "expect": {
+        "candidates": {
+          "ci.yml:push": {
+            "created": true,
+            "jobsDetail": {"ci.yml::test": {"matrixCount": 3}}
+          }
+        }
+      }
+    },
+    {
+      "name": "a non-matching tag does not run the matrix workflow",
+      "fixture": "matrix",
+      "config": {"scenario": "push_tag", "tag": "nightly"},
+      "expect": {
+        "candidates": {"ci.yml:push": {"created": false}}
+      }
+    },
+    {
+      "name": "reusable workflow expands as a child run",
+      "fixture": "reusable",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "ci.yml:push": {
+            "created": true,
+            "childrenCount": 1,
+            "children": {
+              "deploy.yml": {
+                "created": true,
+                "jobs": {"deploy.yml::push_release": "runs",
+                         "deploy.yml::verify": "runs"}
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "invalid workflow never runs",
+      "fixture": "invalid",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {
+          "broken.yml:push": {
+            "created": false,
+            "reasonContains": "invalid workflow file"
+          }
+        }
+      }
+    },
+    {
+      "name": "paths filter with a known changed-files list",
+      "fixture": "minimal",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["src/app.py"]},
+      "expect": {
+        "candidates": {
+          "ci.yml:push": {
+            "created": true,
+            "jobs": {"ci.yml::build": "runs", "ci.yml::test": "runs",
+                     "ci.yml::deploy": "runs"}
+          }
+        }
+      }
+    },
+    {
+      "name": "negated path pattern excludes docs-only changes",
+      "fixture": "minimal",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["src/docs/readme.md"]},
+      "expect": {
+        "candidates": {"ci.yml:push": {"created": false}}
+      }
+    },
+    {
+      "name": "no changed-files list means the paths verdict is unknown",
+      "fixture": "minimal",
+      "config": {"scenario": "push_branch", "branch": "main"},
+      "expect": {
+        "candidates": {"ci.yml:push": {"created": "unknown"}}
+      }
+    },
+    {
+      "name": "needs skip cascades unless always()",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["src/x.py"]},
+      "expect": {
+        "candidates": {
+          "pipeline.yml:push": {
+            "created": true,
+            "jobs": {
+              "pipeline.yml::build": "runs",
+              "pipeline.yml::test": "runs",
+              "pipeline.yml::canary": "conditional",
+              "pipeline.yml::report": "conditional",
+              "pipeline.yml::always_cleanup": "runs",
+              "pipeline.yml::only_on_failure": "skipped",
+              "pipeline.yml::dispatch_deploy": "skipped"
+            },
+            "childrenCount": 1,
+            "children": {
+              "publish.yml": {
+                "created": true,
+                "jobs": {"publish.yml::announce": "runs"}
+              }
+            }
+          },
+          "docs.yml:push": {"created": false}
+        }
+      }
+    },
+    {
+      "name": "pinned repo variable resolves the canary chain",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "main",
+                 "changedFiles": ["src/x.py"],
+                 "overrides": {"vars.CANARY_ENABLED": "true"}},
+      "expect": {
+        "candidates": {
+          "pipeline.yml:push": {
+            "jobs": {
+              "pipeline.yml::canary": "runs",
+              "pipeline.yml::report": "runs"
+            }
+          }
+        }
+      }
+    },
+    {
+      "name": "workflow_run cascade respects its branch filter",
+      "fixture": "whatif_features",
+      "config": {"scenario": "push_branch", "branch": "dev",
+                 "changedFiles": ["src/x.py"]},
+      "expect": {
+        "candidates": {
+          "pipeline.yml:push": {
+            "created": true,
+            "childrenCount": 1,
+            "children": {"publish.yml": {"created": false}}
+          }
+        }
+      }
+    },
+    {
+      "name": "dispatch to production deploys, dry run does not",
+      "fixture": "whatif_features",
+      "config": {"scenario": "workflow_dispatch",
+                 "dispatchWorkflow": "pipeline.yml",
+                 "inputs": {"environment": "production"}},
+      "expect": {
+        "candidates": {
+          "pipeline.yml:workflow_dispatch": {
+            "created": true,
+            "jobs": {"pipeline.yml::dispatch_deploy": "runs"}
+          }
+        }
+      }
+    }
+  ]
+}

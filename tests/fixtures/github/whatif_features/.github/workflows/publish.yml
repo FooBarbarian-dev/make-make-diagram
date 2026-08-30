@@ -1,0 +1,16 @@
+name: Publish
+on:
+  workflow_run:
+    workflows: ["Pipeline"]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: publish
+  cancel-in-progress: true
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - run: ./announce.sh

@@ -992,7 +992,7 @@ kbd {
         <span class="toolbar-title">What-If</span>
         <span class="toolbar-note" id="whatif-note"></span>
         <span class="toolbar-spacer"></span>
-        <span class="toolbar-note"
+        <span class="toolbar-note" id="wi-assumptions"
           data-tip="The simulation shows what GitLab would PROBABLY do. Unknowns are shown as 'depends', never guessed. Assumed world: branches main and dev exist and are protected; other branches are unprotected.">
           probable behavior — hover for assumptions</span>
         <button class="btn" id="wi-copy-text"
@@ -1036,6 +1036,9 @@ kbd {
 </script>
 <script>
 /*WHATIF_PLACEHOLDER*/
+</script>
+<script>
+/*WHATIF_GH_PLACEHOLDER*/
 </script>
 <script>
 const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
@@ -1268,7 +1271,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   const headerRoot = document.getElementById('header-root');
   headerRoot.textContent = midTruncPath(REPORT.root || '', 52);
   headerRoot.title = REPORT.root || '';
-  const FORMAT_LABELS = { gitlab_ci: 'GitLab CI', makefile: 'Make' };
+  const FORMAT_LABELS = { gitlab_ci: 'GitLab CI', makefile: 'Make',
+                          github_actions: 'GitHub Actions' };
+  const IS_GH = REPORT.format === 'github_actions';
+  const VENDOR = IS_GH ? 'GitHub' : 'GitLab';
   document.getElementById('header-format').textContent =
     FORMAT_LABELS[REPORT.format] || REPORT.format || 'unknown';
   document.getElementById('header-generated').textContent =
@@ -1322,11 +1328,25 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   /* ==========================================================
      Tabs (real tablist, arrow-key navigable)
      ========================================================== */
-  // What-If is a GitLab-only view: the tab exists only when the model
-  // carries a compiled what-if program (presence-based, format-neutral).
+  // What-If exists only when the model carries a compiled what-if program
+  // (presence-based, format-neutral). Two engines interpret programs: the
+  // GitLab one and the GitHub one, selected by the program's provider tag.
   const WHATIF = (REPORT.annotations || {}).whatif || null;
-  const whatifAvailable = !!(WHATIF && typeof PipeviewWhatIf !== 'undefined');
+  const WI_GH = !!(WHATIF && WHATIF.provider === 'github');
+  const WIENGINE = WI_GH
+    ? (typeof PipeviewWhatIfGH !== 'undefined' ? PipeviewWhatIfGH : null)
+    : (typeof PipeviewWhatIf !== 'undefined' ? PipeviewWhatIf : null);
+  const whatifAvailable = !!(WHATIF && WIENGINE);
   if (whatifAvailable) document.getElementById('tab-whatif').hidden = false;
+  if (WI_GH) {
+    const asm = document.getElementById('wi-assumptions');
+    if (asm) {
+      asm.dataset.tip = "The simulation shows what GitHub would PROBABLY "
+        + "do. Unknowns (secrets, repository variables, runner state) are "
+        + "shown as 'depends', never guessed. Assumed world: branch main "
+        + "exists and is protected; other branches are unprotected.";
+    }
+  }
 
   // Predefined-variable documentation (GitLab reports only, presence-based).
   // A name with no catalog entry keeps the generic honest wording everywhere —
@@ -1345,11 +1365,11 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     if (!tip) return innerHtml;
     return '<span class="pre-doc" data-tip="' + esc(tip) + '">' + innerHtml + '</span>';
   }
-  // Every name referenced in a rules/workflow expression of this
-  // configuration ($VAR in scripts lands in REPORT.variables instead).
+  // Every name referenced in a rules/workflow expression (or job if:
+  // condition) of this configuration ($VAR in scripts lands in
+  // REPORT.variables instead).
   const RULE_EXPR_VARS = new Set(
-    (WHATIF && typeof PipeviewWhatIf !== 'undefined')
-      ? PipeviewWhatIf.collectExpressionVariables(REPORT) : []);
+    whatifAvailable ? WIENGINE.collectExpressionVariables(REPORT) : []);
 
   const tabs = Array.from(document.querySelectorAll('.tab')).filter(t => !t.hidden);
   const views = Array.from(document.querySelectorAll('.view'));
@@ -1747,13 +1767,13 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         html += '<div class="panel-section"><h3>Predefined by GitLab</h3>'
           + '<div class="value wrap-any">' + esc(d.summary) + '</div>'
           + '<div class="codeblock soft-wrap">e.g. ' + esc(d.example) + '</div>'
-          + '<div class="tl-note">GitLab sets it: ' + esc(d.set_when) + '.</div>'
+          + '<div class="tl-note">' + VENDOR + ' sets it: ' + esc(d.set_when) + '.</div>'
           + (d.unset_when ? '<div class="tl-note">Unset: ' + esc(d.unset_when) + '.</div>' : '')
           + (d.note ? '<div class="tl-note">' + esc(d.note) + '</div>' : '')
           + '</div>';
       } else {
         html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
-          + 'A GitLab predefined variable: the runner provides its value for every job.</div></div>';
+          + 'A ' + VENDOR + ' predefined variable: the runner provides its value for every job.</div></div>';
       }
     } else if (v.origin === 'environment') {
       html += '<div class="panel-section"><div class="value" style="color:var(--text-muted)">'
@@ -1908,7 +1928,13 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       }
     });
     const groupKeys = Object.keys(groupMembers).sort();
-    const groupLabel = k => (REPORT.format === 'gitlab_ci' ? 'child pipeline ' : 'sub-make ') + k;
+    if (IS_GH) {
+      (REPORT.annotations.workflows || []).forEach(w => {
+        if (!w.reusable && groupMembers[w.file]) expandedGroups.add(w.file);
+      });
+    }
+    const groupLabel = k => (REPORT.format === 'gitlab_ci' ? 'child pipeline '
+      : IS_GH ? 'workflow ' : 'sub-make ') + k;
 
     const NODE_TOGGLES = [
       { key: 'stage', label: 'stage lanes', test: n => n.kind === 'stage' },
@@ -2498,8 +2524,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     const count = Object.keys(PRE_DOCS).length;
     if (!count) return '';
     return '<details class="pre-ref" id="pre-ref"' + (preRefOpen ? ' open' : '') + '>'
-      + '<summary>GitLab predefined variables reference (' + count + ')</summary>'
-      + '<div class="legend-note">What GitLab itself supplies to jobs: what each '
+      + '<summary>' + VENDOR + ' predefined variables reference (' + count + ')</summary>'
+      + '<div class="legend-note">What ' + VENDOR + ' itself supplies to jobs: what each '
       + 'variable is, an example value, and when it is set. Values shown are '
       + 'illustrations, not this pipeline’s values.</div>'
       + '<input type="text" class="input" id="pre-ref-filter" placeholder="Filter by name…"'
@@ -2693,7 +2719,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
           out += '<li><div class="file-row" data-path="' + esc(file.path) + '">'
             + '<span class="file-name clip" title="' + esc(file.path) + '">' + esc(name) + '</span>'
             + STATUS_CHIP[file.status]
-            + '<span class="chip">' + esc(file.kind === 'gitlab_yaml' ? 'GitLab CI' : file.kind) + '</span>'
+            + '<span class="chip">' + esc(file.kind === 'gitlab_yaml' ? 'GitLab CI'
+          : file.kind === 'github_yaml' ? 'GitHub Actions' : file.kind) + '</span>'
             + (rels ? '<span class="file-rels clip" title="' + esc(rels) + '">' + esc(rels) + '</span>' : '')
             + '</div>'
             + (diags.length ? '<div class="file-diags">' + diags.map(diagHtml).join('') + '</div>' : '')
@@ -2753,7 +2780,12 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     commitMessage: '',
     changedMode: 'unknown',           // 'unknown' | 'all' | 'none' | 'list'
     changedList: '',
-    overrides: []                     // [{name, value}]
+    overrides: [],                    // [{name, value}]
+    // GitHub-only knobs
+    prAction: '',                     // '' = the scenario's default action
+    releaseAction: 'published',
+    dispatchWorkflow: '',             // '' = every dispatchable workflow
+    dispatchInputs: {}                // {name: string|boolean}
   };
 
   const WI_BRANCHY = ['push_branch', 'schedule', 'web', 'api', 'trigger'];
@@ -2766,7 +2798,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     ['api', 'API pipeline'],
     ['trigger', 'Trigger token']
   ];
-  const WI_STATE_LABEL = {
+  const WI_STATE_LABEL = WI_GH ? {
+    runs: 'runs', manual: 'manual gate', delayed: 'delayed',
+    skipped: 'skipped', 'not-added': 'not added', conditional: 'depends'
+  } : {
     runs: 'runs', manual: 'manual gate', delayed: 'delayed',
     skipped: 'when: never', 'not-added': 'not added', conditional: 'depends'
   };
@@ -2783,7 +2818,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   let wiCopyMd = '';          // what the Copy markdown button copies
   let wiTextOpen = false;     // the plain-text <details> survives re-renders
 
-  const wiMight = res => whatifAvailable && PipeviewWhatIf.mightRun(res);
+  const wiMight = res => whatifAvailable && WIENGINE.mightRun(res);
 
   function wiBranchName() {
     if (wiState.scenario === 'mr') return wiState.featureName || 'feature/widget';
@@ -2791,7 +2826,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     return wiState.branchKind === 'tag' ? 'main' : wiState.branchKind;
   }
 
-  function wiConfig() {
+  function wiConfigGL() {
     const s = wiState;
     const overrides = {};
     s.overrides.forEach(o => { if (o.name) overrides[o.name] = o.value; });
@@ -2840,7 +2875,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '><span>' + esc(label) + '</span></label>';
   }
 
-  function renderWiControls() {
+  function renderWiControlsGL() {
     const s = wiState;
     const isBranchy = WI_BRANCHY.indexOf(s.scenario) >= 0;
     const tagable = isBranchy && s.scenario !== 'push_branch';
@@ -2956,6 +2991,242 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     wireWiControls();
   }
 
+  /* ---------------- GitHub controls (engine-selected) ---------------- */
+
+  const WI_SCENARIOS_GH = [
+    ['push_branch', 'Push to a branch'],
+    ['push_tag', 'Push a tag'],
+    ['pr', 'Pull request'],
+    ['schedule', 'Scheduled run'],
+    ['workflow_dispatch', 'Manual dispatch'],
+    ['release', 'Release']
+  ];
+  const WI_PR_ACTIONS = ['opened', 'synchronize', 'reopened', 'labeled',
+    'ready_for_review', 'closed'];
+  const WI_RELEASE_ACTIONS = ['published', 'created', 'released',
+    'prereleased', 'edited'];
+
+  function wiDispatchable() {
+    const out = [];
+    Object.keys((WHATIF && WHATIF.workflows) || {}).forEach(f => {
+      const wf = WHATIF.workflows[f];
+      if ((wf.on || {}).workflow_dispatch) out.push(f);
+    });
+    return out;
+  }
+
+  function wiBranchNameGH() {
+    if (wiState.scenario === 'pr') return wiState.featureName || 'feature/widget';
+    if (wiState.branchKind === 'main') return 'main';
+    return wiState.featureName || 'feature/widget';
+  }
+
+  function wiConfigGH() {
+    const s = wiState;
+    const overrides = {};
+    s.overrides.forEach(o => { if (o.name) overrides[o.name] = o.value; });
+    let changedFiles = null;
+    if (s.changedMode === 'all') changedFiles = 'all';
+    else if (s.changedMode === 'none') changedFiles = [];
+    else if (s.changedMode === 'list') {
+      changedFiles = s.changedList.split('\n').map(x => x.trim()).filter(Boolean);
+    }
+    const refKind = (s.scenario === 'push_tag' || s.scenario === 'release'
+      || (s.scenario === 'workflow_dispatch' && s.branchKind === 'tag'))
+      ? 'tag' : 'branch';
+    const cfg = {
+      scenario: s.scenario,
+      branch: wiBranchNameGH(),
+      tag: s.tag || 'v1.0.0',
+      refKind: refKind,
+      openPR: s.scenario === 'push_branch' ? s.openMR : false,
+      target: s.target || 'main',
+      draft: s.draft,
+      newBranch: s.scenario === 'push_branch' ? s.newBranch : false,
+      commitMessage: s.commitMessage,
+      changedFiles: changedFiles,
+      overrides: overrides
+    };
+    if (s.prAction) cfg.prAction = s.prAction;
+    if (s.scenario === 'workflow_dispatch') {
+      if (s.dispatchWorkflow) cfg.dispatchWorkflow = s.dispatchWorkflow;
+      cfg.inputs = Object.assign({}, s.dispatchInputs);
+    }
+    if (s.scenario === 'release') cfg.releaseAction = s.releaseAction;
+    return cfg;
+  }
+
+  function wiDispatchInputsHtml(wfFile) {
+    const wf = (WHATIF.workflows || {})[wfFile];
+    const declared = wf && wf.on && wf.on.workflow_dispatch
+      ? (wf.on.workflow_dispatch.inputs || {}) : {};
+    const names = Object.keys(declared);
+    if (!names.length) return '';
+    let html = '<div class="wi-field"><label>inputs</label></div>';
+    names.forEach(n => {
+      const spec = declared[n] || {};
+      const cur = Object.prototype.hasOwnProperty.call(wiState.dispatchInputs, n)
+        ? wiState.dispatchInputs[n]
+        : (spec.type === 'boolean'
+            ? String(spec.default).toLowerCase() === 'true'
+            : (spec.default === null || spec.default === undefined
+               ? '' : spec.default));
+      if (spec.type === 'boolean') {
+        html += '<label class="wi-choice"><input type="checkbox" '
+          + 'class="wi-dispatch-input" data-input="' + esc(n) + '"'
+          + (cur ? ' checked' : '') + '><span>' + esc(n) + '</span></label>';
+      } else if (spec.options && spec.options.length) {
+        html += '<div class="wi-field"><label>' + esc(n)
+          + (spec.required ? ' (required)' : '') + '</label>'
+          + '<select class="input wi-dispatch-input" data-input="' + esc(n) + '">'
+          + spec.options.map(o => '<option value="' + esc(o) + '"'
+              + (String(cur) === o ? ' selected' : '') + '>' + esc(o)
+              + '</option>').join('')
+          + '</select></div>';
+      } else {
+        html += '<div class="wi-field"><label>' + esc(n)
+          + (spec.required ? ' (required)' : '') + '</label>'
+          + '<input class="input wi-dispatch-input" data-input="' + esc(n)
+          + '" value="' + esc(String(cur)) + '"></div>';
+      }
+    });
+    return html;
+  }
+
+  function renderWiControlsGH() {
+    const s = wiState;
+    let html = '<div class="wi-group"><h3>Event</h3>'
+      + WI_SCENARIOS_GH.map(([v, l]) =>
+          wiRadio('wi-scenario', v, l, s.scenario === v)).join('')
+      + '</div>';
+
+    const onBranch = s.scenario === 'push_branch'
+      || (s.scenario === 'workflow_dispatch' && s.branchKind !== 'tag');
+    if (s.scenario === 'push_branch' || s.scenario === 'workflow_dispatch') {
+      html += '<div class="wi-group"><h3>'
+        + (s.scenario === 'workflow_dispatch' ? 'Ref' : 'Branch') + '</h3>'
+        + wiRadio('wi-branch', 'main', 'main', s.branchKind === 'main',
+                  '<span class="chip chip-info" data-tip="default branch, protected">default</span>')
+        + wiRadio('wi-branch', 'feature', 'another branch…',
+                  s.branchKind !== 'main' && s.branchKind !== 'tag',
+                  '<span class="chip" data-tip="any other branch — unprotected">unprotected</span>')
+        + (s.scenario === 'workflow_dispatch'
+            ? wiRadio('wi-branch', 'tag', 'a tag…', s.branchKind === 'tag',
+                      '<span class="chip" data-tip="dispatches can target any ref">tag</span>')
+            : '')
+        + '<div class="wi-field" id="wi-feature-field"'
+        + (s.branchKind !== 'main' && s.branchKind !== 'tag' ? '' : ' hidden')
+        + '><label for="wi-feature-name">branch name (filters may pattern-match it)</label>'
+        + '<input class="input" id="wi-feature-name" value="' + esc(s.featureName) + '"></div>';
+      if (s.scenario === 'workflow_dispatch' && s.branchKind === 'tag') {
+        html += '<div class="wi-field"><label for="wi-tag-name">tag name</label>'
+          + '<input class="input" id="wi-tag-name" value="' + esc(s.tag) + '"></div>';
+      }
+      if (s.scenario === 'push_branch') {
+        html += wiCheck('wi-openmr',
+          'an open PR uses this branch as source', s.openMR,
+          'One push then fires push AND pull_request (and pull_request_target) — a workflow subscribed to more than one of them runs twice: the duplicate-run situation')
+          + wiCheck('wi-newbranch', 'first push of a new branch', s.newBranch,
+            'Sets github.event.created');
+      }
+      html += '</div>';
+    }
+
+    if (s.scenario === 'push_tag' || s.scenario === 'release') {
+      html += '<div class="wi-group"><h3>Tag</h3>'
+        + '<div class="wi-field"><label for="wi-tag-name">tag name</label>'
+        + '<input class="input" id="wi-tag-name" value="' + esc(s.tag) + '"></div>';
+      if (s.scenario === 'release') {
+        html += '<div class="wi-field"><label for="wi-release-action">release action</label>'
+          + '<select class="input" id="wi-release-action">'
+          + WI_RELEASE_ACTIONS.map(a => '<option value="' + a + '"'
+              + (s.releaseAction === a ? ' selected' : '') + '>' + a
+              + '</option>').join('')
+          + '</select></div>';
+      }
+      html += '</div>';
+    }
+
+    if (s.scenario === 'pr') {
+      html += '<div class="wi-group"><h3>Pull request</h3>'
+        + '<div class="wi-field"><label for="wi-feature-name">source (head) branch</label>'
+        + '<input class="input" id="wi-feature-name" value="' + esc(s.featureName) + '"></div>'
+        + '<div class="wi-field"><label for="wi-target-input">target (base) branch — branches: filters match THIS</label>'
+        + '<input class="input" id="wi-target-input" value="' + esc(s.target || 'main') + '"></div>'
+        + wiCheck('wi-draft', 'draft PR', s.draft,
+          'Sets github.event.pull_request.draft — GitHub does not skip drafts unless your conditions say so')
+        + '<div class="wi-field"><label for="wi-praction">action (types: filters match this; default: opened)</label>'
+        + '<select class="input" id="wi-praction">'
+        + '<option value=""' + (s.prAction ? '' : ' selected') + '>opened (default)</option>'
+        + WI_PR_ACTIONS.map(a => '<option value="' + a + '"'
+            + (s.prAction === a ? ' selected' : '') + '>' + a + '</option>').join('')
+        + '</select></div>'
+        + '</div>';
+    } else if (s.scenario === 'push_branch' && s.openMR) {
+      html += '<div class="wi-group"><h3>The open PR</h3>'
+        + '<div class="wi-field"><label for="wi-target-input">target (base) branch</label>'
+        + '<input class="input" id="wi-target-input" value="' + esc(s.target || 'main') + '"></div>'
+        + wiCheck('wi-draft', 'draft PR', s.draft,
+          'Sets github.event.pull_request.draft in the pull_request runs')
+        + '</div>';
+    }
+
+    if (s.scenario === 'workflow_dispatch') {
+      const dispatchable = wiDispatchable();
+      html += '<div class="wi-group"><h3>Workflow</h3>'
+        + '<div class="wi-field"><label for="wi-dispatch-workflow">workflow to dispatch</label>'
+        + '<select class="input" id="wi-dispatch-workflow">'
+        + '<option value=""' + (s.dispatchWorkflow ? '' : ' selected')
+        + '>every dispatchable workflow (one run each)</option>'
+        + dispatchable.map(f => '<option value="' + esc(f) + '"'
+            + (s.dispatchWorkflow === f ? ' selected' : '') + '>' + esc(f)
+            + '</option>').join('')
+        + '</select></div>'
+        + (s.dispatchWorkflow ? wiDispatchInputsHtml(s.dispatchWorkflow) : '')
+        + '</div>';
+    }
+
+    html += '<div class="wi-group"><h3>Changed files</h3>'
+      + wiRadio('wi-changed', 'unknown', 'unknown — leave “depends”', s.changedMode === 'unknown')
+      + wiRadio('wi-changed', 'all', 'assume every pattern matches', s.changedMode === 'all')
+      + wiRadio('wi-changed', 'none', 'assume nothing matches', s.changedMode === 'none')
+      + wiRadio('wi-changed', 'list', 'exactly these paths…', s.changedMode === 'list')
+      + '<div class="wi-field" id="wi-changed-field"' + (s.changedMode === 'list' ? '' : ' hidden')
+      + '><label for="wi-changed-list">one path per line (what’s in the push / PR)</label>'
+      + '<textarea class="input" id="wi-changed-list" spellcheck="false">'
+      + esc(s.changedList) + '</textarea></div>'
+      + '</div>';
+
+    html += '<div class="wi-group"><h3>Commit message</h3>'
+      + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
+      + esc(s.commitMessage) + '"></div></div>';
+
+    html += '<div class="wi-group"><h3>Variables '
+      + '<span style="text-transform:none;letter-spacing:0">(pin unknowns: vars.NAME, secrets.NAME, github.repository, env names)</span></h3>'
+      + '<div id="wi-var-rows">'
+      + s.overrides.map((o, i) =>
+          '<div class="wi-var-row" data-idx="' + i + '">'
+          + '<input class="input wi-var-name" placeholder="vars.NAME" value="' + esc(o.name) + '">'
+          + '<input class="input wi-var-value" placeholder="(empty string)" value="' + esc(o.value) + '">'
+          + '<button class="btn btn-quiet wi-var-del" data-tip="Remove">&times;</button></div>'
+        ).join('')
+      + '</div>'
+      + '<div class="wi-inline-btns"><button class="btn" id="wi-var-add">+ variable</button></div>'
+      + '<div class="legend-note">an empty value is the empty string — which is different from unset</div>'
+      + '<div id="wi-unknown-list"></div>'
+      + '</div>';
+
+    wiControls.innerHTML = html;
+    wireWiControls();
+  }
+
+  function renderWiControls() {
+    if (WI_GH) renderWiControlsGH(); else renderWiControlsGL();
+  }
+  function wiConfig() {
+    return WI_GH ? wiConfigGH() : wiConfigGL();
+  }
+
   function wireWiControls() {
     wiControls.querySelectorAll('input[name="wi-scenario"]').forEach(el =>
       el.addEventListener('change', () => { wiState.scenario = el.value; wiRefresh(true); }));
@@ -2989,6 +3260,27 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     };
     bindSelect('wi-target', 'target');
     bindSelect('wi-flavor', 'mrFlavor');
+    // GitHub-only knobs (the elements exist only in the GitHub controls;
+    // every binding is a no-op when the element is absent)
+    bindText('wi-target-input', 'target');
+    bindSelect('wi-praction', 'prAction');
+    bindSelect('wi-release-action', 'releaseAction');
+    const dwEl = document.getElementById('wi-dispatch-workflow');
+    if (dwEl) dwEl.addEventListener('change', () => {
+      wiState.dispatchWorkflow = dwEl.value;
+      wiState.dispatchInputs = {};   // a new workflow declares new inputs
+      wiRefresh(true);
+    });
+    wiControls.querySelectorAll('.wi-dispatch-input').forEach(el => {
+      const name = el.dataset.input;
+      const ev = el.type === 'checkbox' || el.tagName === 'SELECT'
+        ? 'change' : 'input';
+      el.addEventListener(ev, () => {
+        wiState.dispatchInputs[name] =
+          el.type === 'checkbox' ? el.checked : el.value;
+        wiRefresh(false);
+      });
+    });
 
     const addBtn = document.getElementById('wi-var-add');
     if (addBtn) addBtn.addEventListener('click', () => {
@@ -3032,10 +3324,26 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     REPORT.nodes.forEach(n => {
       const w = n.annotations && n.annotations.whatif;
       if (w) Object.keys(w.variables || {}).forEach(k => defined.add(k));
+      if (w) Object.keys(w.env || {}).forEach(k => {
+        defined.add(k); defined.add('env.' + k.toLowerCase());
+      });
     });
     if (WHATIF.workflow) (WHATIF.workflow.rules || []).forEach(r =>
       Object.keys(r.variables || {}).forEach(k => defined.add(k)));
-    wiState.overrides.forEach(o => { if (o.name) defined.add(o.name); });
+    Object.keys(WHATIF.workflows || {}).forEach(f => {
+      const wf = WHATIF.workflows[f];
+      Object.keys(wf.env || {}).forEach(k => {
+        defined.add(k); defined.add('env.' + k.toLowerCase());
+      });
+      ['workflow_dispatch', 'workflow_call'].forEach(t => {
+        const inp = ((wf.on || {})[t] || {}).inputs || {};
+        Object.keys(inp).forEach(k =>
+          defined.add('inputs.' + k.toLowerCase()));
+      });
+    });
+    wiState.overrides.forEach(o => {
+      if (o.name) { defined.add(o.name); defined.add(o.name.toLowerCase()); }
+    });
 
     const envSet = new Set();
     const decided = new Set();
@@ -3049,7 +3357,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     const runtime = [], unsetType = [], nowhere = [];
     wiExprVars.forEach(name => {
       if (defined.has(name) || envSet.has(name)) return;
-      const isPre = /^(CI|GITLAB)_/.test(name);
+      const isPre = IS_GH
+        ? (/^(GITHUB|RUNNER)_/.test(name) || name === 'CI'
+           || /^(github|runner|secrets|vars|needs|inputs)\./.test(name))
+        : /^(CI|GITLAB)_/.test(name);
       const isDecided = decided.has(name)
         || prefixes.some(p => name.indexOf(p) === 0);
       if (isPre && isDecided) unsetType.push(name);
@@ -3070,7 +3381,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     let html = '';
     if (runtime.length) {
       html += '<div class="legend-note" style="margin-top:var(--sp-2)">'
-        + 'GitLab sets these at pipeline time — <b>not simulated</b>; rules '
+        + VENDOR + ' sets these at run time — <b>not simulated</b>; conditions '
         + 'using them show “depends” until you pin a value:</div>'
         + rows(runtime, 'pin');
     }
@@ -3136,7 +3447,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       const w = nodeMap[id].annotations.whatif;
       (effectiveNeeds(id) || []).forEach(need => {
         if (need.kind) return;
-        const tid = (w.child_of ? w.child_of + '::' : '') + need.job;
+        const prefix = w.child_of ? w.child_of + '::'
+        : (w.provider === 'github' && w.workflow) ? w.workflow + '::' : '';
+      const tid = prefix + need.job;
         if (idSet.has(tid)) edges.push({ src: id, dst: tid, kind: 'needs' });
       });
     });
@@ -3247,9 +3560,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     let chips = '<span class="chip">' + esc(cand.source) + '</span>'
       + '<span class="chip" style="font-family:var(--font-mono)">' + esc(cand.ref) + '</span>';
     if (wiFatalActive) {
-      chips += '<span class="chip chip-error" data-tip="The configuration is invalid — GitLab refuses to create any pipeline">✖ invalid config</span>';
+      chips += '<span class="chip chip-error" data-tip="The configuration is invalid — ' + VENDOR + ' refuses to create any pipeline">✖ invalid config</span>';
     } else if (cand.created === true && cand.creationFails) {
-      chips += '<span class="chip chip-error" data-tip="A needs/dependencies problem in this pipeline makes GitLab fail to create it">✖ creation fails</span>';
+      chips += '<span class="chip chip-error" data-tip="A needs/dependencies problem in this pipeline makes ' + VENDOR + ' fail to create it">✖ creation fails</span>';
     } else if (cand.created === true) chips += '<span class="chip chip-ok">✓ created</span>';
     else if (cand.created === false) chips += '<span class="chip chip-error">✖ not created</span>';
     else chips += '<span class="chip chip-info" data-tip="' + esc(cand.reason || '') + '">? depends</span>';
@@ -3345,9 +3658,14 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     html += wiGraphSvg(cand);
     if (cand.children && cand.children.length) {
       html += '<div class="wi-children">'
-        + '<div class="legend-note" style="margin-bottom:var(--sp-1)">child pipelines '
-        + '(CI_PIPELINE_SOURCE becomes parent_pipeline in here — merge_request_event '
-        + 'rules never match; the child evaluates its own workflow:rules)</div>'
+        + '<div class="legend-note" style="margin-bottom:var(--sp-1)">'
+        + (WI_GH
+            ? 'downstream runs (called reusable workflows run as part of the caller; '
+              + 'workflow_run-triggered workflows start after this one completes)'
+            : 'child pipelines (CI_PIPELINE_SOURCE becomes parent_pipeline in here — '
+              + 'merge_request_event rules never match; the child evaluates its own '
+              + 'workflow:rules)')
+        + '</div>'
         + cand.children.map(renderWiPipeline).join('') + '</div>';
     }
     html += '</section>';
@@ -3375,7 +3693,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     const cfg = wiConfig();
     let result;
     try {
-      result = PipeviewWhatIf.evaluateEvent(REPORT, cfg);
+      result = WIENGINE.evaluateEvent(REPORT, cfg);
     } catch (err) {
       wiResults.innerHTML = '<div class="empty"><div class="empty-title">Simulation failed</div><p>'
         + esc(String(err)) + '</p></div>';
@@ -3406,7 +3724,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     const strip = [];
     if (fatal.length) {
       strip.push(wiDiag('error',
-        '<b>Invalid configuration — GitLab refuses to create ANY pipeline:</b><br>'
+        '<b>Invalid configuration — ' + VENDOR + ' refuses to create ANY pipeline:</b><br>'
         + fatal.map(f => esc(f.message)).join('<br>')));
     } else if (topCountEarly > 0 && createdAllEarly === 0) {
       strip.push(wiDiag('warning',
@@ -3419,8 +3737,11 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         + (d.instances ? ' ×' + d.instances : '') + '</code>').join(', ');
       strip.push(wiDiag('warning', '<b>' + result.duplicates.length
         + ' duplicate job' + (result.duplicates.length > 1 ? 's' : '')
-        + ':</b> ' + names + ' — may run in more than one pipeline for this single event. '
-        + 'The usual fix is the documented <code>workflow:rules</code> dedup pattern.'));
+        + ':</b> ' + names + ' — may run in more than one '
+        + (WI_GH ? 'workflow run' : 'pipeline') + ' for this single event. '
+        + (WI_GH
+            ? 'The usual fix is a branch filter on the push trigger (or dropping one trigger).'
+            : 'The usual fix is the documented <code>workflow:rules</code> dedup pattern.')));
     }
     const rgDups = result.duplicates.filter(d => d.resource_group);
     if (rgDups.length) {
@@ -3456,13 +3777,14 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     document.getElementById('count-whatif').textContent = ' ' + createdAll;
     const nested = wiFatalActive ? 0 : createdAll
       - result.candidates.filter(c => c.created !== false && !c.creationFails).length;
-    wiNoteEl.textContent = topCount + ' candidate pipeline'
+    wiNoteEl.textContent = topCount + ' candidate '
+      + (WI_GH ? 'workflow run' : 'pipeline')
       + (topCount > 1 ? 's' : '') + ' · ' + createdAll + ' would run'
       + (wiFatalActive ? ' (configuration invalid)'
          : nested ? ' (' + nested + ' nested)' : '');
 
-    wiCopyText = PipeviewWhatIf.textSummary(REPORT, result, cfg);
-    wiCopyMd = PipeviewWhatIf.markdownSummary(REPORT, result, cfg);
+    wiCopyText = WIENGINE.textSummary(REPORT, result, cfg);
+    wiCopyMd = WIENGINE.markdownSummary(REPORT, result, cfg);
     wiResults.innerHTML = legend
       + (strip.length ? '<div class="wi-banner-strip">' + strip.join('') + '</div>' : '')
       + wiTextBlock('plain-text job listing (for copy/paste)')
@@ -3500,10 +3822,10 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   /* ---------------- delta mode (a baseline is pinned) ---------------- */
 
   function renderWiDelta(result, cfg) {
-    const curLabel = PipeviewWhatIf.describeConfig(cfg);
-    const diff = PipeviewWhatIf.diffEvents(wiBaseline.result, result);
-    wiCopyText = PipeviewWhatIf.textDiff(REPORT, diff, wiBaseline.label, curLabel);
-    wiCopyMd = PipeviewWhatIf.markdownDiff(REPORT, diff, wiBaseline.label, curLabel);
+    const curLabel = WIENGINE.describeConfig(cfg);
+    const diff = WIENGINE.diffEvents(wiBaseline.result, result);
+    wiCopyText = WIENGINE.textDiff(REPORT, diff, wiBaseline.label, curLabel);
+    wiCopyMd = WIENGINE.markdownDiff(REPORT, diff, wiBaseline.label, curLabel);
     const c = diff.counts;
     const identical = !c.added && !c.removed && !c.changed;
 
@@ -3522,7 +3844,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
     const strip = [];
     if ((result.fatal || []).length) {
       strip.push(wiDiag('error',
-        '<b>Invalid configuration — GitLab refuses to create ANY pipeline:</b><br>'
+        '<b>Invalid configuration — ' + VENDOR + ' refuses to create ANY pipeline:</b><br>'
         + result.fatal.map(f => esc(f.message)).join('<br>')));
     }
     // pipeline-level status is the headline when it explains the counts —
@@ -3898,7 +4220,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       wiClipboardFlow(wiMdBtn, wiCopyMd, wiMdLabel);
     });
     wiExportBtn.addEventListener('click', () => {
-      wiClipboardFlow(wiExportBtn, PipeviewWhatIf.scenarioYaml(wiConfig()),
+      wiClipboardFlow(wiExportBtn, WIENGINE.scenarioYaml(wiConfig()),
                       () => 'Export scenario');
     });
     wiPinBtn.addEventListener('click', () => {
@@ -3909,8 +4231,8 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
         try {
           wiBaseline = {
             config: cfg,
-            result: PipeviewWhatIf.evaluateEvent(REPORT, cfg),
-            label: PipeviewWhatIf.describeConfig(cfg)
+            result: WIENGINE.evaluateEvent(REPORT, cfg),
+            label: WIENGINE.describeConfig(cfg)
           };
         } catch (err) {
           wiBaseline = null;

@@ -23,6 +23,7 @@ examples: install
 	pipeview examples/make-project -o examples/out
 	pipeview examples/gitlab-project -o examples/out || test $$? -eq 1
 	pipeview examples/gitlab-whatif-project -o examples/out/whatif || test $$? -eq 1
+	pipeview examples/github-project -o examples/out/github || test $$? -eq 1
 	pipeview examples/torture-project -o examples/out/torture || test $$? -eq 1
 
 ## Run pipeview on this repo's own Makefile

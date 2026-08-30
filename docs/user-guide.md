@@ -194,7 +194,7 @@ full diagnostics list. For Make this covers `include` directives and
 never fetches remote content, so the include becomes a warning and its jobs
 appear as ghost nodes where referenced.*
 
-### What-If (GitLab CI)
+### What-If (GitLab CI and GitHub Actions)
 
 A pipeline simulator, answering "what would actually run if…?" without
 pushing anything. Pick an event in the left rail — push, tag push, MR,
@@ -263,6 +263,41 @@ The toolbar buttons:
 `v1.0.0`. Removed jobs are red-dashed, added jobs would be green, verdict
 changes amber — and pipeline-level differences are named, here a tag
 pipeline whose creation would fail outright.*
+
+### GitHub Actions reports
+
+Everything above applies to GitHub Actions repositories too — point
+pipeview at a directory containing `.github/workflows/` (or a single
+workflow file) and one report covers the whole workflow set:
+
+```bash
+pipeview examples/github-project -o out
+open out/github-actions.report.html
+```
+
+The mapping mirrors GitLab's structure where the two systems align, and
+is honest where they differ:
+
+- **Graph** — each workflow is a collapsible cluster (primary workflows
+  open, reusable `workflow_call`-only ones folded behind their caller's
+  ▶ edge); `needs:` edges are the DAG — GitHub has no stages, so there
+  are no stage lanes to draw. Cross-repository `uses:` calls are dashed
+  ghosts offline; `pipeview github` resolves them into real nodes.
+- **Variables** — `env:` at workflow/job/step scope with timelines,
+  `workflow_dispatch`/`workflow_call` inputs as `inputs.*` entries,
+  matrix axes, and curated docs for `GITHUB_*`/`RUNNER_*` variables and
+  `github.*` context fields.
+- **What-If** — candidates are *(workflow × fired event)*: one push to
+  a branch with an open PR fires `push`, `pull_request` and
+  `pull_request_target`, so a workflow subscribed to two of them runs
+  twice — the duplicates banner names the branch-filter fix, the GitHub
+  twin of GitLab's `workflow:rules` dedup pattern. Events cover push,
+  tag push, pull request (with action), schedule, manual dispatch
+  (declared inputs render as typed controls), and release. Verdicts are
+  `runs` / `skipped` / *depends*; a job gated on an `environment:` with
+  protection rules gets a note, never a guess — approval gates live in
+  repository settings, not the workflow file. Secrets, `vars.*`, runner
+  state and `hashFiles()` are *depends* until pinned.
 
 ## Worked example 1: mapping a Make build
 
@@ -435,14 +470,19 @@ run the same evaluation logic, kept in lockstep by a shared test suite, so
 they cannot disagree: unknowables render as *depends* with the missing
 fact named, and trigger jobs stop at the project boundary.
 
-## Working with a GitLab instance
+## Working with a GitLab instance (or GitHub)
 
-Everything above is offline. The `pipeview gitlab` subcommand — the only
-part of pipeview that touches a network — fetches CI configuration straight
-from a GitLab instance, resolves cross-repository includes, and runs the
-same offline pipeline on what it fetched. The README's
+Everything above is offline. The `pipeview gitlab` and `pipeview github`
+subcommands — the only parts of pipeview that touch a network — fetch CI
+configuration straight from the server, resolve cross-repository includes
+and reusable workflows, and run the same offline pipeline on what they
+fetched. The README's
 [Fetching from GitLab](../README.md#fetching-from-gitlab-pipeview-gitlab)
-section covers the full flow; highlights and details that go beyond it:
+and
+[Fetching from GitHub](../README.md#fetching-from-github-pipeview-github)
+sections cover the full flows; the two commands mirror each other
+(`pipeview github auth` / `repos` / `report` / `track` / `sync`, the same
+browser TUI, the same rollup). GitLab-specific highlights below:
 
 ```bash
 pipeview gitlab auth --host https://gitlab.example.com   # once
@@ -517,7 +557,7 @@ which include failed to resolve.
 
 The JSON model is what the HTML report itself consumes — parsers emit it,
 the renderer reads it, and nothing in the renderer knows whether the source
-was Make or GitLab CI.
+was Make, GitLab CI, or GitHub Actions.
 
 ---
 

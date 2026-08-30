@@ -24,9 +24,18 @@ import re
 
 import pipeview
 from pipeview.model import Diagnostic
+from pipeview.parsers.github_whatif_eval import (
+    evaluate_event as evaluate_github_event,
+)
 from pipeview.parsers.gitlab_whatif_eval import evaluate_event, might_run
 from pipeview.render.mmd import escape_label
-from pipeview.scenarios import Scenario, to_whatif_config
+from pipeview.scenarios import (
+    GITHUB_EVENTS,
+    GITLAB_EVENTS,
+    Scenario,
+    to_github_whatif_config,
+    to_whatif_config,
+)
 
 MARKER = "pipeview-trigger-doc"
 INDEX_NAME = "pipeline-triggers.md"
@@ -65,17 +74,24 @@ def _candidate_ref(cand: dict) -> str:
     return cand["ref"]
 
 
-def _event_text(scenario: Scenario, cand_ref: str | None = None) -> str:
+def _event_text(scenario: Scenario, provider: str = "gitlab") -> str:
     """Human description of the event, from the scenario definition."""
     c = scenario.config
     branch = c.get("branch")
     tag = c.get("tag")
+    gh = provider == "github"
     if scenario.event == "push_branch":
         text = f"push to branch `{branch}`" if branch \
             else "push to the default branch"
         if c.get("new_branch"):
             text += " (first push of the branch)"
-        if "open_mr" in c:
+        open_pr = c.get("open_pr") if gh else None
+        if gh and (open_pr is not None or "open_mr" in c):
+            target = (open_pr or c.get("open_mr") or {}).get("target")
+            text += (" with an open PR"
+                     + (f" → `{target}`" if target else "")
+                     + " (also fires pull_request)")
+        elif "open_mr" in c:
             target = c["open_mr"].get("target")
             text += " with an open MR" + (f" → `{target}`" if target else "")
         return text
@@ -88,8 +104,31 @@ def _event_text(scenario: Scenario, cand_ref: str | None = None) -> str:
         if c.get("draft"):
             text += " (draft)"
         return text
+    if scenario.event == "pr":
+        src = f"`{branch}`" if branch else "the source branch"
+        dst = f"`{c['target']}`" if c.get("target") else "the default branch"
+        action = c.get("pr_action") or "opened"
+        text = f"pull request {src} → {dst} ({action})"
+        if c.get("draft"):
+            text += " (draft)"
+        return text
+    if scenario.event == "workflow_dispatch":
+        on = f" on tag `{tag or 'v1.0.0'}`" if c.get("ref_kind") == "tag" \
+            else (f" on branch `{branch}`" if branch else "")
+        wf = f" of `{c['workflow']}`" if c.get("workflow") else ""
+        text = f"manual dispatch{wf}{on}"
+        inputs = c.get("inputs") or {}
+        if inputs:
+            text += " with inputs " + ", ".join(
+                f"`{k}={v}`" for k, v in sorted(inputs.items()))
+        return text
+    if scenario.event == "release":
+        action = c.get("release_action") or "published"
+        return f"release `{tag or 'v1.0.0'}` {action}"
     on = f" on tag `{tag or 'v1.0.0'}`" if c.get("ref_kind") == "tag" \
         else (f" on branch `{branch}`" if branch else "")
+    if scenario.event == "schedule" and gh:
+        return "scheduled (cron) run"
     return {
         "schedule": "scheduled pipeline",
         "web": "manual pipeline (web UI)",
@@ -98,8 +137,8 @@ def _event_text(scenario: Scenario, cand_ref: str | None = None) -> str:
     }[scenario.event] + on
 
 
-def _scenario_line(scenario: Scenario) -> str:
-    parts = [_event_text(scenario)]
+def _scenario_line(scenario: Scenario, provider: str = "gitlab") -> str:
+    parts = [_event_text(scenario, provider)]
     variables = scenario.config.get("variables") or {}
     if variables:
         parts.append("variables: " + ", ".join(
@@ -118,6 +157,11 @@ def _scenario_line(scenario: Scenario) -> str:
 
 # ---------------- report metadata ----------------
 
+def _report_provider(report: dict) -> str:
+    whatif = (report.get("annotations") or {}).get("whatif") or {}
+    return "github" if whatif.get("provider") == "github" else "gitlab"
+
+
 def _job_meta(report: dict) -> dict:
     jobs = {}
     for n in report.get("nodes") or []:
@@ -126,7 +170,7 @@ def _job_meta(report: dict) -> dict:
             jobs[n["id"]] = w
     whatif = (report.get("annotations") or {}).get("whatif") or {}
     return {"jobs": jobs, "stages": whatif.get("stages") or [],
-            "whatif": whatif}
+            "whatif": whatif, "provider": _report_provider(report)}
 
 
 def _stage_sorted(ids: list[str], meta: dict) -> list[str]:
@@ -157,7 +201,8 @@ def _matrix_suffix(outcome: dict) -> str:
     return ""
 
 
-def _verdict_text(outcome: dict, is_trigger: bool) -> str:
+def _verdict_text(outcome: dict, is_trigger: bool,
+                  provider: str = "gitlab") -> str:
     state = outcome["state"]
     if is_trigger and might_run(outcome):
         t = "▶ trigger"
@@ -178,7 +223,7 @@ def _verdict_text(outcome: dict, is_trigger: bool) -> str:
     elif state == "conditional":
         t = "*depends*"
     elif state == "skipped":
-        t = "skipped (when: never)"
+        t = "skipped" if provider == "github" else "skipped (when: never)"
     else:
         t = "not added"
     return t + _matrix_suffix(outcome)
@@ -191,7 +236,7 @@ def _matched_desc(outcome: dict) -> str | None:
     return None
 
 
-def _why_text(outcome: dict) -> str:
+def _why_text(outcome: dict, provider: str = "gitlab") -> str:
     """One literal line from the deciding rule — never a paraphrase."""
     state = outcome["state"]
     if state == "conditional":
@@ -201,6 +246,8 @@ def _why_text(outcome: dict) -> str:
             why += " — " + notes[0]
         return why
     if state == "skipped":
+        if provider == "github":
+            return outcome.get("reason") or "skipped"
         desc = _matched_desc(outcome)
         return ("rule " + _code(desc) + " says `when: never`") \
             if desc and desc != "(unconditional)" else "`when: never`"
@@ -210,7 +257,7 @@ def _why_text(outcome: dict) -> str:
         reason = outcome.get("reason") or "no rule matched"
         return reason
     desc = _matched_desc(outcome)
-    if desc is None or desc == "(unconditional)" \
+    if desc is None or desc in ("(unconditional)", "no if: condition") \
             or desc.startswith("implicit default only"):
         return "—"
     return _code(desc)
@@ -230,6 +277,12 @@ def _trigger_targets(whatif_job: dict) -> list[str]:
     fwd = trig.get("forward")
     if fwd and fwd.get("yaml_variables") is False:
         out.append("no yaml variables forwarded")
+    uses = whatif_job.get("uses") or {}
+    if uses.get("kind") == "local":
+        out.append(f"reusable workflow `{uses.get('workflow')}`")
+    elif uses.get("kind") == "remote":
+        out.append("a reusable workflow in another repository "
+                   f"(`{uses.get('raw')}`)")
     return out
 
 
@@ -342,8 +395,13 @@ def _dag_lines(cand: dict, meta: dict) -> tuple[list[str], bool]:
     in_set = set(in_ids)
     for job_id in in_ids:
         whatif_job = meta["jobs"][job_id]
-        prefix = (whatif_job.get("child_of") + "::") \
-            if whatif_job.get("child_of") else ""
+        if whatif_job.get("child_of"):
+            prefix = whatif_job["child_of"] + "::"
+        elif whatif_job.get("provider") == "github" \
+                and whatif_job.get("workflow"):
+            prefix = whatif_job["workflow"] + "::"
+        else:
+            prefix = ""
         for need in _effective_needs(cand["jobs"][job_id], whatif_job):
             if need.get("kind") in ("cross_pipeline", "cross_project"):
                 continue
@@ -357,9 +415,11 @@ def _dag_lines(cand: dict, meta: dict) -> tuple[list[str], bool]:
     return lines, False
 
 
-def _fanout_lines(scenario: Scenario, cands: list[dict]) -> list[str]:
+def _fanout_lines(scenario: Scenario, cands: list[dict],
+                  provider: str = "gitlab") -> list[str]:
+    event = _plain(_event_text(scenario, provider).replace("`", ""))
     lines = ["flowchart LR",
-             f'  event(["{escape_label(_plain(_event_text(scenario).replace("`", "")))}"])']
+             f'  event(["{escape_label(event)}"])']
     for cand in cands:
         nid = "pipe_" + re.sub(r"[^0-9A-Za-z_]", "_", cand["id"])
         if cand["created"] is False:
@@ -382,11 +442,13 @@ def _lifecycle_lines(scenario: Scenario, cand: dict, meta: dict) -> list[str]:
         t for i in in_ids
         for t in _trigger_targets(meta["jobs"][i])
         if not t.startswith("no yaml variables"))
+    vendor = "GitHub" if meta.get("provider") == "github" else "GitLab"
     lines = ["sequenceDiagram", "  actor Dev as Developer",
-             "  participant GL as GitLab"]
+             f"  participant GL as {vendor}"]
     if has_downstream:
         lines.append("  participant DS as Downstream")
-    event = _plain(_event_text(scenario).replace("`", ""))
+    event = _plain(_event_text(scenario, meta.get("provider") or "gitlab")
+                   .replace("`", ""))
     lines.append(f"  Dev->>GL: {event}")
     lines.append(f"  GL->>GL: create {cand['label']}")
     by_stage: dict[str, list[str]] = {}
@@ -454,21 +516,28 @@ def _counts_text(counts: dict) -> str:
 
 
 def _candidate_section(scenario: Scenario, cand: dict, meta: dict) -> list[str]:
+    provider = meta.get("provider") or "gitlab"
+    gh = provider == "github"
     lines: list[str] = []
     ref = _candidate_ref(cand)
     lines.append(f"## {cand['label']} (`{ref}`)")
     lines.append("")
 
     if cand["created"] is False:
-        lines.append(f"> **Not created** — {cand['reason']}.")
+        lines.append(("> **Does not run** — " if gh
+                      else "> **Not created** — ") + f"{cand['reason']}.")
         lines.append("")
         return lines
     if cand["created"] is None:
-        lines.append(f"> ⚠ **Creation uncertain** — {cand['reason']}.")
+        lines.append(("> ⚠ **Run uncertain** — " if gh
+                      else "> ⚠ **Creation uncertain** — ")
+                     + f"{cand['reason']}.")
         lines.append("")
     if cand["creationFails"]:
-        lines.append("> ⚠ **Pipeline creation fails** — GitLab refuses to create "
-                     "this pipeline:")
+        vendor = "GitHub" if gh else "GitLab"
+        noun = "run" if gh else "pipeline"
+        lines.append(f"> ⚠ **{noun.capitalize()} creation fails** — {vendor} "
+                     f"refuses to create this {noun}:")
         for err in cand["artifacts"]["errors"]:
             if err["kind"] != "trigger":
                 lines.append(f"> - {_md_cell(err['message'])}")
@@ -485,17 +554,19 @@ def _candidate_section(scenario: Scenario, cand: dict, meta: dict) -> list[str]:
         lines.append(_LEGEND)
     lines.append("")
 
-    lines.append("| Job | Stage | Verdict | Why |")
+    stage_header = "Workflow" if gh else "Stage"
+    lines.append(f"| Job | {stage_header} | Verdict | Why |")
     lines.append("|---|---|---|---|")
     in_rows = []
     out_rows = []
     for job_id in _stage_sorted(cand["jobOrder"], meta):
         outcome = cand["jobs"][job_id]
         whatif_job = meta["jobs"][job_id]
-        is_trigger = bool(whatif_job.get("trigger"))
-        verdict = _verdict_text(outcome, is_trigger)
+        is_trigger = bool(whatif_job.get("trigger")
+                          or whatif_job.get("uses"))
+        verdict = _verdict_text(outcome, is_trigger, provider)
         why = _trigger_why(whatif_job) if is_trigger and might_run(outcome) \
-            else _why_text(outcome)
+            else _why_text(outcome, provider)
         row = (f"| {_md_cell(_code(whatif_job['name']))} "
                f"| {_md_cell(whatif_job.get('stage') or '')} "
                f"| {_md_cell(verdict)} | {_md_cell(why)} |")
@@ -504,10 +575,11 @@ def _candidate_section(scenario: Scenario, cand: dict, meta: dict) -> list[str]:
     lines.append("")
 
     if out_rows:
-        lines.append("<details><summary>Jobs not in this pipeline "
+        noun = "run" if gh else "pipeline"
+        lines.append(f"<details><summary>Jobs not in this {noun} "
                      f"({len(out_rows)})</summary>")
         lines.append("")
-        lines.append("| Job | Stage | Verdict | Why not |")
+        lines.append(f"| Job | {stage_header} | Verdict | Why not |")
         lines.append("|---|---|---|---|")
         lines.extend(out_rows)
         lines.append("")
@@ -521,6 +593,20 @@ def _candidate_section(scenario: Scenario, cand: dict, meta: dict) -> list[str]:
     for err in trigger_errors:
         lines.append(f"> ⚠ {_md_cell(err['message'])}")
     if trigger_errors:
+        lines.append("")
+
+    cascades = [c for c in (cand.get("children") or [])
+                if c.get("source") == "workflow_run"]
+    for child in cascades:
+        if child["created"] is False:
+            lines.append(f"> `{child['childOf']}` has a `workflow_run` "
+                         f"trigger on this workflow but would not fire here "
+                         f"({_md_cell(child['reason'])}).")
+        else:
+            lines.append(f"> ▶ When this workflow's run completes, "
+                         f"`{child['childOf']}` starts (`workflow_run` — "
+                         f"{_md_cell(child['reason'])}).")
+    if cascades:
         lines.append("")
 
     if "lifecycle" in scenario.diagrams:
@@ -563,12 +649,14 @@ def render_scenario_doc(report: dict, scenario: Scenario, evaluation: dict,
     if scenario.intro:
         lines.append(scenario.intro.strip())
         lines.append("")
-    lines.append(_scenario_line(scenario))
+    provider = meta.get("provider") or "gitlab"
+    lines.append(_scenario_line(scenario, provider))
     lines.append("")
 
     if evaluation.get("fatal"):
-        lines.append("> ⚠ **Invalid configuration — GitLab refuses to create "
-                     "any pipeline for any trigger:**")
+        vendor = "GitHub" if provider == "github" else "GitLab"
+        lines.append(f"> ⚠ **Invalid configuration — {vendor} refuses to "
+                     "create any pipeline for any trigger:**")
         for entry in evaluation["fatal"]:
             message = entry.get("message") if isinstance(entry, dict) else str(entry)
             lines.append(f"> - {_md_cell(message)}")
@@ -581,8 +669,10 @@ def render_scenario_doc(report: dict, scenario: Scenario, evaluation: dict,
     for cand in cands:
         ref = _candidate_ref(cand)
         if cand["created"] is False:
-            lines.append(f"- **{cand['label']}** (`{ref}`): not created — "
-                         f"{cand['reason']}.")
+            lines.append(f"- **{cand['label']}** (`{ref}`): "
+                         + ("does not run — " if provider == "github"
+                            else "not created — ")
+                         + f"{cand['reason']}.")
         else:
             counts = _outcome_counts(cand)
             total = len(cand["jobOrder"])
@@ -593,14 +683,15 @@ def render_scenario_doc(report: dict, scenario: Scenario, evaluation: dict,
         names = ", ".join(_code(meta["jobs"].get(d["job"], {}).get("name")
                                 or d["job"]) for d in dups)
         lines.append("")
+        noun = "workflow runs" if provider == "github" else "pipelines"
         lines.append(f"{len(dups)} job{'s' if len(dups) != 1 else ''} would run "
-                     f"in more than one of these pipelines for the same event: "
+                     f"in more than one of these {noun} for the same event: "
                      f"{names}.")
     lines.append("")
 
     if len(cands) > 1:
         lines.append("```mermaid")
-        lines.extend(_fanout_lines(scenario, cands))
+        lines.extend(_fanout_lines(scenario, cands, provider))
         lines.append("```")
         lines.append("")
 
@@ -631,7 +722,9 @@ def render_index(report: dict, entries: list[tuple[Scenario, dict]],
                      + "; every other branch is a generic unprotected feature "
                        "branch.*")
         lines.append("")
-    lines.append("| Scenario | Event | Pipelines | Jobs that run | Gates | Doc |")
+    runs_header = "Runs" if meta.get("provider") == "github" else "Pipelines"
+    lines.append(f"| Scenario | Event | {runs_header} | Jobs that run "
+                 "| Gates | Doc |")
     lines.append("|---|---|---|---|---|---|")
     for scenario, evaluation in entries:
         if evaluation.get("fatal"):
@@ -670,10 +763,27 @@ def generate_trigger_docs(report: dict, scenarios: list[Scenario],
                           regenerate_cmd: str) -> dict[str, str] | None:
     """Evaluate every scenario against the report and render the full doc
     set: {filename: content}. Returns None when the report carries no
-    what-if program (not a GitLab CI configuration)."""
+    what-if program (not a CI configuration). A scenario whose event the
+    report's provider does not understand (an `mr` scenario against a
+    GitHub report, a `release` one against GitLab) is skipped with a note
+    in the index, never guessed at."""
+    provider = _report_provider(report)
+    events = GITHUB_EVENTS if provider == "github" else GITLAB_EVENTS
+    other = "GitLab CI" if provider == "github" else "GitHub Actions"
+    skipped = list(skipped)
     entries: list[tuple[Scenario, dict]] = []
     for scenario in scenarios:
-        evaluation = evaluate_event(report, to_whatif_config(scenario))
+        if scenario.event not in events:
+            skipped.append(
+                f"scenario '{scenario.id}': event `{scenario.event}` "
+                f"applies to {other} configurations — skipped for this "
+                f"report")
+            continue
+        if provider == "github":
+            evaluation = evaluate_github_event(
+                report, to_github_whatif_config(scenario))
+        else:
+            evaluation = evaluate_event(report, to_whatif_config(scenario))
         if evaluation is None:
             return None
         entries.append((scenario, evaluation))

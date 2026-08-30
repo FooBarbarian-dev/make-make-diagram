@@ -87,6 +87,39 @@ What to look for — open the **What-If** tab:
   `CI_PIPELINE_SOURCE=parent_pipeline` — the `publish_docs` rule matches,
   and a `merge_request_event` rule never would.
 
+## github-project
+
+A GitHub Actions workflow set: a `needs:` DAG with a build matrix, a
+local reusable workflow (`deploy.yml`, called with `secrets: inherit`),
+a cross-repository reusable call (unresolvable offline — a ghost with a
+diagnostic), a path-filtered docs workflow, a tag-driven release with a
+production environment gate — and, deliberately, the classic GitHub
+duplicate-run shape: `ci.yml` triggers on both unfiltered `push` and
+`pull_request`.
+
+```bash
+pipeview examples/github-project -o examples/out/github
+open examples/out/github/github-actions.report.html
+```
+
+What to look for — one report covers all four workflows:
+
+- **Graph**: each workflow renders as a cluster; the reusable
+  `deploy.yml` stays folded behind `deploy_staging`'s ▶ edge. The
+  cross-repo `notify` call is a dashed ghost.
+- **What-If**: pick **Push to a branch** with **an open PR uses this
+  branch as source** — `ci.yml` appears twice (`push` and
+  `pull_request` runs) with its jobs badged as duplicates; the banner
+  names the branch-filter fix. Pick **Push a tag** `v1.2.3` and the
+  Release workflow lights up, with `publish` gated on `!inputs.dry_run`
+  (true outside a dispatch) and a note that the production environment
+  can hold it for approval. **Manual dispatch** renders the declared
+  inputs as typed controls.
+- **Variables**: `APP_NAME` and `BUILD_TARGET` carry workflow/job scope
+  timelines; `inputs.dry_run` and `inputs.environment` come from the
+  dispatch/call declarations; referenced `GITHUB_*` names carry curated
+  docs.
+
 ## torture-project
 
 A deliberately hostile Makefile that stress-tests the report UI's overflow

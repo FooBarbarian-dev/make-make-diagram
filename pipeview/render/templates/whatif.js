@@ -1246,6 +1246,7 @@ var PipeviewWhatIf = (function () {
   function evaluateEvent(report, config) {
     var whatif = (report.annotations || {}).whatif;
     if (!whatif) return null;
+    if (whatif.provider) return null;   // a GitHub program — not ours
     var allJobs = jobIndex(report);
     var candidates = buildCandidates(config, whatif)
       .map(function (c) { return evaluateCandidate(c, allJobs, config, whatif, report); });

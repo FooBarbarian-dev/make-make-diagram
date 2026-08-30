@@ -17,7 +17,12 @@ from typing import Any, Literal
 #       Node.annotations["cross_project_needs"] (typed needs:project
 #       records), Node.annotations["rollup_link"] and
 #       Report.annotations["rollup"] when a sync rollup resolved the node.
-SCHEMA_VERSION = 4
+#   5 — GitHub Actions pass: format "github_actions", FileKind "github_yaml",
+#       Report.annotations["whatif"]["provider"] discriminator ("github";
+#       absent means GitLab), Node.annotations["child_pipeline"] reused for
+#       workflow grouping, Node.annotations["uses_info"] (typed reusable-
+#       workflow call record).
+SCHEMA_VERSION = 5
 
 
 @dataclass
@@ -114,7 +119,7 @@ EdgeKind = Literal[
     "extends",
 ]
 
-FileKind = Literal["makefile", "gitlab_yaml"]
+FileKind = Literal["makefile", "gitlab_yaml", "github_yaml"]
 FileStatus = Literal["ok", "error", "unresolved"]
 Severity = Literal["info", "warning", "error"]
 

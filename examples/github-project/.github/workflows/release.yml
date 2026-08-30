@@ -1,0 +1,35 @@
+# Tag-driven release with a production gate. The v[0-9]+.[0-9]+.[0-9]+
+# pattern uses GitHub's filter dialect (+ repeats the preceding class);
+# the production environment can carry required reviewers — a manual
+# gate that lives in repository settings, so the report notes it rather
+# than guessing.
+
+name: Release
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        type: boolean
+        default: true
+
+jobs:
+  ## Build the release artifacts
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make package
+
+  ## Publish to production (skipped on a dry run)
+  publish:
+    runs-on: ubuntu-latest
+    needs: package
+    if: "!inputs.dry_run"
+    environment:
+      name: production
+      url: https://widget.example.com
+    steps:
+      - run: make publish

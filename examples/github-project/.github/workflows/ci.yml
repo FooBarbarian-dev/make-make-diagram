@@ -1,0 +1,74 @@
+# Example GitHub Actions pipeline for pipeview
+#
+# Run:  pipeview examples/github-project -o /tmp/pipeview-demo-gh
+#
+# This workflow set demonstrates a needs: DAG, a build matrix, a local
+# reusable workflow, a cross-repository reusable call (unresolvable
+# offline — shown as a ghost), path filters, an environment gate, and —
+# deliberately — the classic duplicate-run shape: this workflow triggers
+# on both push (unfiltered) and pull_request, so one push to a branch
+# with an open PR runs every job twice. Open the What-If tab, pick
+# "Push to a branch" with "an open PR uses this branch as source", and
+# watch the duplicates light up. A branches: filter on push is the
+# usual fix.
+
+name: CI
+on:
+  push:
+  pull_request:
+
+env:
+  APP_NAME: widget
+  CACHE_VERSION: "7"
+
+jobs:
+  ## Compile the application and produce a wheel
+  build:
+    runs-on: ubuntu-latest
+    env:
+      BUILD_TARGET: dist
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          make build
+          echo "building $APP_NAME"
+
+  ## Run unit tests across the support matrix
+  test:
+    runs-on: ${{ matrix.os }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python: ["3.11", "3.12"]
+        exclude:
+          - os: macos-latest
+            python: "3.11"
+    steps:
+      - uses: actions/checkout@v4
+      - run: make test PYTHON=${{ matrix.python }}
+
+  ## Lint (starts as soon as the checkout works — no needs)
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: make lint
+
+  ## Deploy to staging through the shared reusable workflow
+  deploy_staging:
+    needs: [test, lint]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: staging
+    secrets: inherit
+
+  ## Announce the release in another repository (unresolvable offline)
+  notify:
+    needs: deploy_staging
+    uses: octo-org/shared-workflows/.github/workflows/notify.yml@v3
+    with:
+      channel: releases
