@@ -27,6 +27,11 @@ from typing import Callable
 
 import yaml
 
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
+
 from pipeview import gitlab_templates
 from pipeview.gitlab.api import (
     GitLabError,
@@ -52,7 +57,7 @@ def slugify(text: str) -> str:
     return out or "x"
 
 
-class _TolerantLoader(yaml.SafeLoader):
+class _TolerantLoader(SafeLoader):
     """SafeLoader that swallows unknown tags (!reference et al) — this
     loader only ever hunts for the `include:` key."""
 
