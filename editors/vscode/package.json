@@ -1,0 +1,169 @@
+{
+  "name": "pipeview-vscode",
+  "displayName": "Pipeview",
+  "description": "Offline interactive reports for GNU Make and GitLab CI pipelines — graphs, variables, What-If simulation — right in the editor, defaulting to the open repository with its git upstream as the reference for cross-repository includes.",
+  "version": "0.1.0",
+  "publisher": "pipeview",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/FooBarbarian-dev/make-make-diagram",
+    "directory": "editors/vscode"
+  },
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Visualization",
+    "Other"
+  ],
+  "keywords": [
+    "make",
+    "makefile",
+    "gitlab",
+    "ci",
+    "pipeline"
+  ],
+  "main": "./out/extension.js",
+  "activationEvents": [],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false,
+      "description": "Report generation runs the pipeview CLI on workspace files (Make enrichment executes `make -pqn`) and --upstream reads the repository's git configuration."
+    }
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "pipeview.showReport",
+        "title": "Pipeline Report for This Repo",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.showReportForFile",
+        "title": "Pipeline Report for This File",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.refreshReport",
+        "title": "Regenerate Last Report",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.gitlabReport",
+        "title": "GitLab: Report for a Remote Project…",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.gitlabSync",
+        "title": "GitLab: Sync Tracked Projects",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.gitlabAuth",
+        "title": "GitLab: Authenticate (opens a terminal)",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.setGitLabToken",
+        "title": "GitLab: Set API Token",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.clearGitLabToken",
+        "title": "GitLab: Clear Stored API Token",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.githubReport",
+        "title": "GitHub: Report for a Remote Repository…",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.githubSync",
+        "title": "GitHub: Sync Tracked Repositories",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.githubAuth",
+        "title": "GitHub: Authenticate (opens a terminal)",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.setGitHubToken",
+        "title": "GitHub: Set API Token",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.clearGitHubToken",
+        "title": "GitHub: Clear Stored API Token",
+        "category": "Pipeview"
+      }
+    ],
+    "menus": {
+      "explorer/context": [
+        {
+          "command": "pipeview.showReportForFile",
+          "when": "resourceFilename =~ /^((GNU)?[Mm]akefile|.*\\.(mk|yml|yaml))$/",
+          "group": "navigation@9"
+        }
+      ],
+      "editor/title/context": [
+        {
+          "command": "pipeview.showReportForFile",
+          "when": "resourceFilename =~ /^((GNU)?[Mm]akefile|.*\\.(mk|yml|yaml))$/",
+          "group": "1_run"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Pipeview",
+      "properties": {
+        "pipeview.pythonPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Python interpreter used for the `python -m pipeview` fallback. Empty: `python3` (or `python` on Windows)."
+        },
+        "pipeview.cliPath": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Explicit path to the `pipeview` executable. Empty: `pipeview` on PATH, falling back to `python -m pipeview`."
+        },
+        "pipeview.outputDirectory": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Where generated reports are written. Empty: the extension's per-workspace storage directory (keeps the repository clean)."
+        },
+        "pipeview.useUpstream": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Pass `--upstream` when reporting on the repository or a file: cross-repository `include:`s of GitLab CI roots are resolved by fetching them from the GitLab host the repository's own git remote points at (requires an API token — see *Pipeview: GitLab: Set API Token*). Without a token the report still generates; unresolved includes stay dashed ghost nodes."
+        },
+        "pipeview.upstreamRemote": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Git remote to use with `--upstream`. Empty: the current branch's tracking remote, else `origin`, else the sole remote."
+        },
+        "pipeview.extraArgs": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "markdownDescription": "Extra arguments appended to report invocations (e.g. `--no-enrich`, `-v`)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "tsc -p ./",
+    "watch": "tsc -w -p ./",
+    "lint": "tsc --noEmit -p ./",
+    "test": "npm run build && node --test out/test/*.test.js"
+  },
+  "devDependencies": {
+    "@types/node": "^18.19.0",
+    "@types/vscode": "^1.85.0",
+    "typescript": "^5.4.0"
+  }
+}

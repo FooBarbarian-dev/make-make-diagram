@@ -38,6 +38,13 @@ def main(argv: list[str] | None = None) -> int:
         from pipeview.scenarios_cli import main as scenarios_main
         return scenarios_main(argv[1:])
 
+    # `pipeview lsp` serves the language server over stdio (used by the
+    # editor integrations under editors/). A local directory literally
+    # named "lsp" is still reachable as `pipeview ./lsp`.
+    if argv and argv[0] == "lsp":
+        from pipeview.lsp import main as lsp_main
+        return lsp_main(argv[1:])
+
     parser = argparse.ArgumentParser(
         prog="pipeview",
         description=(
@@ -100,12 +107,64 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     parser.add_argument(
+        "--upstream",
+        action="store_true",
+        help=(
+            "Resolve cross-repository includes of GitLab CI roots by "
+            "fetching them from the GitLab host the repository's own git "
+            "remote points at (the ONE way a plain `pipeview <path>` run "
+            "performs network access, and only with a token — see --token)"
+        ),
+    )
+    parser.add_argument(
+        "--upstream-remote",
+        metavar="NAME",
+        help=(
+            "Git remote to use with --upstream (default: the current "
+            "branch's tracking remote, else origin, else the sole remote)"
+        ),
+    )
+    parser.add_argument(
+        "--token",
+        help=(
+            "--upstream: API token (else $PIPEVIEW_GITLAB_TOKEN / "
+            "$GITLAB_TOKEN / $GITLAB_PRIVATE_TOKEN / the stored "
+            "`pipeview gitlab auth` config)"
+        ),
+    )
+    parser.add_argument(
+        "--ca-bundle",
+        help="--upstream: custom CA bundle for TLS verification",
+    )
+    parser.add_argument(
+        "--insecure",
+        action="store_true",
+        help="--upstream: disable TLS verification (NOT recommended)",
+    )
+    parser.add_argument(
+        "--timeout", type=float, default=30.0,
+        help="--upstream: HTTP timeout in seconds (default: 30)",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="count", default=0,
+        help=(
+            "Log what is happening to stderr: -v shows fetch steps and "
+            "decisions, -vv also every HTTP request with timing"
+        ),
+    )
+    parser.add_argument(
+        "--log-file",
+        help="Also write a full debug-level log to this file",
+    )
+    parser.add_argument(
         "--version",
         action="version",
         version=f"pipeview {pipeview.__version__}",
     )
 
     args = parser.parse_args(argv)
+    from pipeview.logs import configure as _configure_logging
+    _configure_logging(args.verbose, args.log_file)
     formats = {f.strip() for f in args.format.split(",")}
     path = os.path.abspath(args.path)
     outdir = os.path.abspath(args.output)
@@ -138,8 +197,28 @@ def main(argv: list[str] | None = None) -> int:
     max_severity = None
 
     for root_path, root_kind in roots:
+        upstream = None
+        if args.upstream and root_kind == "gitlab_yaml":
+            from pipeview.gitlab.upstream import resolve_upstream_includes
+            upstream = resolve_upstream_includes(
+                root_path, outdir,
+                remote=args.upstream_remote,
+                token=args.token,
+                ca_bundle=args.ca_bundle,
+                insecure=args.insecure,
+                timeout=args.timeout,
+                bundled_templates=not args.no_bundled_templates,
+            )
         report = _parse_root(root_path, root_kind,
-                             bundled_templates=not args.no_bundled_templates)
+                             bundled_templates=not args.no_bundled_templates,
+                             upstream=upstream)
+        if upstream is not None:
+            # Counts alone hide the one actionable line ("no API token…") —
+            # print what --upstream itself has to say.
+            for d in upstream.diagnostics:
+                if d.severity in ("warning", "error"):
+                    print(f"  {root_path}: [{d.severity}] {d.message}",
+                          file=sys.stderr)
         report.generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
         report.tool_version = pipeview.__version__
 
@@ -242,6 +321,12 @@ def _discover_roots(path: str) -> list[tuple[str, str]]:
         if os.path.isdir(workflows_dir):
             roots.append((workflows_dir, "github_workflows"))
 
+        # Being handed .github/workflows itself also counts — editors
+        # (pipeview lsp) name the root that way.
+        norm = os.path.abspath(path).replace(os.sep, "/")
+        if norm.endswith("/.github/workflows"):
+            roots.append((path, "github_workflows"))
+
     return roots
 
 
@@ -275,11 +360,24 @@ def _looks_like_github_workflow(path: str) -> bool:
     return "jobs" in keys and "on" in keys and "stages" not in keys
 
 
-def _parse_root(path: str, kind: str, bundled_templates: bool = True) -> Report:
+def _parse_root(path: str, kind: str, bundled_templates: bool = True,
+                upstream=None) -> Report:
     if kind == "makefile":
         return parse_makefile(path)
     elif kind == "gitlab_yaml":
-        return parse_gitlab(path, bundled_templates=bundled_templates)
+        if upstream is None:
+            return parse_gitlab(path, bundled_templates=bundled_templates)
+        report = parse_gitlab(
+            path,
+            repo_root=upstream.repo_root,
+            external_resolver=upstream.resolver,
+            local_roots=upstream.local_roots,
+            bundled_templates=bundled_templates,
+        )
+        if upstream.annotation is not None:
+            report.annotations["gitlab_upstream"] = upstream.annotation
+        report.diagnostics.extend(upstream.diagnostics)
+        return report
     elif kind == "github_workflows":
         from pipeview.parsers.github_parser import parse_github
         return parse_github(path)
@@ -288,6 +386,8 @@ def _parse_root(path: str, kind: str, bundled_templates: bool = True) -> Report:
             root=path,
             format=kind,
         )
+
+
 
 
 def _output_basename(path: str, kind: str) -> str:

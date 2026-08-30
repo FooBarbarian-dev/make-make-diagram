@@ -30,4 +30,12 @@ examples: install
 self: install
 	pipeview Makefile -o examples/out
 
-.PHONY: install dev test build lint examples self
+## Build and unit-test the VS Code extension (needs node + npm)
+vscode:
+	cd editors/vscode && npm install && npm test
+
+## Build the Zed extension (needs rust + the wasm32-wasip2 target)
+zed:
+	cd editors/zed && cargo build --release --target wasm32-wasip2
+
+.PHONY: install dev test build lint examples self vscode zed

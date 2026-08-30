@@ -193,6 +193,15 @@ class TestCliGithub:
         assert code == 0
         assert os.path.isfile(os.path.join(tmpdir, "ci_yml.report.html"))
 
+    def test_workflows_dir_itself_is_a_root(self, tmpdir):
+        # Editors (pipeview lsp) name the root as the workflows directory.
+        code = main([
+            str(GITHUB_FIXTURES / "minimal" / ".github" / "workflows"),
+            "-o", tmpdir,
+        ])
+        assert code == 0
+        assert os.path.isfile(os.path.join(tmpdir, "github-actions.report.html"))
+
     def test_workflow_outside_dot_github_is_sniffed(self, tmpdir):
         src = (GITHUB_FIXTURES / "minimal" / ".github" / "workflows"
                / "ci.yml").read_text()

@@ -5,6 +5,88 @@ Releases from 0.2.0 onward are cut by
 Conventional Commits merged to `main`; generated sections are prepended
 here and enriched by hand where a feature deserves the narrative.
 
+## Unreleased
+
+**GitHub Actions in the editor integrations.** The GitHub Actions
+support that landed on `main` flows through both editors: repo reports
+include the `.github/workflows/` root (a workflows directory is now
+itself a valid `pipeview <path>` target), `pipeview lsp` treats workflow
+files as first-class — inline diagnostics across the workflows
+directory, hover docs from the `GITHUB_*`/`RUNNER_*` catalog, clickable
+local `uses:` references (reusable workflows and composite actions),
+and the report code action — and the VS Code extension gains the GitHub
+counterparts of its GitLab commands (remote report, sync, terminal
+auth, token in secret storage as `PIPEVIEW_GITHUB_TOKEN`). The
+`editors/README.md` feature matrix now spans both providers.
+
+**Release automation for the editor extensions.** The VS Code and Zed
+extensions become their own release-please components: commits touching
+`editors/vscode/` or `editors/zed/` route to per-extension release PRs,
+tagged `vscode-vX.Y.Z` / `zed-vX.Y.Z`, with the packaged `.vsix` (and
+the built wasm, for reference) attached to their GitHub Releases. CI
+gains extension jobs (VS Code build + unit tests + packaging, Zed wasm
+build). See `docs/release-pipelines.md` for the component table.
+
+**Zed extension, `pipeview lsp`, and the `editors/` layout** (see
+`docs/agents/specs/2026-08-29-zed-extension-and-editor-layout-design.md`).
+
+- Editor integrations now live under `editors/` — `editors/vscode/`
+  (moved from `vscode-extension/`, unchanged) and the new
+  `editors/zed/` — with `editors/README.md` stating the parity
+  philosophy (every feature lives in the core: CLI, report HTML, or
+  language server; extensions only decide how their editor triggers it)
+  and a per-editor feature matrix.
+- **`pipeview lsp`**: a stdlib-only language server over stdio. Parser
+  diagnostics published on open/save (offline, never Make-enriched),
+  hover docs for predefined `CI_*` variables from the curated catalog,
+  document links for `include:local`, and code actions that generate
+  the report via the ordinary CLI in-process (stdout captured — the
+  protocol channel stays clean) and open it in the default browser.
+  `initializationOptions`: `upstream` (default on, matching the VS Code
+  extension), `upstreamRemote`, `outputDir` (default: a cache dir, so
+  repositories stay clean). Unrelated YAML gets silence.
+- **Zed extension** (`editors/zed/`): a wasm extension
+  (`zed_extension_api` 0.7.0, ~80 lines by design) wiring
+  `pipeview lsp` up for YAML and Make buffers. Zed has no webviews, so
+  the report code action opens the self-contained `file://` HTML in the
+  browser — a complete viewer by construction. Server resolution:
+  settings binary → `pipeview` on PATH → `python -m pipeview`; the
+  worktree shell env flows through so GitLab tokens reach `--upstream`
+  runs. Remote-project report/sync stay terminal flows in Zed (no
+  extension input UI); `make zed` builds for `wasm32-wasip2`.
+
+**Upstream include resolution + VS Code extension** (see
+`docs/agents/specs/2026-08-29-vscode-extension-upstream-includes-design.md`).
+
+- `pipeview <path> --upstream` analyzes the local working tree as
+  always — uncommitted edits, real line numbers — but resolves
+  cross-repository includes (`project:`, `remote:`, `component:`, and
+  instance templates) by fetching them from the GitLab host the
+  repository's own git remote points at. Remote selection: explicit
+  `--upstream-remote`, else the branch's tracking remote, else
+  `origin`, else the sole remote; ssh/scp-style/http(s) remote URLs all
+  parse. Local files are never fetched or materialized; externals reuse
+  the `files`-strategy traversal (nested includes, template fallback,
+  the 150-file ceiling) and land under
+  `<outdir>/fetched/<project>@upstream/`. Auth reuses the
+  `pipeview gitlab` chain (`--token`, env vars, stored config); every
+  failure — no git, no remote, no token, fetch errors — degrades to a
+  warning diagnostic with the fix named, ghosts intact. Reports gain a
+  `gitlab_upstream` annotation. This is the one way a plain
+  `pipeview <path>` run touches a network, and only with the flag. The
+  main CLI also gains `-v`/`--log-file` (the gitlab CLI's logging).
+- **VS Code extension** (`editors/vscode/`): a thin TypeScript shell
+  over the CLI. "Pipeline Report for This Repo" defaults to the open
+  repository with `--upstream` on and renders the self-contained report
+  HTML in a webview panel — every view included, What-If and all, since
+  it is the same file the CLI writes. Also: per-file reports via
+  context menus, regenerate-last, `gitlab report`/`sync` flows (the
+  rollup opens when produced), API-token storage in VS Code secrets
+  (injected as `PIPEVIEW_GITLAB_TOKEN`), an integrated-terminal flow
+  for interactive `pipeview gitlab auth`, and a Pipeview output channel
+  carrying the CLI's full output. Disabled in untrusted workspaces.
+  `make vscode` builds and unit-tests it.
+
 ## [0.2.1](https://github.com/FooBarbarian-dev/make-make-diagram/compare/v0.2.0...v0.2.1) (2026-08-29)
 
 
