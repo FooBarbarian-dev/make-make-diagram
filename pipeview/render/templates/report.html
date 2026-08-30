@@ -2934,7 +2934,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '</div>';
 
     html += '<div class="wi-group"><h3>Commit message</h3>'
-      + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
+      + '<div class="wi-field"><input class="input" id="wi-commit-msg" aria-label="Commit message" placeholder="Update code" value="'
       + esc(s.commitMessage) + '"></div></div>';
 
     html += '<div class="wi-group"><h3>Variables '
@@ -2942,9 +2942,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '<div id="wi-var-rows">'
       + s.overrides.map((o, i) =>
           '<div class="wi-var-row" data-idx="' + i + '">'
-          + '<input class="input wi-var-name" placeholder="NAME" value="' + esc(o.name) + '">'
-          + '<input class="input wi-var-value" placeholder="(empty string)" value="' + esc(o.value) + '">'
-          + '<button class="btn btn-quiet wi-var-del" data-tip="Remove">&times;</button></div>'
+          + '<input class="input wi-var-name" aria-label="Variable name" placeholder="NAME" value="' + esc(o.name) + '">'
+          + '<input class="input wi-var-value" aria-label="Variable value" placeholder="(empty string)" value="' + esc(o.value) + '">'
+          + '<button class="btn btn-quiet wi-var-del" aria-label="Remove variable" data-tip="Remove">&times;</button></div>'
         ).join('')
       + '</div>'
       + '<div class="wi-inline-btns"><button class="btn" id="wi-var-add">+ variable</button></div>'
