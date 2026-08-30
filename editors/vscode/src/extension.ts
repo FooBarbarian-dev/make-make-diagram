@@ -13,7 +13,12 @@ import {
 } from "./cli";
 import { showReportPanel } from "./panel";
 
-const TOKEN_SECRET = "pipeview.gitlabToken";
+const TOKEN_SECRETS = {
+  gitlab: { secret: "pipeview.gitlabToken", env: "PIPEVIEW_GITLAB_TOKEN" },
+  github: { secret: "pipeview.githubToken", env: "PIPEVIEW_GITHUB_TOKEN" },
+} as const;
+
+type Provider = keyof typeof TOKEN_SECRETS;
 
 let output: vscode.OutputChannel;
 let cachedCli: CliCommand | undefined;
@@ -77,10 +82,12 @@ async function spawnEnv(
   context: vscode.ExtensionContext,
 ): Promise<NodeJS.ProcessEnv> {
   const env = { ...process.env };
-  if (!env.PIPEVIEW_GITLAB_TOKEN) {
-    const stored = await context.secrets.get(TOKEN_SECRET);
-    if (stored) {
-      env.PIPEVIEW_GITLAB_TOKEN = stored;
+  for (const { secret, env: name } of Object.values(TOKEN_SECRETS)) {
+    if (!env[name]) {
+      const stored = await context.secrets.get(secret);
+      if (stored) {
+        env[name] = stored;
+      }
     }
   }
   return env;
@@ -93,6 +100,7 @@ async function runAndShow(
   args: string[],
   cwd: string,
   title: string,
+  provider: Provider = "gitlab",
 ): Promise<void> {
   let command: CliCommand;
   try {
@@ -117,16 +125,19 @@ async function runAndShow(
   }
 
   if (needsGitLabSetupHint(result.stderr)) {
+    const name = provider === "github" ? "GitHub" : "GitLab";
     const action = await vscode.window.showWarningMessage(
-      "pipeview needs GitLab access (host and/or API token) configured.",
+      `pipeview needs ${name} access (host and/or API token) configured.`,
       "Authenticate in Terminal",
-      "Set GitLab Token",
+      `Set ${name} Token`,
       "Show Output",
     );
     if (action === "Authenticate in Terminal") {
-      void vscode.commands.executeCommand("pipeview.gitlabAuth");
-    } else if (action === "Set GitLab Token") {
-      void vscode.commands.executeCommand("pipeview.setGitLabToken");
+      void vscode.commands.executeCommand(`pipeview.${provider}Auth`);
+    } else if (action === `Set ${name} Token`) {
+      void vscode.commands.executeCommand(
+        provider === "github" ? "pipeview.setGitHubToken"
+                              : "pipeview.setGitLabToken");
     } else if (action === "Show Output") {
       output.show();
     }
@@ -231,63 +242,92 @@ export function activate(context: vscode.ExtensionContext): void {
     await lastInvocation();
   });
 
-  register("pipeview.gitlabReport", async () => {
-    const entry = await vscode.window.showInputBox({
-      title: "Pipeview: GitLab project",
-      prompt: "group/project, or group/project@ref to pin a branch/tag",
-      placeHolder: "group/app@main",
-      validateInput: (v) => (v.trim() ? undefined : "Enter a project path"),
+  const registerProvider = (
+    provider: Provider,
+    ids: { report: string; sync: string; auth: string;
+           setToken: string; clearToken: string },
+    placeholder: string,
+  ) => {
+    const name = provider === "github" ? "GitHub" : "GitLab";
+    register(ids.report, async () => {
+      const entry = await vscode.window.showInputBox({
+        title: `Pipeview: ${name} project`,
+        prompt: `${placeholder.split("@")[0]} — append @ref to pin a branch/tag`,
+        placeHolder: placeholder,
+        validateInput: (v) => (v.trim() ? undefined : "Enter a project path"),
+      });
+      if (!entry) {
+        return;
+      }
+      const cwd = pickWorkspaceFolder()?.uri.fsPath ?? process.cwd();
+      const args = [provider, "report", entry.trim(), "-o", outDir(context),
+                    "--format", "html,json"];
+      const invoke = () =>
+        runAndShow(context, args, cwd,
+                   `pipeview: fetching ${entry.trim()}…`, provider);
+      lastInvocation = invoke;
+      await invoke();
     });
-    if (!entry) {
-      return;
-    }
-    const cwd = pickWorkspaceFolder()?.uri.fsPath ?? process.cwd();
-    const args = ["gitlab", "report", entry.trim(), "-o", outDir(context),
-                  "--format", "html,json"];
-    const invoke = () =>
-      runAndShow(context, args, cwd, `pipeview: fetching ${entry.trim()}…`);
-    lastInvocation = invoke;
-    await invoke();
-  });
 
-  register("pipeview.gitlabSync", async () => {
-    const cwd = pickWorkspaceFolder()?.uri.fsPath ?? process.cwd();
-    const args = ["gitlab", "sync", "-o", outDir(context), "--format", "html,json"];
-    const invoke = () =>
-      runAndShow(context, args, cwd, "pipeview: syncing tracked projects…");
-    lastInvocation = invoke;
-    await invoke();
-  });
-
-  register("pipeview.gitlabAuth", async () => {
-    const { gitlabAuthTerminal } = await import("./gitlab");
-    try {
-      await gitlabAuthTerminal(await cli());
-    } catch (e) {
-      void vscode.window.showErrorMessage((e as Error).message);
-    }
-  });
-
-  register("pipeview.setGitLabToken", async () => {
-    const token = await vscode.window.showInputBox({
-      title: "GitLab API token (read_api scope)",
-      prompt:
-        "Stored in VS Code secret storage and passed to pipeview as " +
-        "PIPEVIEW_GITLAB_TOKEN. Create one via the Pipeview: GitLab: " +
-        "Authenticate command or your GitLab profile settings.",
-      password: true,
-      ignoreFocusOut: true,
+    register(ids.sync, async () => {
+      const cwd = pickWorkspaceFolder()?.uri.fsPath ?? process.cwd();
+      const args = [provider, "sync", "-o", outDir(context),
+                    "--format", "html,json"];
+      const invoke = () =>
+        runAndShow(context, args, cwd,
+                   "pipeview: syncing tracked projects…", provider);
+      lastInvocation = invoke;
+      await invoke();
     });
-    if (token) {
-      await context.secrets.store(TOKEN_SECRET, token.trim());
-      void vscode.window.showInformationMessage("pipeview: token stored.");
-    }
-  });
 
-  register("pipeview.clearGitLabToken", async () => {
-    await context.secrets.delete(TOKEN_SECRET);
-    void vscode.window.showInformationMessage("pipeview: stored token cleared.");
-  });
+    register(ids.auth, async () => {
+      const { providerAuthTerminal } = await import("./gitlab");
+      try {
+        await providerAuthTerminal(await cli(), provider);
+      } catch (e) {
+        void vscode.window.showErrorMessage((e as Error).message);
+      }
+    });
+
+    register(ids.setToken, async () => {
+      const token = await vscode.window.showInputBox({
+        title: `${name} API token`,
+        prompt:
+          "Stored in VS Code secret storage and passed to pipeview as " +
+          `${TOKEN_SECRETS[provider].env}. Create one via the Pipeview: ` +
+          `${name}: Authenticate command or your ${name} settings.`,
+        password: true,
+        ignoreFocusOut: true,
+      });
+      if (token) {
+        await context.secrets.store(TOKEN_SECRETS[provider].secret,
+                                    token.trim());
+        void vscode.window.showInformationMessage("pipeview: token stored.");
+      }
+    });
+
+    register(ids.clearToken, async () => {
+      await context.secrets.delete(TOKEN_SECRETS[provider].secret);
+      void vscode.window.showInformationMessage(
+        "pipeview: stored token cleared.");
+    });
+  };
+
+  registerProvider("gitlab", {
+    report: "pipeview.gitlabReport",
+    sync: "pipeview.gitlabSync",
+    auth: "pipeview.gitlabAuth",
+    setToken: "pipeview.setGitLabToken",
+    clearToken: "pipeview.clearGitLabToken",
+  }, "group/app@main");
+
+  registerProvider("github", {
+    report: "pipeview.githubReport",
+    sync: "pipeview.githubSync",
+    auth: "pipeview.githubAuth",
+    setToken: "pipeview.setGitHubToken",
+    clearToken: "pipeview.clearGitHubToken",
+  }, "owner/repo@main");
 }
 
 export function deactivate(): void {

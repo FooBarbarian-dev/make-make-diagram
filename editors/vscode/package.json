@@ -73,6 +73,31 @@
         "command": "pipeview.clearGitLabToken",
         "title": "GitLab: Clear Stored API Token",
         "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.githubReport",
+        "title": "GitHub: Report for a Remote Repository…",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.githubSync",
+        "title": "GitHub: Sync Tracked Repositories",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.githubAuth",
+        "title": "GitHub: Authenticate (opens a terminal)",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.setGitHubToken",
+        "title": "GitHub: Set API Token",
+        "category": "Pipeview"
+      },
+      {
+        "command": "pipeview.clearGitHubToken",
+        "title": "GitHub: Clear Stored API Token",
+        "category": "Pipeview"
       }
     ],
     "menus": {

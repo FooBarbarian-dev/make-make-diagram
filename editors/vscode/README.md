@@ -20,7 +20,7 @@ simulator all included — rendered in a webview panel.
 
 | Command | What it does |
 |---|---|
-| **Pipeview: Pipeline Report for This Repo** | Analyzes the open repository (Makefile and/or `.gitlab-ci.yml`) and opens the report(s). By default runs with `--upstream`: cross-repository `include:`s are resolved by fetching them from the GitLab host the repo's own git remote points at. |
+| **Pipeview: Pipeline Report for This Repo** | Analyzes the open repository (Makefile, `.gitlab-ci.yml`, and/or `.github/workflows/`) and opens the report(s). By default runs with `--upstream`: cross-repository `include:`s of GitLab roots are resolved by fetching them from the GitLab host the repo's own git remote points at. |
 | **Pipeview: Pipeline Report for This File** | Same, for the selected Makefile / `*.mk` / `*.yml` (also in the explorer and editor-title context menus). |
 | **Pipeview: Regenerate Last Report** | Re-runs the previous generation (after editing pipeline files). |
 | **Pipeview: GitLab: Report for a Remote Project…** | `pipeview gitlab report group/project[@ref]` — fetches straight from GitLab, no checkout needed. |
@@ -28,6 +28,12 @@ simulator all included — rendered in a webview panel.
 | **Pipeview: GitLab: Set API Token** | Stores a `read_api` token in VS Code secret storage; it is passed to the CLI as `PIPEVIEW_GITLAB_TOKEN` (an already-exported environment variable wins). |
 | **Pipeview: GitLab: Authenticate (opens a terminal)** | Runs `pipeview gitlab auth` in an integrated terminal — the interactive flow that opens GitLab's prefilled token form and stores the result in pipeview's own config. |
 | **Pipeview: GitLab: Clear Stored API Token** | Removes the secret-storage token. |
+| **Pipeview: GitHub: Report for a Remote Repository…** / **Sync Tracked Repositories** | The same flows against GitHub (`pipeview github report owner/repo[@ref]`, `pipeview github sync`). |
+| **Pipeview: GitHub: Set API Token / Authenticate / Clear Stored API Token** | GitHub counterparts of the GitLab commands; the token is passed as `PIPEVIEW_GITHUB_TOKEN`. |
+
+Repo reports cover every root pipeview discovers — a `Makefile`,
+`.gitlab-ci.yml`, and `.github/workflows/` each get their own report
+panel.
 
 ## The upstream default
 
