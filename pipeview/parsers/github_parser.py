@@ -32,6 +32,14 @@ from typing import Any
 
 import yaml
 
+try:
+    # ⚡ Bolt: CSafeLoader is ~10x faster than pure-Python SafeLoader
+    # for parsing YAML files. We fall back to SafeLoader if the C extension
+    # is unavailable.
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
+
 from pipeview.model import (
     Diagnostic,
     Edge,
@@ -88,7 +96,7 @@ _REMOTE_USES_RE = re.compile(
 )
 
 
-class _PipeviewGithubLoader(yaml.SafeLoader):
+class _PipeviewGithubLoader(SafeLoader):
     """SafeLoader subclass that detects duplicate mapping keys (PyYAML keeps
     the last silently — data loss wearing a valid-YAML costume)."""
 
@@ -314,7 +322,7 @@ def _build_file_maps(raw_text: str) -> tuple[dict, dict]:
     top: dict[str, int] = {}
     nested: dict[tuple[str, str], int] = {}
     try:
-        root = yaml.compose(raw_text, yaml.SafeLoader)
+        root = yaml.compose(raw_text, SafeLoader)
     except yaml.YAMLError:
         return top, nested
     if not isinstance(root, yaml.MappingNode):
