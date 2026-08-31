@@ -23,6 +23,11 @@ from typing import Any
 
 import yaml
 
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
+
 from pipeview.model import Diagnostic, SourceLocation
 from pipeview.parsers.github_predefined import (
     PREDEFINED_VAR_DOCS as GITHUB_PREDEFINED_VAR_DOCS,
@@ -193,7 +198,7 @@ def _stanza_lines(text: str) -> list[int]:
     """1-based start line of each entry in the top-level `scenarios:` list,
     via a compose pass over the same text safe_load parsed."""
     try:
-        root = yaml.compose(text, Loader=yaml.SafeLoader)
+        root = yaml.compose(text, Loader=SafeLoader)
     except yaml.YAMLError:
         return []
     if not isinstance(root, yaml.MappingNode):

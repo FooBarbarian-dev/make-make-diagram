@@ -7,6 +7,11 @@ from typing import Any
 
 import yaml
 
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
+
 from pipeview import gitlab_templates
 from pipeview.model import (
     Diagnostic,
@@ -64,7 +69,7 @@ class _Reference:
         return f"!reference [{', '.join(self.path)}]"
 
 
-class _PipeviewLoader(yaml.SafeLoader):
+class _PipeviewLoader(SafeLoader):
     """SafeLoader subclass: captures !reference tags as value objects and
     detects duplicate mapping keys (which PyYAML otherwise resolves silently
     by keeping the last — data loss wearing a valid-YAML costume)."""
@@ -316,7 +321,7 @@ def _build_file_maps(
     nested: dict[tuple[str, str], int] = {}
     raw_scalars: dict[tuple[str, str], str] = {}
     try:
-        root = yaml.compose(raw_text, yaml.SafeLoader)
+        root = yaml.compose(raw_text, SafeLoader)
     except yaml.YAMLError:
         return top, nested, raw_scalars
     if not isinstance(root, yaml.MappingNode):
