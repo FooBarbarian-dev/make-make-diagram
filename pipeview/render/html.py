@@ -42,7 +42,11 @@ def render_html(report: Report, output_path: str) -> None:
 
 
 def _escape_html(s: str) -> str:
-    return s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    return (s.replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace('"', "&quot;")
+            .replace("'", "&#x27;"))
 
 
 def script_safe_json(json_str: str) -> str:
