@@ -908,7 +908,7 @@ kbd {
     <button class="btn btn-quiet" id="theme-toggle" data-tip="Switch theme" aria-live="polite"></button>
     <div class="search-wrap">
       <input type="text" class="input" id="global-search" placeholder="Search…  ( / )"
-        autocomplete="off" role="combobox" aria-expanded="false" aria-label="Search tasks, variables, and files">
+        autocomplete="off" role="combobox" aria-expanded="false" aria-label="Search tasks, variables, and files" aria-controls="search-results">
       <div class="search-results" id="search-results" role="listbox"></div>
     </div>
   </div>
@@ -2968,7 +2968,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + esc(s.changedList) + '</textarea></div>'
       + '</div>';
 
-    html += '<div class="wi-group"><h3>Commit message</h3>'
+    html += '<div class="wi-group"><label for="wi-commit-msg" style="display:block;font-size:var(--fs-0);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:var(--sp-2)">Commit message</label>'
       + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
       + esc(s.commitMessage) + '"></div></div>';
 
@@ -2977,9 +2977,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '<div id="wi-var-rows">'
       + s.overrides.map((o, i) =>
           '<div class="wi-var-row" data-idx="' + i + '">'
-          + '<input class="input wi-var-name" placeholder="NAME" value="' + esc(o.name) + '">'
-          + '<input class="input wi-var-value" placeholder="(empty string)" value="' + esc(o.value) + '">'
-          + '<button class="btn btn-quiet wi-var-del" data-tip="Remove">&times;</button></div>'
+          + '<input class="input wi-var-name" aria-label="Variable name" placeholder="NAME" value="' + esc(o.name) + '">'
+          + '<input class="input wi-var-value" aria-label="Variable value" placeholder="(empty string)" value="' + esc(o.value) + '">'
+          + '<button class="btn btn-quiet wi-var-del" aria-label="Remove variable" data-tip="Remove">&times;</button></div>'
         ).join('')
       + '</div>'
       + '<div class="wi-inline-btns"><button class="btn" id="wi-var-add">+ variable</button></div>'
@@ -3071,22 +3071,23 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
             ? String(spec.default).toLowerCase() === 'true'
             : (spec.default === null || spec.default === undefined
                ? '' : spec.default));
+      const inputId = 'wi-dispatch-input-' + esc(n);
       if (spec.type === 'boolean') {
-        html += '<label class="wi-choice"><input type="checkbox" '
-          + 'class="wi-dispatch-input" data-input="' + esc(n) + '"'
+        html += '<label class="wi-choice" for="' + inputId + '"><input type="checkbox" '
+          + 'id="' + inputId + '" class="wi-dispatch-input" data-input="' + esc(n) + '"'
           + (cur ? ' checked' : '') + '><span>' + esc(n) + '</span></label>';
       } else if (spec.options && spec.options.length) {
-        html += '<div class="wi-field"><label>' + esc(n)
+        html += '<div class="wi-field"><label for="' + inputId + '">' + esc(n)
           + (spec.required ? ' (required)' : '') + '</label>'
-          + '<select class="input wi-dispatch-input" data-input="' + esc(n) + '">'
+          + '<select id="' + inputId + '" class="input wi-dispatch-input" data-input="' + esc(n) + '">'
           + spec.options.map(o => '<option value="' + esc(o) + '"'
               + (String(cur) === o ? ' selected' : '') + '>' + esc(o)
               + '</option>').join('')
           + '</select></div>';
       } else {
-        html += '<div class="wi-field"><label>' + esc(n)
+        html += '<div class="wi-field"><label for="' + inputId + '">' + esc(n)
           + (spec.required ? ' (required)' : '') + '</label>'
-          + '<input class="input wi-dispatch-input" data-input="' + esc(n)
+          + '<input id="' + inputId + '" class="input wi-dispatch-input" data-input="' + esc(n)
           + '" value="' + esc(String(cur)) + '"></div>';
       }
     });
@@ -3197,7 +3198,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + esc(s.changedList) + '</textarea></div>'
       + '</div>';
 
-    html += '<div class="wi-group"><h3>Commit message</h3>'
+    html += '<div class="wi-group"><label for="wi-commit-msg" style="display:block;font-size:var(--fs-0);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;color:var(--text-muted);margin-bottom:var(--sp-2)">Commit message</label>'
       + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
       + esc(s.commitMessage) + '"></div></div>';
 
@@ -3206,9 +3207,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '<div id="wi-var-rows">'
       + s.overrides.map((o, i) =>
           '<div class="wi-var-row" data-idx="' + i + '">'
-          + '<input class="input wi-var-name" placeholder="vars.NAME" value="' + esc(o.name) + '">'
-          + '<input class="input wi-var-value" placeholder="(empty string)" value="' + esc(o.value) + '">'
-          + '<button class="btn btn-quiet wi-var-del" data-tip="Remove">&times;</button></div>'
+          + '<input class="input wi-var-name" aria-label="Variable name" placeholder="vars.NAME" value="' + esc(o.name) + '">'
+          + '<input class="input wi-var-value" aria-label="Variable value" placeholder="(empty string)" value="' + esc(o.value) + '">'
+          + '<button class="btn btn-quiet wi-var-del" aria-label="Remove variable" data-tip="Remove">&times;</button></div>'
         ).join('')
       + '</div>'
       + '<div class="wi-inline-btns"><button class="btn" id="wi-var-add">+ variable</button></div>'
@@ -4338,15 +4339,20 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
   function closeSearch() {
     searchResults.classList.remove('open');
     searchInput.setAttribute('aria-expanded', 'false');
+    searchInput.removeAttribute('aria-activedescendant');
     searchActive = -1;
   }
   function moveActive(delta) {
     if (!searchItems.length) return;
     searchActive = (searchActive + delta + searchItems.length) % searchItems.length;
     searchResults.querySelectorAll('.search-result').forEach((el, i) => {
-      el.classList.toggle('active', i === searchActive);
+      const isActive = i === searchActive;
+      el.classList.toggle('active', isActive);
+      el.setAttribute('aria-selected', isActive ? 'true' : 'false');
     });
-    const el = document.getElementById('sr-' + searchActive);
+    const activeId = 'sr-' + searchActive;
+    searchInput.setAttribute('aria-activedescendant', activeId);
+    const el = document.getElementById(activeId);
     if (el) el.scrollIntoView({ block: 'nearest' });
   }
 

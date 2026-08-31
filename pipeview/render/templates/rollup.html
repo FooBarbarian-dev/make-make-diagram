@@ -483,7 +483,7 @@ mark {
     <button class="btn btn-quiet" id="theme-toggle" data-tip="Switch theme" aria-live="polite"></button>
     <div class="search-wrap">
       <input type="text" class="input" id="global-search" placeholder="Search projects &amp; jobs…  ( / )"
-        autocomplete="off" role="combobox" aria-expanded="false" aria-label="Search projects and jobs">
+        autocomplete="off" role="combobox" aria-expanded="false" aria-label="Search projects and jobs" aria-controls="search-results">
       <div class="search-results" id="search-results" role="listbox"></div>
     </div>
   </div>
@@ -1463,7 +1463,7 @@ const ROLLUP = /*ROLLUP_JSON_PLACEHOLDER*/{};
         html += '<div class="search-group">Projects</div>';
         projHits.slice(0, 8).forEach(i => {
           items.push({ type: 'project', pi: i });
-          html += '<div class="search-item" role="option" data-i="' + (items.length - 1) + '">'
+          html += '<div class="search-item" id="sr-' + (items.length - 1) + '" role="option" data-i="' + (items.length - 1) + '">'
             + '<span class="si-name clip">' + highlight(projLabel(i), q) + '</span>'
             + chip((PROJECTS[i].counts || {}).jobs + ' jobs') + '</div>';
         });
@@ -1481,7 +1481,7 @@ const ROLLUP = /*ROLLUP_JSON_PLACEHOLDER*/{};
         html += '<div class="search-group">Jobs</div>';
         jobHits.slice(0, 12).forEach(h => {
           items.push({ type: 'job', pi: h.pi, id: h.id });
-          html += '<div class="search-item" role="option" data-i="' + (items.length - 1) + '">'
+          html += '<div class="search-item" id="sr-' + (items.length - 1) + '" role="option" data-i="' + (items.length - 1) + '">'
             + '<span class="si-name clip">' + highlight(h.name, q) + '</span>'
             + chip(projLabel(h.pi)) + '</div>';
         });
@@ -1502,6 +1502,7 @@ const ROLLUP = /*ROLLUP_JSON_PLACEHOLDER*/{};
     function close() {
       results.classList.remove('open');
       input.setAttribute('aria-expanded', 'false');
+      input.removeAttribute('aria-activedescendant');
       active = -1;
     }
     function pick(i) {
@@ -1525,7 +1526,12 @@ const ROLLUP = /*ROLLUP_JSON_PLACEHOLDER*/{};
       const els = results.querySelectorAll('.search-item');
       if (!els.length) return;
       active = (i + els.length) % els.length;
-      els.forEach((el, j) => el.classList.toggle('active', j === active));
+      els.forEach((el, j) => {
+        const isActive = j === active;
+        el.classList.toggle('active', isActive);
+        el.setAttribute('aria-selected', isActive ? 'true' : 'false');
+      });
+      input.setAttribute('aria-activedescendant', 'sr-' + active);
       els[active].scrollIntoView({ block: 'nearest' });
     }
 
