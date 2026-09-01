@@ -2969,7 +2969,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '</div>';
 
     html += '<div class="wi-group"><h3>Commit message</h3>'
-      + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
+      + '<div class="wi-field"><input class="input" id="wi-commit-msg" aria-label="Commit message" placeholder="Update code" value="'
       + esc(s.commitMessage) + '"></div></div>';
 
     html += '<div class="wi-group"><h3>Variables '
@@ -2977,9 +2977,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '<div id="wi-var-rows">'
       + s.overrides.map((o, i) =>
           '<div class="wi-var-row" data-idx="' + i + '">'
-          + '<input class="input wi-var-name" placeholder="NAME" value="' + esc(o.name) + '">'
-          + '<input class="input wi-var-value" placeholder="(empty string)" value="' + esc(o.value) + '">'
-          + '<button class="btn btn-quiet wi-var-del" data-tip="Remove">&times;</button></div>'
+          + '<input class="input wi-var-name" aria-label="Variable name" placeholder="NAME" value="' + esc(o.name) + '">'
+          + '<input class="input wi-var-value" aria-label="Variable value" placeholder="(empty string)" value="' + esc(o.value) + '">'
+          + '<button class="btn btn-quiet wi-var-del" aria-label="Remove variable" data-tip="Remove">&times;</button></div>'
         ).join('')
       + '</div>'
       + '<div class="wi-inline-btns"><button class="btn" id="wi-var-add">+ variable</button></div>'
@@ -3076,17 +3076,17 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
           + 'class="wi-dispatch-input" data-input="' + esc(n) + '"'
           + (cur ? ' checked' : '') + '><span>' + esc(n) + '</span></label>';
       } else if (spec.options && spec.options.length) {
-        html += '<div class="wi-field"><label>' + esc(n)
+        html += '<div class="wi-field"><label for="wi-dispatch-input-' + esc(n) + '">' + esc(n)
           + (spec.required ? ' (required)' : '') + '</label>'
-          + '<select class="input wi-dispatch-input" data-input="' + esc(n) + '">'
+          + '<select class="input wi-dispatch-input" id="wi-dispatch-input-' + esc(n) + '" data-input="' + esc(n) + '">'
           + spec.options.map(o => '<option value="' + esc(o) + '"'
               + (String(cur) === o ? ' selected' : '') + '>' + esc(o)
               + '</option>').join('')
           + '</select></div>';
       } else {
-        html += '<div class="wi-field"><label>' + esc(n)
+        html += '<div class="wi-field"><label for="wi-dispatch-input-' + esc(n) + '">' + esc(n)
           + (spec.required ? ' (required)' : '') + '</label>'
-          + '<input class="input wi-dispatch-input" data-input="' + esc(n)
+          + '<input class="input wi-dispatch-input" id="wi-dispatch-input-' + esc(n) + '" data-input="' + esc(n)
           + '" value="' + esc(String(cur)) + '"></div>';
       }
     });
@@ -3198,7 +3198,7 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '</div>';
 
     html += '<div class="wi-group"><h3>Commit message</h3>'
-      + '<div class="wi-field"><input class="input" id="wi-commit-msg" placeholder="Update code" value="'
+      + '<div class="wi-field"><input class="input" id="wi-commit-msg" aria-label="Commit message" placeholder="Update code" value="'
       + esc(s.commitMessage) + '"></div></div>';
 
     html += '<div class="wi-group"><h3>Variables '
@@ -3206,9 +3206,9 @@ const REPORT = /*MODEL_JSON_PLACEHOLDER*/{};
       + '<div id="wi-var-rows">'
       + s.overrides.map((o, i) =>
           '<div class="wi-var-row" data-idx="' + i + '">'
-          + '<input class="input wi-var-name" placeholder="vars.NAME" value="' + esc(o.name) + '">'
-          + '<input class="input wi-var-value" placeholder="(empty string)" value="' + esc(o.value) + '">'
-          + '<button class="btn btn-quiet wi-var-del" data-tip="Remove">&times;</button></div>'
+          + '<input class="input wi-var-name" aria-label="Variable name" placeholder="vars.NAME" value="' + esc(o.name) + '">'
+          + '<input class="input wi-var-value" aria-label="Variable value" placeholder="(empty string)" value="' + esc(o.value) + '">'
+          + '<button class="btn btn-quiet wi-var-del" aria-label="Remove variable" data-tip="Remove">&times;</button></div>'
         ).join('')
       + '</div>'
       + '<div class="wi-inline-btns"><button class="btn" id="wi-var-add">+ variable</button></div>'
