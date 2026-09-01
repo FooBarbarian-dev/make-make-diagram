@@ -28,6 +28,11 @@ from typing import Any, Callable
 
 import yaml
 
+try:
+    from yaml import CSafeLoader as SafeLoader
+except ImportError:
+    from yaml import SafeLoader
+
 from pipeview.github.api import GitHubClient, GitHubError
 from pipeview.gitlab.fetch import (
     EXTERNAL_DIR,
@@ -61,7 +66,7 @@ def extract_job_uses(text: str) -> list[str]:
     """jobs.<id>.uses values from one workflow's YAML — a tolerant
     pre-pass; YAML errors return [] (the real parser reports them)."""
     try:
-        data = yaml.safe_load(text)
+        data = yaml.load(text, Loader=SafeLoader)
     except yaml.YAMLError:
         return []
     if not isinstance(data, dict):
