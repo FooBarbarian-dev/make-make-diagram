@@ -247,7 +247,7 @@ def load_scenarios(path: str) -> tuple[list[Scenario], list[Diagnostic]]:
         return file_error(f"Cannot read scenarios file {path}: {e}")
 
     try:
-        data = yaml.safe_load(text)
+        data = yaml.load(text, Loader=SafeLoader)
     except yaml.YAMLError as e:
         return file_error(f"Scenarios file {path} is not valid YAML: {e}")
 
