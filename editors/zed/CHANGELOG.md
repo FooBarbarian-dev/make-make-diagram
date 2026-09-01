@@ -5,6 +5,14 @@ Conventional Commits touching `editors/zed/`, tagged `zed-vX.Y.Z`, with
 the built `zed_pipeview.wasm` attached to the GitHub Release for
 reference (Zed compiles dev extensions itself).
 
+## [0.1.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/zed-v0.0.1...zed-v0.1.0) (2026-09-01)
+
+
+### Features
+
+* editor extensions (VS Code, Zed), upstream include resolution, and pipeview lsp ([7939b68](https://github.com/FooBarbarian-dev/make-make-diagram/commit/7939b6885d1d289ab4206ef8b9d87007690c7d04))
+* **zed:** ship LICENSE, changelog, and version annotation for automated releases ([1fb53ce](https://github.com/FooBarbarian-dev/make-make-diagram/commit/1fb53ce95a4adbc7f0791e92ec14ac9acf0dee79))
+
 ## 0.1.0 (unreleased seed)
 
 Initial extension: wires the `pipeview lsp` language server up for YAML

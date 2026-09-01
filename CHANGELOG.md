@@ -87,6 +87,33 @@ build). See `docs/release-pipelines.md` for the component table.
   carrying the CLI's full output. Disabled in untrusted workspaces.
   `make vscode` builds and unit-tests it.
 
+## [0.3.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/v0.2.1...v0.3.0) (2026-09-01)
+
+
+### Features
+
+* editor extensions (VS Code, Zed), upstream include resolution, and pipeview lsp ([7939b68](https://github.com/FooBarbarian-dev/make-make-diagram/commit/7939b6885d1d289ab4206ef8b9d87007690c7d04))
+* GitHub Actions roots in pipeview lsp and CLI root discovery ([6080562](https://github.com/FooBarbarian-dev/make-make-diagram/commit/60805629c98796ddb3dcc9e611a11cb7623d1a05))
+* **vscode:** GitHub remote report, sync, auth, and token commands ([684ae5e](https://github.com/FooBarbarian-dev/make-make-diagram/commit/684ae5ef281b4965332c02ce5caa3352a35aa2f4))
+* **vscode:** ship LICENSE and changelog for automated releases ([347c5bf](https://github.com/FooBarbarian-dev/make-make-diagram/commit/347c5bfcc3292d320e44965a3e2103c3a86bedda))
+* **zed:** ship LICENSE, changelog, and version annotation for automated releases ([1fb53ce](https://github.com/FooBarbarian-dev/make-make-diagram/commit/1fb53ce95a4adbc7f0791e92ec14ac9acf0dee79))
+
+
+### Bug Fixes
+
+* harden --upstream and pipeview lsp (self-review pass) ([12b9689](https://github.com/FooBarbarian-dev/make-make-diagram/commit/12b968921ff3ded018851214f1488778b9ac918d))
+
+
+### Performance Improvements
+
+* use CSafeLoader for PyYAML parsing ([77a7e0b](https://github.com/FooBarbarian-dev/make-make-diagram/commit/77a7e0b93b37a12b2fc53bee0e2e3d10fedd8f3e))
+
+
+### Documentation
+
+* Zed round — lsp in the CLI reference and architecture, changelog ([3491812](https://github.com/FooBarbarian-dev/make-make-diagram/commit/3491812aaab6962e5e38b9aaef6771b1622b6bf7))
+* **zed:** document GitHub Actions support carried by pipeview lsp ([f93c665](https://github.com/FooBarbarian-dev/make-make-diagram/commit/f93c665e11310838a9c5baaf056e2fc46e6879b3))
+
 ## [0.2.1](https://github.com/FooBarbarian-dev/make-make-diagram/compare/v0.2.0...v0.2.1) (2026-08-29)
 
 
