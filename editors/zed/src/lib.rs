@@ -4,10 +4,48 @@
 //! and forwards the user's settings, per editors/README.md.
 
 use zed_extension_api::{
-    self as zed, settings::LspSettings, Command, LanguageServerId, Result, Worktree,
+    self as zed, settings::LspSettings, Command, LanguageServerId, Os, Result, Worktree,
 };
 
 struct PipeviewExtension;
+
+/// Interpreter fallbacks for `python -m pipeview lsp` — (executable,
+/// arguments) — most trustworthy first. A WebAssembly extension cannot
+/// probe `--version`, so this order is the only defense against a wrong
+/// hit:
+///
+/// - Windows: `py`, the launcher the python.org installer always puts on
+///   PATH (unlike python.exe and pip's Scripts directory, which the
+///   installer leaves off PATH by default) and the one name the Microsoft
+///   Store never shadows with its "Python was not found" stub; then
+///   `python`, which is real when the PATH box was ticked or Python came
+///   from the Store; `python3` last — python.org installs never create it,
+///   while the Store stub answers to it.
+/// - elsewhere: `python3`, then `python`.
+fn interpreters(os: Os) -> &'static [(&'static str, &'static [&'static str])] {
+    const MODULE: &[&str] = &["-m", "pipeview", "lsp"];
+    const LAUNCHER: &[&str] = &["-3", "-m", "pipeview", "lsp"];
+    match os {
+        Os::Windows => &[("py", LAUNCHER), ("python", MODULE), ("python3", MODULE)],
+        _ => &[("python3", MODULE), ("python", MODULE)],
+    }
+}
+
+fn not_found_message(os: Os) -> String {
+    let (install, example) = match os {
+        Os::Windows => ("`py -m pip install .`", r"C:\\path\\to\\pipeview.exe"),
+        _ => ("`pip install .` or `pipx install .`", "/path/to/pipeview"),
+    };
+    format!(
+        "pipeview not found. Install it ({install} from the make-make-diagram \
+         repository), or point Zed at it in settings.json: \
+         {{\"lsp\": {{\"pipeview\": {{\"binary\": {{\"path\": \"{example}\"}}}}}}}}"
+    )
+}
+
+fn strings(parts: &[&str]) -> Vec<String> {
+    parts.iter().map(|s| s.to_string()).collect()
+}
 
 impl zed::Extension for PipeviewExtension {
     fn new() -> Self {
@@ -22,6 +60,7 @@ impl zed::Extension for PipeviewExtension {
         // The worktree shell env flows through so GitLab tokens
         // (PIPEVIEW_GITLAB_TOKEN et al.) reach the server's --upstream runs.
         let env = worktree.shell_env();
+        let (os, _arch) = zed::current_platform();
 
         // An explicit binary from Zed settings wins:
         //   "lsp": {"pipeview": {"binary": {"path": "...", "arguments": [...]}}}
@@ -39,6 +78,7 @@ impl zed::Extension for PipeviewExtension {
             }
         }
 
+        // `which` resolves pipeview.exe on Windows via PATHEXT.
         if let Some(path) = worktree.which("pipeview") {
             return Ok(Command {
                 command: path,
@@ -47,21 +87,17 @@ impl zed::Extension for PipeviewExtension {
             });
         }
 
-        for python in ["python3", "python"] {
+        for (python, args) in interpreters(os) {
             if let Some(path) = worktree.which(python) {
                 return Ok(Command {
                     command: path,
-                    args: vec!["-m".to_string(), "pipeview".to_string(), "lsp".to_string()],
+                    args: strings(args),
                     env,
                 });
             }
         }
 
-        Err("pipeview not found. Install it (`pip install .` from the \
-             make-make-diagram repository, or `pipx install .`), or point Zed \
-             at it in settings.json: {\"lsp\": {\"pipeview\": {\"binary\": \
-             {\"path\": \"/path/to/pipeview\"}}}}"
-            .to_string())
+        Err(not_found_message(os))
     }
 
     fn language_server_initialization_options(

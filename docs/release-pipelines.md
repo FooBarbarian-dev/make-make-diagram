@@ -21,7 +21,7 @@ GitHub Release. A publish job then attaches the component's artifacts.
 |---|---|---|---|---|---|
 | `.` | pipeview (core + CLI) | python | `vX.Y.Z` | `pyproject.toml`, `pipeview/__init__.py` | sdist + wheel |
 | `editors/vscode` | VS Code extension | node | `vscode-vX.Y.Z` | `package.json` (+ lockfile) | packaged `.vsix` |
-| `editors/zed` | Zed extension | rust | `zed-vX.Y.Z` | `Cargo.toml`, `extension.toml` (via the `x-release-please-version` annotation) | built `zed_pipeview.wasm` (reference — Zed compiles dev extensions itself) |
+| `editors/zed` | Zed extension | rust | `zed-vX.Y.Z` | `Cargo.toml`, `extension.toml` (via the `x-release-please-version` annotation) | `pipeview-zed-vX.Y.Z.zip` + `.tar.gz` — the installable extension directory (`extension.toml` beside `extension.wasm`, built by `editors/zed/scripts/package.sh`); install via *Install Dev Extension*, no Rust toolchain |
 
 **Never hand-bump versions** in any of the files above — release-please
 owns them all, and per component they must agree (the core has a test
@@ -33,6 +33,32 @@ Scoping commits helps attribution read well (`feat(vscode): …`,
 `feat(zed): …`), but the file paths are what actually route a commit to
 a component — a commit touching only `editors/zed/` can never bump the
 core.
+
+## Trying a branch before it merges: preview releases
+
+Two things exist short of a real release:
+
+- **CI artifacts.** Every PR's CI run builds the installable files —
+  the `.vsix` and the Zed `pipeview-zed-*.zip`/`.tar.gz` — and keeps
+  them as workflow artifacts for 7 days (Actions → the run → Artifacts;
+  a GitHub login is needed to download).
+- **Preview releases** (`.github/workflows/preview.yml`). Run it from
+  Actions → *Preview release* → *Run workflow* on any branch, or push a
+  tag `preview/<name>`. It builds the sdist + wheel, the `.vsix`, and
+  the Zed archives with the same commands and scripts as the release
+  jobs, then creates (or replaces) a GitHub **pre-release** tagged
+  `preview/<branch>` with all of them attached, plus install notes.
+  Pre-releases never become *latest*, and release-please reads only
+  `v*`, `vscode-v*`, `zed-v*` tags, so a preview cannot disturb
+  versioning. Deleting the branch deletes its preview;
+  `gh release delete preview/<name> --cleanup-tag` does it by hand.
+
+A preview rehearses everything in `release.yml` except release-please
+itself — the version-bump PR only exists on `main`. The manual
+dispatch of `release.yml` is not a preview mechanism: it is the
+bootstrap/escape hatch that publishes the *current* version, and it
+refuses to run from any branch but `main` because the tag it targets
+already exists and it would overwrite a real release's assets.
 
 ## GitHub Token Permissions
 

@@ -90,7 +90,10 @@ export function defaultPython(platform: NodeJS.Platform): string {
   return platform === "win32" ? "python" : "python3";
 }
 
-/** CLI candidates to probe, most preferred first. */
+/** CLI candidates to probe, most preferred first. Every candidate is
+ * verified with a `--version` probe before use, so a name that is
+ * missing (or, on Windows, the Microsoft Store's "Python was not found"
+ * stub) simply falls through to the next one. */
 export function cliCandidates(
   cliPath: string,
   pythonPath: string,
@@ -100,7 +103,7 @@ export function cliCandidates(
     return [{ command: cliPath, prefix: [], source: "pipeview.cliPath setting" }];
   }
   const python = pythonPath || defaultPython(platform);
-  return [
+  const candidates: CliCommand[] = [
     { command: "pipeview", prefix: [], source: "pipeview on PATH" },
     {
       command: python,
@@ -108,6 +111,56 @@ export function cliCandidates(
       source: `${python} -m pipeview`,
     },
   ];
+  if (platform === "win32") {
+    // The python.org installer leaves python.exe (and pip's Scripts dir,
+    // hence pipeview.exe) off PATH by default but always installs the
+    // `py` launcher into the Windows directory.
+    candidates.push({
+      command: "py",
+      prefix: ["-3", "-m", "pipeview"],
+      source: "py -3 -m pipeview",
+    });
+  }
+  return candidates;
+}
+
+/** Windows cannot run .cmd/.bat wrappers as processes, and Node refuses
+ * to try (EINVAL since CVE-2024-27980); such a `pipeview.cliPath` (or a
+ * python.bat as pythonPath) has to go through cmd.exe. */
+export function isWindowsBatchFile(command: string, platform: NodeJS.Platform): boolean {
+  return platform === "win32" && /\.(cmd|bat)$/i.test(command);
+}
+
+// cmd.exe escaping as done by cross-spawn (lib/util/escape.js), itself
+// after https://qntm.org/cmd — the one set of rules known to survive
+// both cmd's own parsing and the batch file's re-parsing of its %*.
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+export function escapeCmdCommand(command: string): string {
+  return command.replace(CMD_META, "^$1");
+}
+
+export function escapeCmdArgument(arg: string): string {
+  // Backslashes before a double quote double up, and the quote is escaped
+  // (CRT rules); so do backslashes at the end, which the closing quote
+  // would otherwise swallow. Then quote, then caret-escape cmd's meta
+  // characters — twice, because the batch file's %* is parsed again.
+  let out = arg.replace(/(?=(\\+?)?)\1"/g, '$1$1\\"');
+  out = out.replace(/(?=(\\+?)?)\1$/, "$1$1");
+  out = `"${out}"`;
+  out = out.replace(CMD_META, "^$1");
+  return out.replace(CMD_META, "^$1");
+}
+
+/** How to spawn a .cmd/.bat with argv: cmd.exe with one pre-escaped
+ * command line, passed verbatim. */
+export function batchSpawnArgs(
+  command: string,
+  argv: string[],
+  comspec: string | undefined = process.env.ComSpec,
+): { file: string; args: string[] } {
+  const line = [escapeCmdCommand(command), ...argv.map(escapeCmdArgument)].join(" ");
+  return { file: comspec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`] };
 }
 
 export function runProcess(
@@ -117,13 +170,29 @@ export function runProcess(
     cwd?: string;
     env?: NodeJS.ProcessEnv;
     onOutput?: (chunk: string) => void;
+    platform?: NodeJS.Platform;
   } = {},
 ): Promise<RunResult> {
+  const platform = options.platform ?? process.platform;
+  const argv = [...cli.prefix, ...args];
+  const env: NodeJS.ProcessEnv = {
+    ...(options.env ?? process.env),
+    // Windows Python writes the ANSI code page to pipes; the report
+    // paths parsed from stdout below are decoded as UTF-8 and a
+    // non-ASCII path (C:\Users\José\…) would come out mangled.
+    PYTHONUTF8: "1",
+  };
   return new Promise((resolve, reject) => {
-    const child = spawn(cli.command, [...cli.prefix, ...args], {
+    const batch = isWindowsBatchFile(cli.command, platform)
+      ? batchSpawnArgs(cli.command, argv)
+      : undefined;
+    const child = spawn(batch?.file ?? cli.command, batch?.args ?? argv, {
       cwd: options.cwd,
-      env: options.env ?? process.env,
+      env,
       shell: false,
+      windowsVerbatimArguments: batch !== undefined,
+      // no console window flashing over the editor per run
+      windowsHide: true,
     });
     let stdout = "";
     let stderr = "";
@@ -154,7 +223,7 @@ export async function locateCli(
   const failures: string[] = [];
   for (const candidate of candidates) {
     try {
-      const probe = await runProcess(candidate, ["--version"]);
+      const probe = await runProcess(candidate, ["--version"], { platform });
       if (probe.code === 0 && /pipeview/.test(probe.stdout)) {
         return candidate;
       }
@@ -163,9 +232,12 @@ export async function locateCli(
       failures.push(`${candidate.source}: ${(e as Error).message}`);
     }
   }
+  const install = platform === "win32"
+    ? "py -m pip install . from the repository"
+    : "pip install . from the repository, or pipx install .";
   throw new Error(
-    "pipeview CLI not found. Install it (pip install pipeview / " +
-      "pip install . from the repository) or set pipeview.cliPath / " +
-      `pipeview.pythonPath. Tried — ${failures.join("; ")}`,
+    `pipeview CLI not found. Install it (${install}) or set ` +
+      "pipeview.cliPath / pipeview.pythonPath. Tried — " +
+      failures.join("; "),
   );
 }

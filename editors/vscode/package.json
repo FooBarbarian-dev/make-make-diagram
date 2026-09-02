@@ -122,17 +122,17 @@
         "pipeview.pythonPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Python interpreter used for the `python -m pipeview` fallback. Empty: `python3` (or `python` on Windows)."
+          "markdownDescription": "Python interpreter used for the `python -m pipeview` fallback. Empty: `python3` (or `python` on Windows, where the `py` launcher is tried as well)."
         },
         "pipeview.cliPath": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Explicit path to the `pipeview` executable. Empty: `pipeview` on PATH, falling back to `python -m pipeview`."
+          "markdownDescription": "Explicit path to the `pipeview` executable (on Windows e.g. `C:\\Users\\me\\AppData\\Roaming\\Python\\Python312\\Scripts\\pipeview.exe`). Empty: `pipeview` on PATH, falling back to `python -m pipeview` (and `py -3 -m pipeview` on Windows)."
         },
         "pipeview.outputDirectory": {
           "type": "string",
           "default": "",
-          "markdownDescription": "Where generated reports are written. Empty: the extension's per-workspace storage directory (keeps the repository clean)."
+          "markdownDescription": "Where generated reports are written. A relative path is resolved from the workspace folder. Empty: the extension's per-workspace storage directory (keeps the repository clean)."
         },
         "pipeview.useUpstream": {
           "type": "boolean",
@@ -156,10 +156,11 @@
     }
   },
   "scripts": {
+    "vscode:prepublish": "npm run build",
     "build": "tsc -p ./",
     "watch": "tsc -w -p ./",
     "lint": "tsc --noEmit -p ./",
-    "test": "npm run build && node --test out/test/*.test.js"
+    "test": "npm run build && node --test out/test/cli.test.js"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",

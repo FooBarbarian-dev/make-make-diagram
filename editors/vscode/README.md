@@ -11,10 +11,25 @@ simulator all included — rendered in a webview panel.
 
 - Python 3.10+ with pipeview installed (`pip install .` from the
   repository, or `pipx install .`). The extension finds it as `pipeview`
-  on PATH, falls back to `python -m pipeview`, or uses the
-  `pipeview.cliPath` / `pipeview.pythonPath` settings.
+  on PATH, falls back to `python3 -m pipeview` (on Windows: `python`,
+  then the `py -3 -m pipeview` launcher), or uses the `pipeview.cliPath`
+  / `pipeview.pythonPath` settings. Each candidate is checked with
+  `--version`, so a stray Microsoft Store "python" stub is skipped.
 - Trusted workspace (report generation runs the CLI on your files; Make
   enrichment executes `make -pqn`).
+
+Platform notes:
+
+- **Windows.** The python.org installer leaves `python.exe` and pip's
+  `Scripts` directory off PATH by default; the `py` launcher fallback
+  covers that. To pin an interpreter or a venv, set `pipeview.pythonPath`
+  or `pipeview.cliPath` (`…\Scripts\pipeview.exe`; a `.cmd`/`.bat`
+  wrapper works too). Report generation runs without a console window,
+  and non-ASCII paths (a `C:\Users\José` profile) are handled.
+- **WSL.** With the Remote - WSL extension the extension host runs inside
+  the distro, so install pipeview there and everything — including the
+  *Authenticate* terminal — runs in Linux. Report panels are webviews, so
+  no browser is involved.
 
 ## Commands
 
@@ -26,7 +41,7 @@ simulator all included — rendered in a webview panel.
 | **Pipeview: GitLab: Report for a Remote Project…** | `pipeview gitlab report group/project[@ref]` — fetches straight from GitLab, no checkout needed. |
 | **Pipeview: GitLab: Sync Tracked Projects** | `pipeview gitlab sync` — one report per tracked project, plus the cross-project rollup, which opens when produced. |
 | **Pipeview: GitLab: Set API Token** | Stores a `read_api` token in VS Code secret storage; it is passed to the CLI as `PIPEVIEW_GITLAB_TOKEN` (an already-exported environment variable wins). |
-| **Pipeview: GitLab: Authenticate (opens a terminal)** | Runs `pipeview gitlab auth` in an integrated terminal — the interactive flow that opens GitLab's prefilled token form and stores the result in pipeview's own config. |
+| **Pipeview: GitLab: Authenticate (opens a terminal)** | Runs `pipeview gitlab auth` in an integrated terminal (the terminal's process is pipeview itself, so it works the same under PowerShell, cmd, bash, and Remote-WSL) — the interactive flow that opens GitLab's prefilled token form and stores the result in pipeview's own config. |
 | **Pipeview: GitLab: Clear Stored API Token** | Removes the secret-storage token. |
 | **Pipeview: GitHub: Report for a Remote Repository…** / **Sync Tracked Repositories** | The same flows against GitHub (`pipeview github report owner/repo[@ref]`, `pipeview github sync`). |
 | **Pipeview: GitHub: Set API Token / Authenticate / Clear Stored API Token** | GitHub counterparts of the GitLab commands; the token is passed as `PIPEVIEW_GITHUB_TOKEN`. |
@@ -54,7 +69,8 @@ fully offline runs.
 - `pipeview.pythonPath` — interpreter for the `-m pipeview` fallback.
 - `pipeview.cliPath` — explicit pipeview executable.
 - `pipeview.outputDirectory` — where reports are written (default: the
-  extension's per-workspace storage, keeping your repository clean).
+  extension's per-workspace storage, keeping your repository clean); a
+  relative path is resolved from the workspace folder.
 - `pipeview.useUpstream` — pass `--upstream` for repo/file reports
   (default: true).
 - `pipeview.upstreamRemote` — which git remote to use.
@@ -73,3 +89,9 @@ npm test          # tsc build + node --test unit tests
 
 Launch the extension from VS Code with F5 (Extension Development Host),
 or package it with `npx @vscode/vsce package`.
+
+To try a branch's build without merging, run the *Preview release*
+workflow on it (or push a `preview/<name>` tag): it attaches the
+`.vsix` — and the wheel it needs — to a `preview/<branch>` pre-release;
+install with *Extensions → ··· → Install from VSIX…*. See
+[docs/release-pipelines.md](../../docs/release-pipelines.md).

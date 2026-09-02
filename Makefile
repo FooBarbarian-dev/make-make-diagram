@@ -38,4 +38,8 @@ vscode:
 zed:
 	cd editors/zed && cargo build --release --target wasm32-wasip2
 
-.PHONY: install dev test build lint examples self vscode zed
+## Build + package the Zed extension as Zed installs it (editors/zed/dist/)
+zed-package:
+	cd editors/zed && scripts/package.sh
+
+.PHONY: install dev test build lint examples self vscode zed zed-package

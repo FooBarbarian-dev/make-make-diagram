@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import os
 import sys
-import webbrowser
 
+from pipeview.browser import open_in_browser
 from pipeview.gitlab.api import GitLabError
 from pipeview.gitlab.config import GitLabConfig
 
@@ -63,10 +63,9 @@ def truncate(text: str, width: int) -> str:
 
 
 def open_report(path: str) -> bool:
-    try:
-        return webbrowser.open("file://" + os.path.abspath(path))
-    except Exception:
-        return False
+    """Open a generated report in the browser; False when no browser
+    could be launched (headless box, browserless WSL distro)."""
+    return open_in_browser(path)
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +280,7 @@ class _App:
         elif key == ord("t") and count:
             self._toggle_track_project(ordered[self.cursor].get("path_with_namespace"))
         elif key == ord("o") and self.last_report:
-            open_report(self.last_report)
+            self._open_last_report()
         elif key == ord("?"):
             self.help_visible = True
         elif key in (curses.KEY_ENTER, 10, 13) and count:
@@ -301,11 +300,16 @@ class _App:
         elif key in (curses.KEY_ENTER, 10, 13):
             self._generate()
         elif key == ord("o") and self.last_report:
-            open_report(self.last_report)
+            self._open_last_report()
         elif key == ord("t") and self.current:
             self._toggle_track_ref()
         elif key == ord("?"):
             self.help_visible = True
+
+    def _open_last_report(self) -> None:
+        if not open_report(self.last_report):
+            self.status = ("could not open a browser here — report at "
+                           f"{self.last_report}")
 
     def _prompt_search(self) -> None:
         import curses

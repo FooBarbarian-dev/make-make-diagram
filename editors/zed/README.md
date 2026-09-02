@@ -35,14 +35,76 @@ generates; unresolved includes stay dashed ghost nodes.
 See [editors/README.md](../README.md) for how the Zed and VS Code
 integrations divide the same features.
 
+## Using it
+
+There is **no command-palette entry** — Zed extensions can register
+language servers, not commands. Everything happens inside a pipeline
+file's buffer:
+
+1. Open a `.gitlab-ci.yml`, a `.github/workflows/*.yml`, or a
+   `Makefile` (Makefiles need a Make language extension, else Zed treats
+   them as plain text and no server attaches).
+2. The server attaches and says so once: *"pipeview attached: …"*
+   (silence it with `"announce": false` in the settings below). The
+   language-server indicator in the status bar lists `pipeview` too.
+3. Save → diagnostics inline. Hover a `CI_*` / `GITHUB_*` name → docs.
+   `cmd-.` / `ctrl-.` on any line → *Pipeview: open pipeline report
+   (browser)*. Other YAML files, ones that belong to no pipeline root,
+   get nothing on purpose.
+
+### If nothing shows up
+
+- **No "pipeview attached" toast, no `pipeview` in the status-bar
+  language-server list** → the server did not start. Run
+  `debug: open language server logs` (or `zed: open log`) and look for
+  `pipeview`: the message names what was tried. Usual causes: pipeview
+  is not installed for the interpreter that was found (on Windows the
+  `py` launcher picks the newest Python — install there with
+  `py -m pip install .`, or point the `binary` setting below at the
+  right `pipeview.exe`), or nothing was found at all (the toast says so,
+  with the settings escape hatch).
+- **Toast appears but no code action** → the file belongs to no root:
+  the buffer must be a `Makefile` (with the Make language active), a
+  `.gitlab-ci.yml`, a `*.yml` under `.github/workflows/`, or a `*.mk` /
+  `*.yml` with one of those in a parent directory.
+- **Report generated but no browser** → the toast tells you the file
+  path; under WSL install `wslu` (`wslview`) or set `BROWSER`.
+
 ## Requirements
 
-Python 3.10+ with pipeview installed. The extension finds the server as
-`pipeview` on PATH, falls back to `python3 -m pipeview`, or uses an
-explicit binary from settings (below). Zed's YAML support is built in;
-Makefile buffers need a Make language extension installed.
+Zed 0.205 or newer (extension API 0.7) and Python 3.10+ with pipeview
+installed. The extension finds the server as `pipeview` on PATH, falls
+back to `python3 -m pipeview` (`python`, then `py -3 -m pipeview` on
+Windows), or uses an explicit binary from settings (below). Zed's YAML
+support is built in; Makefile buffers need a Make language extension
+installed.
 
-## Installation (dev extension)
+**Windows.** `pip install .` puts `pipeview.exe` into Python's `Scripts`
+directory, which the python.org installer leaves off PATH by default —
+the extension then reaches pipeview through the `py` launcher, which is
+always on PATH. If Zed still reports it missing, install with
+`py -m pip install .` or point the `binary` setting below at
+`…\Scripts\pipeview.exe` (double the backslashes in JSON).
+
+**WSL.** Zed's remote development runs `pipeview lsp` inside the distro;
+install pipeview there. The report code action opens the report in your
+Windows browser: the server detects WSL and hands the file to `wslview`
+(wslu — preinstalled on the Ubuntu images) or PowerShell. Set `BROWSER`
+to prefer a Linux browser instead.
+
+## Installation
+
+### From a release (no Rust toolchain)
+
+Download `pipeview-zed-vX.Y.Z.zip` (or `.tar.gz`) from the matching
+[`zed-vX.Y.Z` release](https://github.com/FooBarbarian-dev/make-make-diagram/releases)
+and extract it. The `pipeview/` folder inside holds `extension.toml`
+beside the compiled `extension.wasm` — the same layout Zed's extension
+registry serves, and the only form Zed can install (a bare `.wasm` is
+not). In Zed: `zed: extensions` → **Install Dev Extension** → choose
+that `pipeview/` folder. Same steps on Windows, macOS, and Linux.
+
+### From source
 
 ```bash
 git clone https://github.com/FooBarbarian-dev/make-make-diagram.git
@@ -51,7 +113,9 @@ cd make-make-diagram && pip install .
 
 In Zed: `zed: extensions` → **Install Dev Extension** → choose
 `editors/zed/`. (Zed compiles the extension with your Rust toolchain;
-`rustup target add wasm32-wasip2` first if needed.)
+`rustup target add wasm32-wasip2` first if needed.) Or build the release
+archive yourself with `editors/zed/scripts/package.sh` (`make
+zed-package`) and install its `dist/` output as above.
 
 ## Settings
 
@@ -63,13 +127,16 @@ server:
   "lsp": {
     "pipeview": {
       // Explicit server binary (optional; default: pipeview on PATH,
-      // then python3 -m pipeview). Arguments default to ["lsp"].
+      // then python3 -m pipeview / py -3 -m pipeview). Arguments default
+      // to ["lsp"]. Windows: "C:\\Users\\me\\...\\Scripts\\pipeview.exe"
       "binary": { "path": "/path/to/pipeview" },
       "initialization_options": {
+        "announce": true,        // the one-time "pipeview attached" toast
         "upstream": true,        // resolve cross-repo includes via the
                                  // repo's git remote for reports
         "upstreamRemote": "",    // "" = tracking remote, else origin
         "outputDir": ""          // "" = ~/.cache/pipeview/lsp/<slug>
+                                 // (%LOCALAPPDATA%\pipeview\lsp on Windows)
       }
     }
   }
@@ -88,7 +155,21 @@ sync`) — Zed extensions have no input UI to prompt for a project path.
 ```bash
 cd editors/zed
 cargo build --release --target wasm32-wasip2   # or: make zed (repo root)
+scripts/package.sh                             # or: make zed-package — the
+                                               # release archives, in dist/
 ```
+
+`scripts/package.sh` is what CI and the release workflow run: it checks
+`extension.toml` (required fields, version in step with `Cargo.toml`),
+stages `extension.toml` + `extension.wasm` (+ LICENSE, README,
+CHANGELOG — deliberately no `Cargo.toml`, which would make Zed rebuild
+on install) and writes the `.zip`/`.tar.gz`.
+
+To try a branch's build without merging, run the *Preview release*
+workflow on it (or push a `preview/<name>` tag): it attaches these
+archives — and the wheel they need — to a `preview/<branch>`
+pre-release, installable exactly like a real one. See
+[docs/release-pipelines.md](../../docs/release-pipelines.md).
 
 The extension is ~80 lines on purpose: every feature lives in
 `pipeview lsp` so other editors (and the VS Code extension, as a

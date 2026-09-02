@@ -69,8 +69,14 @@ jobs:
           retention-days: 7
 
   vscode:
-    name: VS Code extension
-    runs-on: ubuntu-latest
+    name: VS Code extension (${{ matrix.os }})
+    # Windows too: the extension host and the CLI it spawns run natively
+    # there, and cmd.exe/PowerShell differ from sh in ways the tests cover.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     defaults:
       run:
         working-directory: editors/vscode
@@ -87,6 +93,7 @@ jobs:
       # The same packaging step the release job runs — fail here, not there.
       - run: npx --yes @vscode/vsce package
       - uses: actions/upload-artifact@v4
+        if: matrix.os == 'ubuntu-latest'
         with:
           name: vsix
           path: editors/vscode/*.vsix
@@ -101,4 +108,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: rustup target add wasm32-wasip2
-      - run: cargo build --release --target wasm32-wasip2
+      # Builds, validates extension.toml (required fields, version in step
+      # with Cargo.toml), and produces the installable archives exactly as
+      # the release job does — fail here, not there.
+      - run: scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zed-extension
+          path: editors/zed/dist/*
+          retention-days: 7

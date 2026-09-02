@@ -54,10 +54,13 @@ async function cli(): Promise<CliCommand> {
   return cachedCli;
 }
 
-function outDir(context: vscode.ExtensionContext): string {
+/** Where reports go: the configured directory (a relative one is taken
+ * from the workspace folder, so every command agrees on it), else the
+ * extension's per-workspace storage. Always absolute. */
+function outDir(context: vscode.ExtensionContext, workspaceDir: string): string {
   const configured = settings().outputDirectory;
   if (configured) {
-    return configured;
+    return path.resolve(workspaceDir, configured);
   }
   const base = context.storageUri ?? context.globalStorageUri;
   return path.join(base.fsPath, "reports");
@@ -184,7 +187,9 @@ async function reportOn(
   cwd: string,
 ): Promise<void> {
   const s = settings();
-  const args = buildReportArgs(target, outDir(context), {
+  const workspaceDir =
+    vscode.workspace.getWorkspaceFolder(vscode.Uri.file(target))?.uri.fsPath ?? cwd;
+  const args = buildReportArgs(target, outDir(context, workspaceDir), {
     useUpstream: s.useUpstream,
     upstreamRemote: s.upstreamRemote,
     extraArgs: s.extraArgs,
@@ -260,7 +265,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       const cwd = pickWorkspaceFolder()?.uri.fsPath ?? process.cwd();
-      const args = [provider, "report", entry.trim(), "-o", outDir(context),
+      const args = [provider, "report", entry.trim(), "-o", outDir(context, cwd),
                     "--format", "html,json"];
       const invoke = () =>
         runAndShow(context, args, cwd,
@@ -271,7 +276,7 @@ export function activate(context: vscode.ExtensionContext): void {
 
     register(ids.sync, async () => {
       const cwd = pickWorkspaceFolder()?.uri.fsPath ?? process.cwd();
-      const args = [provider, "sync", "-o", outDir(context),
+      const args = [provider, "sync", "-o", outDir(context, cwd),
                     "--format", "html,json"];
       const invoke = () =>
         runAndShow(context, args, cwd,

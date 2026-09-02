@@ -9,18 +9,40 @@ import { CliCommand } from "./cli";
 
 export type Provider = "gitlab" | "github";
 
-function shellQuote(part: string): string {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(part) ? part : `'${part.replace(/'/g, "'\\''")}'`;
+/** The terminal's own process is pipeview itself (shellPath/shellArgs),
+ * so no shell ever parses the command line: the same argv works under
+ * PowerShell-default Windows, cmd, bash, and a Remote-WSL extension host,
+ * whatever characters the configured cliPath/pythonPath contain. */
+export function authTerminalOptions(
+  cli: CliCommand,
+  provider: Provider,
+): vscode.TerminalOptions {
+  return {
+    name: `pipeview ${provider} auth`,
+    shellPath: cli.command,
+    shellArgs: [...cli.prefix, provider, "auth"],
+  };
 }
 
 export async function providerAuthTerminal(
   cli: CliCommand,
   provider: Provider,
 ): Promise<void> {
-  const terminal = vscode.window.createTerminal({ name: `pipeview ${provider} auth` });
+  const terminal = vscode.window.createTerminal(authTerminalOptions(cli, provider));
   terminal.show();
-  const cmd = [cli.command, ...cli.prefix, provider, "auth"]
-    .map(shellQuote)
-    .join(" ");
-  terminal.sendText(cmd, true);
+  // VS Code closes a terminal whose process exits cleanly, and with it
+  // the CLI's final "token stored" line — say so here instead. A failed
+  // run stays open with VS Code's own exit-code alert.
+  const closed = vscode.window.onDidCloseTerminal((t) => {
+    if (t !== terminal) {
+      return;
+    }
+    closed.dispose();
+    if (t.exitStatus?.code === 0) {
+      void vscode.window.showInformationMessage(
+        `pipeview: ${provider} authentication finished — the token is stored ` +
+          "in pipeview's own config and used by every command.",
+      );
+    }
+  });
 }
