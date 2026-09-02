@@ -73,11 +73,10 @@ def interactive_setup(host: str, config: GitHubConfig, *,
     print("Create one here (form is prefilled), then paste it below:")
     print(f"  {url}\n")
     if open_browser:
-        try:
-            import webbrowser
-            webbrowser.open(url)
-        except Exception:
-            pass  # headless boxes: URL is printed above
+        from pipeview.browser import open_in_browser
+        if not open_in_browser(url):
+            # headless boxes: the URL is printed above
+            print("(could not open a browser here — open the URL above.)\n")
 
     for attempt in range(3):
         try:

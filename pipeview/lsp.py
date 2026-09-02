@@ -26,13 +26,14 @@ import hashlib
 import io
 import json
 import logging
+import ntpath
 import os
 import re
 import sys
-import webbrowser
 from pathlib import Path
 from urllib.parse import unquote, urlparse
 
+from pipeview.browser import open_in_browser
 from pipeview.cli import main as _cli_main
 from pipeview.parsers.github_parser import parse_github
 from pipeview.parsers.github_predefined import (
@@ -128,8 +129,17 @@ def index_to_utf16(line: str, index: int) -> int:
 def uri_to_path(uri: str) -> str:
     parsed = urlparse(uri)
     path = unquote(parsed.path)
-    if os.name == "nt" and re.match(r"^/[A-Za-z]:", path):
-        path = path[1:]
+    if os.name == "nt":
+        host = parsed.netloc
+        if host and host.lower() != "localhost":
+            # file://server/share/x is a UNC path (\\server\share\x):
+            # network shares and \\wsl.localhost\<distro>\... worktrees
+            # opened as local folders. Dropping the authority would
+            # resolve it against the current drive instead.
+            return ntpath.abspath("\\\\" + host + path.replace("/", "\\"))
+        if re.match(r"^/[A-Za-z]:", path):
+            path = path[1:]
+        return ntpath.abspath(path)
     return os.path.abspath(path)
 
 
@@ -175,9 +185,19 @@ def find_root(path: str) -> tuple[str, str] | None:
     return None
 
 
-def default_outdir(root_path: str) -> str:
-    cache = os.environ.get("XDG_CACHE_HOME") or os.path.join(
+def cache_home() -> str:
+    """The user's cache directory: $XDG_CACHE_HOME / ~/.cache, or
+    %LOCALAPPDATA% on Windows."""
+    if os.name == "nt":
+        local = os.environ.get("LOCALAPPDATA") or os.path.join(
+            os.path.expanduser("~"), "AppData", "Local")
+        return local
+    return os.environ.get("XDG_CACHE_HOME") or os.path.join(
         os.path.expanduser("~"), ".cache")
+
+
+def default_outdir(root_path: str) -> str:
+    cache = cache_home()
     root_dir = os.path.dirname(os.path.abspath(root_path))
     digest = hashlib.sha1(root_dir.encode()).hexdigest()[:10]
     return os.path.join(cache, "pipeview", "lsp",
@@ -500,8 +520,12 @@ class LspServer:
         html = os.path.join(outdir,
                             f"{_output_basename(root_path, kind)}.report.html")
         if os.path.isfile(html):
-            _open_in_browser(path_to_uri(html))
-            if code == 0:
+            opened = _open_in_browser(html)
+            if not opened:
+                self._show_message(2, "pipeview: report generated but no "
+                                      "browser could be opened — open it "
+                                      f"manually: {html}")
+            elif code == 0:
                 self._show_message(3, f"pipeview: report opened ({html})")
             else:
                 self._show_message(2, "pipeview: report opened with "
@@ -536,8 +560,11 @@ class LspServer:
         })
 
 
-def _open_in_browser(url: str) -> None:
-    """webbrowser's children inherit fd 1 — the LSP protocol channel —
+def _open_in_browser(html: str) -> bool:
+    """Open the report (see pipeview.browser for the per-platform and
+    WSL handling) and say whether anything was launched.
+
+    The launchers' children inherit fd 1 — the LSP protocol channel —
     and browsers print to it ("Opening in existing browser session.").
     Point fd 1 at devnull around the launch so their chatter cannot
     corrupt the framing; redirect_stdout alone only covers Python-level
@@ -549,7 +576,7 @@ def _open_in_browser(url: str) -> None:
             os.dup2(devnull, 1)
         finally:
             os.close(devnull)
-        webbrowser.open(url)
+        return open_in_browser(html)
     finally:
         os.dup2(saved, 1)
         os.close(saved)

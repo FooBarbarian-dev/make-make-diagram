@@ -12,11 +12,13 @@ import os
 
 import pytest
 
+from pipeview import browser as browser_mod
 from pipeview import lsp as lsp_mod
 from pipeview.lsp import (
     CMD_OPEN_REPORT,
     CMD_OPEN_REPORT_OFFLINE,
     LspServer,
+    cache_home,
     default_outdir,
     find_root,
     index_to_utf16,
@@ -26,6 +28,12 @@ from pipeview.lsp import (
     utf16_to_index,
     write_message,
 )
+
+
+@pytest.fixture(autouse=True)
+def _not_wsl(monkeypatch):
+    monkeypatch.setattr(browser_mod, "is_wsl", lambda: False)
+
 
 GITLAB_OK = """\
 stages: [build]
@@ -455,8 +463,8 @@ class TestGitHubIntegration:
     def test_report_generated_and_opened(self, tmp_path, monkeypatch):
         write_tree(tmp_path, {".github/workflows/ci.yml": WORKFLOW_OK})
         opened = []
-        monkeypatch.setattr(lsp_mod.webbrowser, "open",
-                            lambda url: opened.append(url))
+        monkeypatch.setattr(browser_mod.webbrowser, "open",
+                            lambda url: opened.append(url) or True)
         outdir = str(tmp_path / "out")
         client = Client({"outputDir": outdir})
         uri = client.open(tmp_path / ".github" / "workflows" / "ci.yml")
@@ -481,8 +489,8 @@ class TestExecuteCommand:
     def test_offline_report_generated_and_opened(self, tmp_path, monkeypatch):
         write_tree(tmp_path, {".gitlab-ci.yml": GITLAB_OK})
         opened = []
-        monkeypatch.setattr(lsp_mod.webbrowser, "open",
-                            lambda url: opened.append(url))
+        monkeypatch.setattr(browser_mod.webbrowser, "open",
+                            lambda url: opened.append(url) or True)
         outdir = str(tmp_path / "out")
         client = Client({"outputDir": outdir})
         uri = client.open(tmp_path / ".gitlab-ci.yml")
@@ -519,7 +527,7 @@ class TestExecuteCommand:
         # An outputDir starting with '-' makes argparse SystemExit inside
         # the in-process CLI call; the server must survive and report.
         write_tree(tmp_path, {".gitlab-ci.yml": GITLAB_OK})
-        monkeypatch.setattr(lsp_mod.webbrowser, "open",
+        monkeypatch.setattr(browser_mod.webbrowser, "open",
                             lambda url: pytest.fail("opened despite failure"))
         client = Client({"outputDir": "-reports"})
         uri = client.open(tmp_path / ".gitlab-ci.yml")
@@ -532,7 +540,7 @@ class TestExecuteCommand:
     def test_failure_reports_error_message(self, tmp_path, monkeypatch):
         write_tree(tmp_path, {".gitlab-ci.yml": GITLAB_OK})
         monkeypatch.setattr(lsp_mod, "_cli_main", lambda argv: 2)
-        monkeypatch.setattr(lsp_mod.webbrowser, "open",
+        monkeypatch.setattr(browser_mod.webbrowser, "open",
                             lambda url: pytest.fail("opened despite failure"))
         client = Client({"outputDir": str(tmp_path / "empty")})
         uri = client.open(tmp_path / ".gitlab-ci.yml")
@@ -546,9 +554,69 @@ class TestExecuteCommand:
         # cli.main prints to stdout — the LSP protocol channel. The server
         # must capture it.
         write_tree(tmp_path, {".gitlab-ci.yml": GITLAB_OK})
-        monkeypatch.setattr(lsp_mod.webbrowser, "open", lambda url: None)
+        monkeypatch.setattr(browser_mod.webbrowser, "open", lambda url: None)
         client = Client({"outputDir": str(tmp_path / "out")})
         uri = client.open(tmp_path / ".gitlab-ci.yml")
         client.request("workspace/executeCommand", {
             "command": CMD_OPEN_REPORT_OFFLINE, "arguments": [uri]})
         assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------------------
+# Platform paths
+# ---------------------------------------------------------------------------
+
+class TestWindowsPaths:
+    def test_drive_letter_uri(self, monkeypatch):
+        monkeypatch.setattr(os, "name", "nt")
+        assert uri_to_path("file:///c%3A/proj/Makefile") == \
+            "c:\\proj\\Makefile"
+        assert uri_to_path("file:///C:/proj/.gitlab-ci.yml") == \
+            "C:\\proj\\.gitlab-ci.yml"
+
+    def test_unc_authority_is_kept(self, monkeypatch):
+        # Zed sends \\\\server\\share\\... worktrees as file://server/share/...
+        monkeypatch.setattr(os, "name", "nt")
+        assert uri_to_path("file://fileserver/proj/Makefile") == \
+            "\\\\fileserver\\proj\\Makefile"
+        assert uri_to_path("file://wsl.localhost/Ubuntu/home/u/p/Makefile") \
+            == "\\\\wsl.localhost\\Ubuntu\\home\\u\\p\\Makefile"
+        # localhost is not a UNC host
+        assert uri_to_path("file://localhost/C:/proj/Makefile") == \
+            "C:\\proj\\Makefile"
+
+    def test_posix_uri_unchanged(self, tmp_path):
+        p = tmp_path / "Makefile"
+        assert uri_to_path(path_to_uri(str(p))) == str(p)
+
+    def test_cache_home_windows(self, monkeypatch):
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setenv("LOCALAPPDATA", "C:\\Users\\u\\AppData\\Local")
+        monkeypatch.setenv("XDG_CACHE_HOME", "/ignored")
+        assert cache_home() == "C:\\Users\\u\\AppData\\Local"
+
+    def test_cache_home_xdg(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+        assert cache_home() == str(tmp_path)
+        monkeypatch.delenv("XDG_CACHE_HOME")
+        assert cache_home().endswith(".cache")
+
+
+class TestBrowserlessHost:
+    def test_no_browser_is_reported_not_claimed(self, tmp_path, monkeypatch):
+        # WSL without wslu, a headless box over SSH: the report exists but
+        # nothing could open it — say so instead of "report opened".
+        write_tree(tmp_path, {".gitlab-ci.yml": GITLAB_OK})
+        monkeypatch.setattr(browser_mod.webbrowser, "open", lambda url: False)
+        outdir = str(tmp_path / "out")
+        client = Client({"outputDir": outdir})
+        uri = client.open(tmp_path / ".gitlab-ci.yml")
+        client.request("workspace/executeCommand", {
+            "command": CMD_OPEN_REPORT_OFFLINE, "arguments": [uri]})
+        html = os.path.join(outdir, "gitlab-ci.report.html")
+        assert os.path.isfile(html)
+        msgs = client.messages()
+        assert any(m["type"] == 2 and "no browser" in m["message"]
+                   and html in m["message"] for m in msgs)
+        assert not any("report opened" in m["message"] for m in msgs)
+
