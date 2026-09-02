@@ -5,6 +5,18 @@ Conventional Commits touching `editors/zed/`, tagged `zed-vX.Y.Z`, with
 the built `zed_pipeview.wasm` attached to the GitHub Release for
 reference (Zed compiles dev extensions itself).
 
+## [0.2.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/zed-v0.1.0...zed-v0.2.0) (2026-09-02)
+
+
+### Features
+
+* **lsp:** announce what pipeview offers when it attaches ([cfcbbd7](https://github.com/FooBarbarian-dev/make-make-diagram/commit/cfcbbd7b9681bf94a33613068f13e234b40c105b))
+
+
+### Bug Fixes
+
+* **zed:** find Python on Windows, ship an installable extension archive ([59c9632](https://github.com/FooBarbarian-dev/make-make-diagram/commit/59c96325e04f79139c23fc36e45edc31ad24c5bc))
+
 ## [0.1.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/zed-v0.0.1...zed-v0.1.0) (2026-09-01)
 
 
