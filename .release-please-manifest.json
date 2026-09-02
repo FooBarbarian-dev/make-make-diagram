@@ -1,5 +1,5 @@
 {
   ".": "1.0.0",
   "editors/vscode": "0.2.0",
-  "editors/zed": "0.2.1"
+  "editors/zed": "0.3.0"
 }
