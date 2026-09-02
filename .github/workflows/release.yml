@@ -111,9 +111,12 @@ jobs:
           gh release upload '${{ needs.release-please.outputs.vscode_tag_name }}' \
             *.vsix --repo "$GITHUB_REPOSITORY" --clobber
 
-  # Build the Zed extension and attach the wasm to its release for
-  # reference (tags zed-vX.Y.Z; Zed compiles dev extensions itself, so
-  # the artifact is a verification aid, not an install path).
+  # Package the Zed extension as Zed installs it — a directory with
+  # extension.toml beside the compiled extension.wasm, archived as .zip
+  # and .tar.gz — and attach both to its release (tags zed-vX.Y.Z). A bare
+  # .wasm is not installable; the archive is: zed: extensions → Install
+  # Dev Extension on the extracted folder, no Rust toolchain needed on
+  # any platform (editors/zed/README.md).
   publish-zed:
     needs: release-please
     if: needs.release-please.outputs.zed_release_created == 'true'
@@ -128,11 +131,16 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.zed_tag_name }}
       - run: rustup target add wasm32-wasip2
-      - run: cargo build --release --target wasm32-wasip2
-      - name: Attach the wasm to the GitHub Release
+      - name: Build and package the installable extension directory
+        env:
+          TAG: ${{ needs.release-please.outputs.zed_tag_name }}
+        # --expect-version: the manifest must agree with the tag being
+        # published (release-please bumps extension.toml via its
+        # x-release-please-version annotation; this catches a hand edit).
+        run: scripts/package.sh --expect-version "${TAG#zed-v}"
+      - name: Attach the archives to the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release upload '${{ needs.release-please.outputs.zed_tag_name }}' \
-            target/wasm32-wasip2/release/zed_pipeview.wasm \
-            --repo "$GITHUB_REPOSITORY" --clobber
+            dist/*.zip dist/*.tar.gz --repo "$GITHUB_REPOSITORY" --clobber

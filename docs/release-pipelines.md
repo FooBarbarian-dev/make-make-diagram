@@ -21,7 +21,7 @@ GitHub Release. A publish job then attaches the component's artifacts.
 |---|---|---|---|---|---|
 | `.` | pipeview (core + CLI) | python | `vX.Y.Z` | `pyproject.toml`, `pipeview/__init__.py` | sdist + wheel |
 | `editors/vscode` | VS Code extension | node | `vscode-vX.Y.Z` | `package.json` (+ lockfile) | packaged `.vsix` |
-| `editors/zed` | Zed extension | rust | `zed-vX.Y.Z` | `Cargo.toml`, `extension.toml` (via the `x-release-please-version` annotation) | built `zed_pipeview.wasm` (reference — Zed compiles dev extensions itself) |
+| `editors/zed` | Zed extension | rust | `zed-vX.Y.Z` | `Cargo.toml`, `extension.toml` (via the `x-release-please-version` annotation) | `pipeview-zed-vX.Y.Z.zip` + `.tar.gz` — the installable extension directory (`extension.toml` beside `extension.wasm`, built by `editors/zed/scripts/package.sh`); install via *Install Dev Extension*, no Rust toolchain |
 
 **Never hand-bump versions** in any of the files above — release-please
 owns them all, and per component they must agree (the core has a test
