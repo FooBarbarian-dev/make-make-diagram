@@ -1,7 +1,10 @@
 #!/usr/bin/env bash
 # Package the Zed extension the way Zed installs it.
 #
-#   scripts/package.sh [--no-build] [--expect-version X.Y.Z] [--out DIR]
+#   scripts/package.sh [--no-build] [--expect-version X.Y.Z] [--out DIR] [--label TEXT]
+#
+# --label appends "-TEXT" to the archive names (preview builds:
+# pipeview-zed-v0.1.0-preview-abc1234.zip); the folder inside stays pipeview/.
 #
 # Zed has no notion of a bare .wasm file. What it loads — from the
 # extension registry and from "Install Dev Extension" alike — is a
@@ -21,11 +24,13 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 build=1
 expect_version=""
 out="dist"
+label=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --no-build) build=0 ;;
     --expect-version) expect_version="$2"; shift ;;
     --out) out="$2"; shift ;;
+    --label) label="$2"; shift ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -65,7 +70,7 @@ if [ ! -f "$wasm" ]; then
 fi
 
 # --- stage + archive --------------------------------------------------------
-name="pipeview-zed-v${ext_version}"
+name="pipeview-zed-v${ext_version}${label:+-$label}"
 stage="$out/stage"
 rm -rf "$stage"
 mkdir -p "$stage/$ext_id" "$out"

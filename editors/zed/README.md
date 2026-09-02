@@ -129,6 +129,12 @@ stages `extension.toml` + `extension.wasm` (+ LICENSE, README,
 CHANGELOG — deliberately no `Cargo.toml`, which would make Zed rebuild
 on install) and writes the `.zip`/`.tar.gz`.
 
+To try a branch's build without merging, run the *Preview release*
+workflow on it (or push a `preview/<name>` tag): it attaches these
+archives — and the wheel they need — to a `preview/<branch>`
+pre-release, installable exactly like a real one. See
+[docs/release-pipelines.md](../../docs/release-pipelines.md).
+
 The extension is ~80 lines on purpose: every feature lives in
 `pipeview lsp` so other editors (and the VS Code extension, as a
 follow-up) can share it.

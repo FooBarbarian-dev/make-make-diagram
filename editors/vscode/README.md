@@ -89,3 +89,9 @@ npm test          # tsc build + node --test unit tests
 
 Launch the extension from VS Code with F5 (Extension Development Host),
 or package it with `npx @vscode/vsce package`.
+
+To try a branch's build without merging, run the *Preview release*
+workflow on it (or push a `preview/<name>` tag): it attaches the
+`.vsix` — and the wheel it needs — to a `preview/<branch>` pre-release;
+install with *Extensions → ··· → Install from VSIX…*. See
+[docs/release-pipelines.md](../../docs/release-pipelines.md).

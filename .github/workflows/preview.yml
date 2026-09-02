@@ -1,0 +1,151 @@
+name: Preview release
+
+# A throwaway, installable build of everything from ANY branch — the way to
+# try the editor extensions (and the packaging that produces them) before
+# merging to main. Two ways in:
+#
+#   1. Actions → "Preview release" → Run workflow → pick the branch.
+#   2. git tag preview/<name> && git push origin preview/<name>
+#
+# Either way the result is a GitHub *pre-release* tagged
+# preview/<branch> (or the pushed tag), rebuilt in place on every run,
+# carrying the same three artifacts the real release jobs attach: the
+# sdist + wheel, the .vsix, and the Zed extension archives — built by the
+# same commands and scripts (editors/zed/scripts/package.sh, vsce
+# package, python -m build). Pre-releases never become "latest", and
+# release-please only reads v*, vscode-v*, zed-v* tags, so previews can
+# never disturb real versioning. What a preview cannot rehearse is
+# release-please itself (the version-bump PR), which only runs on main.
+#
+# Deleting the branch deletes its preview; `gh release delete
+# preview/<name> --cleanup-tag` does it by hand.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["preview/**"]
+  delete:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: preview-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    if: github.event_name != 'delete'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: python -m pip install build twine
+      - run: python -m build
+      - run: python -m twine check dist/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-python
+          path: dist/*
+          retention-days: 7
+
+  vscode:
+    if: github.event_name != 'delete'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/vscode
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: editors/vscode/package-lock.json
+      - run: npm ci
+      - run: npm test
+      # Same version inside as the branch's package.json (the Marketplace
+      # allows no pre-release suffix there); the file name says what it is.
+      - run: npx --yes @vscode/vsce package -o "pipeview-vscode-preview-$(git rev-parse --short=7 HEAD).vsix"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-vscode
+          path: editors/vscode/*.vsix
+          retention-days: 7
+
+  zed:
+    if: github.event_name != 'delete'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: editors/zed
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup target add wasm32-wasip2
+      - run: scripts/package.sh --label "preview-$(git rev-parse --short=7 HEAD)"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: preview-zed
+          path: editors/zed/dist/*
+          retention-days: 7
+
+  publish:
+    needs: [python, vscode, zed]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: assets
+          merge-multiple: true
+      - name: Create or replace the pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          sha="$(git rev-parse HEAD)"
+          short="$(git rev-parse --short=7 HEAD)"
+          # a pushed preview/* tag names the release itself; a manual run
+          # on a branch gets preview/<branch>
+          case "$REF_NAME" in
+            preview/*) tag="$REF_NAME" ;;
+            *)         tag="preview/$REF_NAME" ;;
+          esac
+          notes="$(cat <<NOTES
+          Preview build of \`$REF_NAME\` at $sha — **not a release**. Rebuilt in
+          place on every run; assets change under the same URLs.
+
+          - \`pipeview-*.whl\`: \`pip install <the wheel>\` — the CLI and the
+            \`pipeview lsp\` server both extensions need.
+          - \`pipeview-vscode-preview-*.vsix\`: VS Code → Extensions → ··· →
+            *Install from VSIX…* (reinstalling over a previous preview is fine).
+          - \`pipeview-zed-*.zip\` / \`.tar.gz\`: extract, then Zed →
+            \`zed: extensions\` → *Install Dev Extension* → the \`pipeview/\` folder.
+
+          Built by the [Preview release workflow](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID).
+          NOTES
+          )"
+          # Replace rather than edit: the tag must follow the branch head,
+          # and gh cannot move an existing tag.
+          gh release delete "$tag" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
+            2>/dev/null || true
+          gh release create "$tag" assets/* --repo "$GITHUB_REPOSITORY" \
+            --target "$sha" --prerelease --title "Preview: $REF_NAME @ $short" \
+            --notes "$notes"
+          echo "::notice::pre-release https://github.com/$GITHUB_REPOSITORY/releases/tag/$tag"
+
+  # Branch gone → its preview goes too (tag pushes and deletions of the
+  # preview/* tags themselves are left alone).
+  cleanup:
+    if: github.event_name == 'delete' && github.event.ref_type == 'branch'
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ github.event.ref }}
+        run: |
+          gh release delete "preview/$BRANCH" --repo "$GITHUB_REPOSITORY" --yes --cleanup-tag \
+            && echo "deleted preview/$BRANCH" || echo "no preview for $BRANCH"
