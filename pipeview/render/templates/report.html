@@ -838,7 +838,14 @@ td .btn.copy-btn { min-height: var(--hit); }
    Search
    ============================================================ */
 .search-wrap { position: relative; }
-.search-wrap .input { width: 260px; }
+.search-wrap .input { width: 260px; padding-right: 32px; }
+.search-shortcut {
+  position: absolute;
+  right: var(--sp-2);
+  top: 50%;
+  transform: translateY(-50%);
+  pointer-events: none;
+}
 .search-results {
   position: absolute; top: calc(100% + 4px); right: 0;
   width: 380px; max-height: 420px; overflow-y: auto;
@@ -907,8 +914,9 @@ kbd {
     <button class="chip diag-badge" id="diag-badge" hidden></button>
     <button class="btn btn-quiet" id="theme-toggle" data-tip="Switch theme" aria-live="polite"></button>
     <div class="search-wrap">
-      <input type="text" class="input" id="global-search" placeholder="Search…  ( / )"
+      <input type="text" class="input" id="global-search" placeholder="Search…"
         autocomplete="off" role="combobox" aria-expanded="false" aria-label="Search tasks, variables, and files">
+      <kbd class="search-shortcut" aria-hidden="true">/</kbd>
       <div class="search-results" id="search-results" role="listbox"></div>
     </div>
   </div>
