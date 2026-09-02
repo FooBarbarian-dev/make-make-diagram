@@ -1,7 +1,7 @@
 id = "pipeview"
 name = "Pipeview"
 description = "Pipeline intelligence for GNU Make and GitLab CI: inline diagnostics, CI variable hover docs, include links, and one-keystroke interactive pipeline reports (opened in the browser)."
-version = "0.2.0" # x-release-please-version
+version = "0.2.1" # x-release-please-version
 schema_version = 1
 authors = ["FooBarbarian-dev"]
 repository = "https://github.com/FooBarbarian-dev/make-make-diagram"

@@ -107,6 +107,33 @@ build). See `docs/release-pipelines.md` for the component table.
   carrying the CLI's full output. Disabled in untrusted workspaces.
   `make vscode` builds and unit-tests it.
 
+## [1.0.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/v0.4.0...v1.0.0) (2026-09-02)
+
+
+### ⚠ BREAKING CHANGES
+
+* Python 3.10 is no longer supported; pipeview requires 3.11 or newer.
+
+### Features
+
+* **vscode:** host pipeview lsp — diagnostics, hover, links, report action ([a80d82c](https://github.com/FooBarbarian-dev/make-make-diagram/commit/a80d82cb44413faacdbaf7aca2b67de7f0703891))
+
+
+### Bug Fixes
+
+* **zed:** a configured binary.path ran pipeview without "lsp" ([34dbe55](https://github.com/FooBarbarian-dev/make-make-diagram/commit/34dbe55abeed768404153b16efc8d8aac2f38ae9))
+
+
+### Documentation
+
+* editors matrix, changelog and spec as-built notes for the lsp round ([d38431f](https://github.com/FooBarbarian-dev/make-make-diagram/commit/d38431fee4abf07a7300772af893875751041a82))
+* **editors:** requirements say Python 3.11+ ([4180a49](https://github.com/FooBarbarian-dev/make-make-diagram/commit/4180a49fc8b3e7694a415702c46f84d1eecdda6c))
+
+
+### Miscellaneous Chores
+
+* drop Python 3.10, require 3.11+ ([3772ef8](https://github.com/FooBarbarian-dev/make-make-diagram/commit/3772ef803cc43be1108423b93dcec4de29efaa92))
+
 ## [0.4.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/v0.3.0...v0.4.0) (2026-09-02)
 
 

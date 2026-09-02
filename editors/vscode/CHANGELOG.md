@@ -4,6 +4,13 @@ Releases of the VS Code extension are cut by release-please from
 Conventional Commits touching `editors/vscode/`, tagged `vscode-vX.Y.Z`,
 with the packaged `.vsix` attached to the GitHub Release.
 
+## [0.2.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/vscode-v0.1.1...vscode-v0.2.0) (2026-09-02)
+
+
+### Features
+
+* **vscode:** host pipeview lsp — diagnostics, hover, links, report action ([a80d82c](https://github.com/FooBarbarian-dev/make-make-diagram/commit/a80d82cb44413faacdbaf7aca2b67de7f0703891))
+
 ## [0.1.1](https://github.com/FooBarbarian-dev/make-make-diagram/compare/vscode-v0.1.0...vscode-v0.1.1) (2026-09-02)
 
 
