@@ -350,8 +350,12 @@ def _looks_like_github_workflow(path: str) -> bool:
     True) and no GitLab-only markers."""
     try:
         import yaml
+        try:
+            from yaml import CSafeLoader as SafeLoader
+        except ImportError:
+            from yaml import SafeLoader
         with open(path, "r", encoding="utf-8-sig", errors="replace") as f:
-            data = yaml.safe_load(f.read())
+            data = yaml.load(f.read(), Loader=SafeLoader)
     except Exception:
         return False
     if not isinstance(data, dict):
