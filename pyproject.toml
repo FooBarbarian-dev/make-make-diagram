@@ -9,7 +9,7 @@ name = "pipeview"
 version = "0.4.0"
 description = "Offline interactive HTML reports for GNU Make, GitLab CI, and GitHub Actions pipelines"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = "MIT"
 keywords = ["make", "makefile", "gitlab", "github", "actions", "ci", "pipeline", "visualization", "offline"]
 classifiers = [
@@ -18,7 +18,6 @@ classifiers = [
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -29,13 +28,17 @@ dependencies = ["PyYAML>=6"]
 
 [project.scripts]
 pipeview = "pipeview.cli:main"
+# The language server as its own executable: editors that take a bare
+# binary path and no arguments (Zed's lsp.<name>.binary.path) can point
+# at this instead of remembering `pipeview` + ["lsp"].
+pipeview-lsp = "pipeview.lsp:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I"]

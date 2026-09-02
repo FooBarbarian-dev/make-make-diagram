@@ -8,7 +8,7 @@ duplicate-pipeline problem through the What-If simulator.
 
 All screenshots below come from the runnable projects in
 [`examples/`](../examples/README.md), so you can regenerate every report
-shown here and click around yourself. You need Python 3.10+ and PyYAML —
+shown here and click around yourself. You need Python 3.11+ and PyYAML —
 see [Installation](../README.md#installation) in the README for pipx and
 air-gapped options:
 

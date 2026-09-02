@@ -197,3 +197,21 @@ server's own environment.
   name it. The editors feature matrix now spans both providers.
 - The `--upstream` code action variants remain GitLab-only by
   construction (`report_argv` gates on the root kind).
+- The "configured binary path gets `["lsp"]` as its default arguments"
+  line above never held: Zed resolves `lsp.<name>.binary` before
+  consulting the extension (`crates/project/src/lsp_store.rs`), running
+  a configured `path` with `arguments.unwrap_or_default()` — nothing —
+  and, with only `arguments` set, replacing whatever
+  `language_server_command` returned. Users following the README got
+  `pipeview: error: the following arguments are required: path`. As
+  built: the extension no longer reads `binary` at all (it only decides
+  the default), the docs say `"arguments": ["lsp"]`, and the server is
+  also installed as the `pipeview-lsp` console script (and runs as
+  `python -m pipeview.lsp`) so a bare binary path works.
+- The designated follow-up landed: the VS Code extension hosts
+  `pipeview lsp` through `vscode-languageclient` (`editors/vscode/src/
+  client.ts`, `lsp.ts`), spawning the same located CLI as its report
+  commands, with `announce: false` (it has a palette) and a
+  `provideCodeActions` middleware that rewrites the server's
+  browser-opening report actions into `pipeview.showReportForFile`
+  (webview). `pipeview.languageServer` switches it off.

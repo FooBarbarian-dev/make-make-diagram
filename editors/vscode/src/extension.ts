@@ -11,7 +11,9 @@ import {
   reportHtmlPaths,
   runProcess,
 } from "./cli";
+import { createClient } from "./client";
 import { showReportPanel } from "./panel";
+import type { LanguageClient } from "vscode-languageclient/node";
 
 const TOKEN_SECRETS = {
   gitlab: { secret: "pipeview.gitlabToken", env: "PIPEVIEW_GITLAB_TOKEN" },
@@ -23,6 +25,12 @@ type Provider = keyof typeof TOKEN_SECRETS;
 let output: vscode.OutputChannel;
 let cachedCli: CliCommand | undefined;
 let lastInvocation: (() => Promise<void>) | undefined;
+let client: LanguageClient | undefined;
+let serverStartFailed = false;
+// Start/stop requests are chained: activation, a settings change and a
+// workspace-folder change can arrive back to back, and two concurrent
+// starts would orphan one server process.
+let serverOp: Promise<void> = Promise.resolve();
 
 interface Settings {
   pythonPath: string;
@@ -31,6 +39,7 @@ interface Settings {
   useUpstream: boolean;
   upstreamRemote: string;
   extraArgs: string[];
+  languageServer: boolean;
 }
 
 function settings(): Settings {
@@ -42,6 +51,7 @@ function settings(): Settings {
     useUpstream: cfg.get("useUpstream", true),
     upstreamRemote: cfg.get("upstreamRemote", ""),
     extraArgs: cfg.get("extraArgs", []),
+    languageServer: cfg.get("languageServer", true),
   };
 }
 
@@ -181,16 +191,24 @@ async function runAndShow(
   }
 }
 
+/** Options a caller can pass to the report commands (the language
+ * server's redirected code actions do): `upstream: false` forces a run
+ * without `--upstream`; anything else leaves the setting in charge. */
+interface ReportCommandOptions {
+  upstream?: boolean;
+}
+
 async function reportOn(
   context: vscode.ExtensionContext,
   target: string,
   cwd: string,
+  options: ReportCommandOptions = {},
 ): Promise<void> {
   const s = settings();
   const workspaceDir =
     vscode.workspace.getWorkspaceFolder(vscode.Uri.file(target))?.uri.fsPath ?? cwd;
   const args = buildReportArgs(target, outDir(context, workspaceDir), {
-    useUpstream: s.useUpstream,
+    useUpstream: s.useUpstream && options.upstream !== false,
     upstreamRemote: s.upstreamRemote,
     extraArgs: s.extraArgs,
   });
@@ -200,6 +218,70 @@ async function reportOn(
   await invoke();
 }
 
+/** Start (or restart) `pipeview lsp` for the open workspace. The CLI
+ * is the same one the commands use; a missing CLI is reported once per
+ * session here rather than on every YAML file that opens. */
+async function startLanguageServer(context: vscode.ExtensionContext): Promise<void> {
+  await stopLanguageServer();
+  const s = settings();
+  if (!s.languageServer) {
+    return;
+  }
+  let command: CliCommand;
+  try {
+    command = await cli();
+  } catch (e) {
+    output.appendLine(`[pipeview] language server not started: ${(e as Error).message}`);
+    if (!serverStartFailed) {
+      serverStartFailed = true;
+      const action = await vscode.window.showWarningMessage(
+        "pipeview: language server not started — the pipeview CLI was not found.",
+        "Show Output",
+      );
+      if (action) {
+        output.show();
+      }
+    }
+    return;
+  }
+  const folder = pickWorkspaceFolder()?.uri.fsPath;
+  const next = createClient({
+    cli: command,
+    env: await spawnEnv(context),
+    cwd: folder,
+    settings: { useUpstream: s.useUpstream, upstreamRemote: s.upstreamRemote },
+    outputDir: outDir(context, folder ?? process.cwd()),
+    output,
+  });
+  client = next;
+  output.appendLine(`[pipeview] starting language server: ${command.source} lsp`);
+  try {
+    await next.start();
+  } catch (e) {
+    output.appendLine(`[pipeview] language server failed to start: ${(e as Error).message}`);
+    if (client === next) {
+      client = undefined;
+    }
+  }
+}
+
+function restartLanguageServer(context: vscode.ExtensionContext): Promise<void> {
+  serverOp = serverOp.then(() => startLanguageServer(context));
+  return serverOp;
+}
+
+async function stopLanguageServer(): Promise<void> {
+  const current = client;
+  client = undefined;
+  if (current) {
+    try {
+      await current.stop();
+    } catch (e) {
+      output.appendLine(`[pipeview] language server stop: ${(e as Error).message}`);
+    }
+  }
+}
+
 export function activate(context: vscode.ExtensionContext): void {
   output = vscode.window.createOutputChannel("Pipeview");
   context.subscriptions.push(output);
@@ -207,11 +289,20 @@ export function activate(context: vscode.ExtensionContext): void {
     (e) => {
       if (e.affectsConfiguration("pipeview")) {
         cachedCli = undefined;
+        // CLI location, upstream defaults and the on/off switch all
+        // feed the server's spawn or its initializationOptions.
+        void restartLanguageServer(context);
       }
     },
     undefined,
     context.subscriptions,
   );
+  vscode.workspace.onDidChangeWorkspaceFolders(
+    () => void restartLanguageServer(context),
+    undefined,
+    context.subscriptions,
+  );
+  void restartLanguageServer(context);
 
   const register = (id: string, fn: (...a: unknown[]) => unknown) =>
     context.subscriptions.push(vscode.commands.registerCommand(id, fn));
@@ -225,7 +316,7 @@ export function activate(context: vscode.ExtensionContext): void {
     await reportOn(context, folder.uri.fsPath, folder.uri.fsPath);
   });
 
-  register("pipeview.showReportForFile", async (resource) => {
+  register("pipeview.showReportForFile", async (resource, options) => {
     const uri =
       resource instanceof vscode.Uri
         ? resource
@@ -236,7 +327,9 @@ export function activate(context: vscode.ExtensionContext): void {
       );
       return;
     }
-    await reportOn(context, uri.fsPath, path.dirname(uri.fsPath));
+    const opts: ReportCommandOptions =
+      options && typeof options === "object" ? (options as ReportCommandOptions) : {};
+    await reportOn(context, uri.fsPath, path.dirname(uri.fsPath), opts);
   });
 
   register("pipeview.refreshReport", async () => {
@@ -335,6 +428,9 @@ export function activate(context: vscode.ExtensionContext): void {
   }, "owner/repo@main");
 }
 
-export function deactivate(): void {
-  // Panels and the output channel are disposed via context.subscriptions.
+export function deactivate(): Promise<void> {
+  // Panels and the output channel are disposed via context.subscriptions;
+  // the server process is not, so stop it here (after any start in flight).
+  serverOp = serverOp.then(stopLanguageServer);
+  return serverOp;
 }

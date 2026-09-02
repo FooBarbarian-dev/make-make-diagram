@@ -2,6 +2,15 @@
 //! up for YAML and Make buffers. Everything of substance lives in the
 //! server (see pipeview/lsp.py) — this extension only finds the binary
 //! and forwards the user's settings, per editors/README.md.
+//!
+//! Zed applies the `lsp.pipeview.binary` setting itself, before this
+//! extension is consulted (crates/project/src/lsp_store.rs): a
+//! configured `path` is run with the configured `arguments` verbatim —
+//! an empty list when unset, so no implicit `lsp` — and configured
+//! `arguments` without a `path` replace whatever `language_server_command`
+//! returns. Hence nothing here reads `binary`: the documented escape
+//! hatch is `pipeview-lsp` (the server as its own executable) or
+//! `pipeview` with `"arguments": ["lsp"]`.
 
 use zed_extension_api::{
     self as zed, settings::LspSettings, Command, LanguageServerId, Os, Result, Worktree,
@@ -32,14 +41,18 @@ fn interpreters(os: Os) -> &'static [(&'static str, &'static [&'static str])] {
 }
 
 fn not_found_message(os: Os) -> String {
+    // Zed runs a configured binary path with no arguments unless
+    // `arguments` is set too, so the example names the server's own
+    // executable rather than `pipeview` (which would need ["lsp"]).
     let (install, example) = match os {
-        Os::Windows => ("`py -m pip install .`", r"C:\\path\\to\\pipeview.exe"),
-        _ => ("`pip install .` or `pipx install .`", "/path/to/pipeview"),
+        Os::Windows => ("`py -m pip install .`", r"C:\\path\\to\\Scripts\\pipeview-lsp.exe"),
+        _ => ("`pip install .` or `pipx install .`", "/path/to/pipeview-lsp"),
     };
     format!(
         "pipeview not found. Install it ({install} from the make-make-diagram \
-         repository), or point Zed at it in settings.json: \
-         {{\"lsp\": {{\"pipeview\": {{\"binary\": {{\"path\": \"{example}\"}}}}}}}}"
+         repository), or point Zed at the server in settings.json: \
+         {{\"lsp\": {{\"pipeview\": {{\"binary\": {{\"path\": \"{example}\"}}}}}}}} \
+         (a path to `pipeview` itself also needs \"arguments\": [\"lsp\"])"
     )
 }
 
@@ -57,26 +70,14 @@ impl zed::Extension for PipeviewExtension {
         _language_server_id: &LanguageServerId,
         worktree: &Worktree,
     ) -> Result<Command> {
+        // Only reached when no `binary.path` is configured (see the
+        // module docs): this decides the default, and a configured
+        // `binary.arguments` overrides the args chosen here.
+        //
         // The worktree shell env flows through so GitLab tokens
         // (PIPEVIEW_GITLAB_TOKEN et al.) reach the server's --upstream runs.
         let env = worktree.shell_env();
         let (os, _arch) = zed::current_platform();
-
-        // An explicit binary from Zed settings wins:
-        //   "lsp": {"pipeview": {"binary": {"path": "...", "arguments": [...]}}}
-        if let Some(binary) = LspSettings::for_worktree("pipeview", worktree)
-            .ok()
-            .and_then(|settings| settings.binary)
-        {
-            if let Some(path) = binary.path {
-                let args = binary.arguments.unwrap_or_else(|| vec!["lsp".to_string()]);
-                return Ok(Command {
-                    command: path,
-                    args,
-                    env,
-                });
-            }
-        }
 
         // `which` resolves pipeview.exe on Windows via PATHEXT.
         if let Some(path) = worktree.which("pipeview") {

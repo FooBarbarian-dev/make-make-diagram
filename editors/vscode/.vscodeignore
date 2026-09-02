@@ -1,6 +1,5 @@
 src/**
 out/test/**
 tsconfig.json
-node_modules/**
 **/*.map
 .gitignore

@@ -95,7 +95,7 @@ ruff check .     # lint
 
 ### No-install (run from checkout)
 
-The only requirement is Python 3.10+ and PyYAML:
+The only requirement is Python 3.11+ and PyYAML:
 
 ```bash
 pip install PyYAML
@@ -330,6 +330,9 @@ or the `pipeview lsp` language server, never to extension code. See
   commands run `pipeview gitlab report`/`sync` (the rollup opens when
   produced), store a token in VS Code secret storage, or open an
   integrated terminal for the interactive `pipeview gitlab auth`.
+  Pipeline buffers also get `pipeview lsp`: inline diagnostics, hover
+  docs, clickable includes, and a report code action that lands in the
+  webview.
 - **[Zed](editors/zed/)** — Zed extensions cannot show webviews, so the
   extension wires up `pipeview lsp` instead: pipeview's diagnostics
   appear inline on save, predefined `CI_*` variables get hover docs
@@ -339,8 +342,9 @@ or the `pipeview lsp` language server, never to extension code. See
   self-contained `file://` HTML precisely so any browser is a full
   viewer.
 
-`pipeview lsp` is editor-agnostic; pointing the VS Code extension at it
-too is the designated follow-up.
+`pipeview lsp` is editor-agnostic — both extensions host it — and also
+ships as its own `pipeview-lsp` executable for editors that take a bare
+binary path with no arguments (Zed's `binary.path` setting).
 
 ## Fetching from GitLab (`pipeview gitlab`)
 
@@ -595,7 +599,8 @@ pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--trigger-docs FILE]
 pipeview scenarios [init|check|preview|verify] …
 pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 pipeview github [browse|auth|repos|report|track|untrack|tracked|sync] …
-pipeview lsp     # language server over stdio (used by editors/)
+pipeview lsp     # language server over stdio (used by editors/);
+                 # also installed as the `pipeview-lsp` executable
 ```
 
 | Flag | Default | Description |
@@ -704,7 +709,7 @@ make vscode                 # build + unit-test the VS Code extension
 make zed                    # build the Zed extension (wasm32-wasip2)
 ```
 
-CI runs lint, the test suite (Python 3.10–3.13), a package build check,
+CI runs lint, the test suite (Python 3.11–3.13), a package build check,
 and the editor-extension builds (VS Code unit tests + `.vsix` packaging,
 Zed wasm build) on every pull request. Working conventions —
 architecture invariants, testing rules, docs layout — live in
