@@ -95,7 +95,7 @@ ruff check .     # lint
 
 ### No-install (run from checkout)
 
-The only requirement is Python 3.10+ and PyYAML:
+The only requirement is Python 3.11+ and PyYAML:
 
 ```bash
 pip install PyYAML
@@ -709,7 +709,7 @@ make vscode                 # build + unit-test the VS Code extension
 make zed                    # build the Zed extension (wasm32-wasip2)
 ```
 
-CI runs lint, the test suite (Python 3.10–3.13), a package build check,
+CI runs lint, the test suite (Python 3.11–3.13), a package build check,
 and the editor-extension builds (VS Code unit tests + `.vsix` packaging,
 Zed wasm build) on every pull request. Working conventions —
 architecture invariants, testing rules, docs layout — live in

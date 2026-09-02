@@ -583,9 +583,8 @@ class TestEntryPoints:
     `python -m pipeview.lsp` to reach the same server."""
 
     def test_console_script_declared(self):
-        from importlib import import_module
-
         import tomllib
+        from importlib import import_module
 
         pyproject = tomllib.loads(
             (Path(__file__).parent.parent / "pyproject.toml").read_text())

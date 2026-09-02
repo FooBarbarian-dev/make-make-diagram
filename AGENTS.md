@@ -4,7 +4,7 @@ Guidance for coding agents (and humans) contributing to this repository.
 
 ## What this is
 
-`pipeview` is a Python package (3.10+, only runtime dependency PyYAML)
+`pipeview` is a Python package (3.11+, only runtime dependency PyYAML)
 that parses GNU Make, GitLab CI, and GitHub Actions pipeline definitions
 into a normalized model and renders self-contained, fully offline,
 interactive HTML reports. The `pipeview gitlab` and `pipeview github`
@@ -123,7 +123,7 @@ on merges to `main` — see `.github/workflows/release.yml`.
 ## CI
 
 `.github/workflows/ci.yml` runs on every PR and push to `main`: ruff,
-pytest across Python 3.10–3.13 (Ubuntu runners provide `make` and `node`),
+pytest across Python 3.11–3.13 (Ubuntu runners provide `make` and `node`),
 a package build check, the VS Code extension build + unit tests +
 packaging, and the Zed extension wasm build. Everything CI runs is
 reproducible locally with the commands at the top of this file — a change

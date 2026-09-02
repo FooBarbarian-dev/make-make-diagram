@@ -7,6 +7,8 @@ here and enriched by hand where a feature deserves the narrative.
 
 ## Unreleased
 
+**Python 3.11 is the floor.** 3.10 is dropped from `requires-python`, the classifiers, ruff's target and the CI matrix; the release tooling (`scripts/package.sh`) already needed 3.11's `tomllib`, and the test suite now uses it too.
+
 **`pipeview lsp` in VS Code; a `pipeview-lsp` executable; the Zed
 `binary` setting told the truth.** The VS Code extension now hosts the
 same language server Zed does (`vscode-languageclient`): inline
