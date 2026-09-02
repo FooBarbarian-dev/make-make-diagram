@@ -29,6 +29,10 @@ dependencies = ["PyYAML>=6"]
 
 [project.scripts]
 pipeview = "pipeview.cli:main"
+# The language server as its own executable: editors that take a bare
+# binary path and no arguments (Zed's lsp.<name>.binary.path) can point
+# at this instead of remembering `pipeview` + ["lsp"].
+pipeview-lsp = "pipeview.lsp:main"
 
 [project.optional-dependencies]
 dev = ["pytest", "ruff"]

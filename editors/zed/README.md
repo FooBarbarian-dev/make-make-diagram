@@ -61,8 +61,13 @@ file's buffer:
   is not installed for the interpreter that was found (on Windows the
   `py` launcher picks the newest Python — install there with
   `py -m pip install .`, or point the `binary` setting below at the
-  right `pipeview.exe`), or nothing was found at all (the toast says so,
-  with the settings escape hatch).
+  right `pipeview-lsp.exe`), or nothing was found at all (the toast says
+  so, with the settings escape hatch).
+- **Log says `pipeview: error: the following arguments are required:
+  path`** → the `binary.path` setting names `pipeview` without
+  `"arguments": ["lsp"]`. Zed runs a configured path with the configured
+  arguments only (none by default); the extension is not consulted. Use
+  `pipeview-lsp` as the path, or add the arguments — see Settings.
 - **Toast appears but no code action** → the file belongs to no root:
   the buffer must be a `Makefile` (with the Make language active), a
   `.gitlab-ci.yml`, a `*.yml` under `.github/workflows/`, or a `*.mk` /
@@ -73,18 +78,18 @@ file's buffer:
 ## Requirements
 
 Zed 0.205 or newer (extension API 0.7) and Python 3.10+ with pipeview
-installed. The extension finds the server as `pipeview` on PATH, falls
-back to `python3 -m pipeview` (`python`, then `py -3 -m pipeview` on
-Windows), or uses an explicit binary from settings (below). Zed's YAML
-support is built in; Makefile buffers need a Make language extension
-installed.
+installed. The extension finds the server as `pipeview` on PATH (run as
+`pipeview lsp`), falls back to `python3 -m pipeview lsp` (`python`, then
+`py -3 -m pipeview lsp` on Windows), or Zed uses an explicit binary from
+settings (below). Zed's YAML support is built in; Makefile buffers need
+a Make language extension installed.
 
-**Windows.** `pip install .` puts `pipeview.exe` into Python's `Scripts`
-directory, which the python.org installer leaves off PATH by default —
-the extension then reaches pipeview through the `py` launcher, which is
-always on PATH. If Zed still reports it missing, install with
-`py -m pip install .` or point the `binary` setting below at
-`…\Scripts\pipeview.exe` (double the backslashes in JSON).
+**Windows.** `pip install .` puts `pipeview.exe` and `pipeview-lsp.exe`
+into Python's `Scripts` directory, which the python.org installer leaves
+off PATH by default — the extension then reaches pipeview through the
+`py` launcher, which is always on PATH. If Zed still reports it missing,
+install with `py -m pip install .` or point the `binary` setting below
+at `…\Scripts\pipeview-lsp.exe` (double the backslashes in JSON).
 
 **WSL.** Zed's remote development runs `pipeview lsp` inside the distro;
 install pipeview there. The report code action opens the report in your
@@ -127,9 +132,15 @@ server:
   "lsp": {
     "pipeview": {
       // Explicit server binary (optional; default: pipeview on PATH,
-      // then python3 -m pipeview / py -3 -m pipeview). Arguments default
-      // to ["lsp"]. Windows: "C:\\Users\\me\\...\\Scripts\\pipeview.exe"
-      "binary": { "path": "/path/to/pipeview" },
+      // then python3 -m pipeview / py -3 -m pipeview, each with "lsp").
+      // Zed runs a configured path with *exactly* the "arguments" given
+      // — none when omitted — so name the server's own executable:
+      // Windows: "C:\\Users\\me\\...\\Scripts\\pipeview-lsp.exe"
+      "binary": { "path": "/path/to/pipeview-lsp" },
+      // …or the multi-command CLI plus its subcommand:
+      // "binary": { "path": "/path/to/pipeview", "arguments": ["lsp"] }
+      // A venv's interpreter works the same way:
+      // "binary": { "path": "/venv/bin/python", "arguments": ["-m", "pipeview", "lsp"] }
       "initialization_options": {
         "announce": true,        // the one-time "pipeview attached" toast
         "upstream": true,        // resolve cross-repo includes via the

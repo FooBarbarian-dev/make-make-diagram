@@ -9,6 +9,9 @@ from __future__ import annotations
 
 import io
 import os
+import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
@@ -560,6 +563,72 @@ class TestExecuteCommand:
         client.request("workspace/executeCommand", {
             "command": CMD_OPEN_REPORT_OFFLINE, "arguments": [uri]})
         assert capsys.readouterr().out == ""
+
+
+# ---------------------------------------------------------------------------
+# Entry points
+# ---------------------------------------------------------------------------
+
+def _lsp_session(*messages: dict) -> bytes:
+    out = io.BytesIO()
+    for m in messages:
+        write_message(out, m)
+    return out.getvalue()
+
+
+class TestEntryPoints:
+    """`pipeview lsp` is one spelling; editors that take a bare
+    executable and no arguments (Zed's lsp.<name>.binary.path runs
+    exactly that — the extension is bypassed) need `pipeview-lsp` or
+    `python -m pipeview.lsp` to reach the same server."""
+
+    def test_console_script_declared(self):
+        from importlib import import_module
+
+        import tomllib
+
+        pyproject = tomllib.loads(
+            (Path(__file__).parent.parent / "pyproject.toml").read_text())
+        target = pyproject["project"]["scripts"]["pipeview-lsp"]
+        module, func = target.split(":")
+        assert getattr(import_module(module), func) is lsp_mod.main
+
+    def test_module_runs_as_script(self):
+        # `python -m pipeview.lsp -v`: a full initialize/shutdown/exit
+        # handshake over real pipes, exit 0, logging on stderr, nothing
+        # but framed JSON on stdout.
+        proc = subprocess.run(
+            [sys.executable, "-m", "pipeview.lsp", "-v"],
+            input=_lsp_session(
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                 "params": {"initializationOptions": {"announce": False}}},
+                {"jsonrpc": "2.0", "method": "initialized", "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "shutdown"},
+                {"jsonrpc": "2.0", "method": "exit"},
+            ),
+            capture_output=True, timeout=60,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        assert proc.returncode == 0, proc.stderr.decode()
+        assert b"serving on stdio" in proc.stderr
+        first = read_message(io.BytesIO(proc.stdout))
+        assert first["id"] == 1
+        assert first["result"]["serverInfo"]["name"] == "pipeview"
+
+    def test_cli_subcommand_reaches_the_same_server(self):
+        proc = subprocess.run(
+            [sys.executable, "-m", "pipeview", "lsp"],
+            input=_lsp_session(
+                {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+                 "params": {}},
+                {"jsonrpc": "2.0", "id": 2, "method": "shutdown"},
+                {"jsonrpc": "2.0", "method": "exit"},
+            ),
+            capture_output=True, timeout=60,
+            cwd=str(Path(__file__).parent.parent),
+        )
+        assert proc.returncode == 0, proc.stderr.decode()
+        assert read_message(io.BytesIO(proc.stdout))["id"] == 1
 
 
 # ---------------------------------------------------------------------------

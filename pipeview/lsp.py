@@ -635,9 +635,18 @@ def serve(instream=None, outstream=None) -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    if argv and "-v" in argv:
+    """Entry point for `pipeview lsp`, the `pipeview-lsp` console script,
+    and `python -m pipeview.lsp` — the last two exist for editors that
+    take a bare executable and no arguments (Zed's `binary.path`)."""
+    if argv is None:
+        argv = sys.argv[1:]
+    if "-v" in argv:
         logging.basicConfig(stream=sys.stderr, level=logging.INFO,
                             format="%(asctime)s %(levelname)-7s %(name)s: "
                                    "%(message)s")
     log.info("pipeview lsp: serving on stdio")
     return serve()
+
+
+if __name__ == "__main__":  # pragma: no cover — `python -m pipeview.lsp`
+    raise SystemExit(main())
