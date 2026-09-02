@@ -87,6 +87,21 @@ build). See `docs/release-pipelines.md` for the component table.
   carrying the CLI's full output. Disabled in untrusted workspaces.
   `make vscode` builds and unit-tests it.
 
+## [0.4.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/v0.3.0...v0.4.0) (2026-09-02)
+
+
+### Features
+
+* **lsp:** announce what pipeview offers when it attaches ([cfcbbd7](https://github.com/FooBarbarian-dev/make-make-diagram/commit/cfcbbd7b9681bf94a33613068f13e234b40c105b))
+
+
+### Bug Fixes
+
+* **enrich:** pin the whole C locale for make -p, not just LANG ([e901221](https://github.com/FooBarbarian-dev/make-make-diagram/commit/e901221985ec8edeea0c6a65224eb95b783f1bcc))
+* open reports on Windows and from inside WSL, keep UNC worktrees ([49c7079](https://github.com/FooBarbarian-dev/make-make-diagram/commit/49c707979ef756f6ae5d0816c75cc0cdee8fe840))
+* **vscode:** work on Windows — py launcher, batch wrappers, UTF-8, shell-free auth ([7a27376](https://github.com/FooBarbarian-dev/make-make-diagram/commit/7a27376afccf2c8c569d1f8ee1e66ae61f06e601))
+* **zed:** find Python on Windows, ship an installable extension archive ([59c9632](https://github.com/FooBarbarian-dev/make-make-diagram/commit/59c96325e04f79139c23fc36e45edc31ad24c5bc))
+
 ## [0.3.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/v0.2.1...v0.3.0) (2026-09-01)
 
 

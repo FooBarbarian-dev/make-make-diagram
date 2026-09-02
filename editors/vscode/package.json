@@ -2,7 +2,7 @@
   "name": "pipeview-vscode",
   "displayName": "Pipeview",
   "description": "Offline interactive reports for GNU Make and GitLab CI pipelines — graphs, variables, What-If simulation — right in the editor, defaulting to the open repository with its git upstream as the reference for cross-repository includes.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "pipeview",
   "license": "MIT",
   "repository": {

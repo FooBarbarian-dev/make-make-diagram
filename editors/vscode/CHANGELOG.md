@@ -4,6 +4,13 @@ Releases of the VS Code extension are cut by release-please from
 Conventional Commits touching `editors/vscode/`, tagged `vscode-vX.Y.Z`,
 with the packaged `.vsix` attached to the GitHub Release.
 
+## [0.1.1](https://github.com/FooBarbarian-dev/make-make-diagram/compare/vscode-v0.1.0...vscode-v0.1.1) (2026-09-02)
+
+
+### Bug Fixes
+
+* **vscode:** work on Windows — py launcher, batch wrappers, UTF-8, shell-free auth ([7a27376](https://github.com/FooBarbarian-dev/make-make-diagram/commit/7a27376afccf2c8c569d1f8ee1e66ae61f06e601))
+
 ## [0.1.0](https://github.com/FooBarbarian-dev/make-make-diagram/compare/vscode-v0.0.1...vscode-v0.1.0) (2026-09-01)
 
 
