@@ -1,11 +1,14 @@
 # Pipeview for VS Code
 
-Offline interactive reports for GNU Make and GitLab CI pipelines, inside
-the editor. This extension is a thin shell around the
+Offline interactive reports for GNU Make, GitLab CI and GitHub Actions
+pipelines, inside the editor. This extension is a thin shell around the
 [pipeview](https://github.com/FooBarbarian-dev/make-make-diagram) CLI:
 the reports it shows are the same self-contained HTML files the CLI
 generates — Graph, Tasks, Variables, Files, and the What-If pipeline
-simulator all included — rendered in a webview panel.
+simulator all included — rendered in a webview panel. Pipeline buffers
+also get the `pipeview lsp` language server: inline diagnostics, hover
+docs for predefined CI variables, and clickable includes (see
+[Language server](#language-server)).
 
 ## Requirements
 
@@ -50,6 +53,32 @@ Repo reports cover every root pipeview discovers — a `Makefile`,
 `.gitlab-ci.yml`, and `.github/workflows/` each get their own report
 panel.
 
+## Language server
+
+Opening a `.gitlab-ci.yml`, a `.github/workflows/*.yml`, a `Makefile`
+or a `*.mk` starts `pipeview lsp` (the same CLI, found the same way):
+
+- **Inline diagnostics** on open and save — pipeview's parser findings
+  (broken includes, unknown `needs:` targets, variable problems) on the
+  lines that cause them, across the whole include tree or workflows
+  directory. Fully offline and never Make-enriched (no `$(shell)`
+  execution from the editor loop).
+- **Hover docs** for predefined variables: `CI_*`/`GITLAB_*` in GitLab
+  files, `GITHUB_*`/`RUNNER_*` in workflow files — the Variables-tab
+  catalog, inline.
+- **Clickable references**: `include:local` entries and local
+  `uses: ./…` reusable workflows / composite actions (document links).
+- **Code action** (`Ctrl+.` / `Cmd+.`): *Pipeview: open pipeline
+  report* — the same report the commands produce, in a webview panel
+  (the server's own version of this action targets a browser; the
+  extension rewrites it). GitLab roots also get *… without upstream
+  fetch*.
+
+YAML that belongs to no pipeline root gets nothing on purpose. Turn the
+server off with `pipeview.languageServer: false`; that setting and the
+CLI / upstream settings restart it when changed. The server's stderr
+goes to the Pipeview output channel.
+
 ## The upstream default
 
 “Report for This Repo” assumes the project you have open is a checkout
@@ -74,7 +103,10 @@ fully offline runs.
 - `pipeview.useUpstream` — pass `--upstream` for repo/file reports
   (default: true).
 - `pipeview.upstreamRemote` — which git remote to use.
-- `pipeview.extraArgs` — extra CLI arguments (e.g. `--no-enrich`, `-v`).
+- `pipeview.extraArgs` — extra CLI arguments for report runs (e.g.
+  `--no-enrich`, `-v`).
+- `pipeview.languageServer` — run `pipeview lsp` for pipeline buffers
+  (default: true).
 
 The Pipeview output channel carries the CLI's full stdout/stderr —
 add `-v` to `pipeview.extraArgs` to see fetch steps and decisions there.

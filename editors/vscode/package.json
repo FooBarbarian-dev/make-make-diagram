@@ -1,7 +1,7 @@
 {
   "name": "pipeview-vscode",
   "displayName": "Pipeview",
-  "description": "Offline interactive reports for GNU Make and GitLab CI pipelines — graphs, variables, What-If simulation — right in the editor, defaulting to the open repository with its git upstream as the reference for cross-repository includes.",
+  "description": "Offline interactive reports for GNU Make, GitLab CI and GitHub Actions pipelines — graphs, variables, What-If simulation — right in the editor, plus inline diagnostics, CI variable hover docs and include links from the pipeview language server. Repo reports default to the open repository with its git upstream as the reference for cross-repository includes.",
   "version": "0.1.1",
   "publisher": "pipeview",
   "license": "MIT",
@@ -25,7 +25,11 @@
     "pipeline"
   ],
   "main": "./out/extension.js",
-  "activationEvents": [],
+  "activationEvents": [
+    "onLanguage:yaml",
+    "onLanguage:github-actions-workflow",
+    "onLanguage:makefile"
+  ],
   "capabilities": {
     "untrustedWorkspaces": {
       "supported": false,
@@ -144,6 +148,11 @@
           "default": "",
           "markdownDescription": "Git remote to use with `--upstream`. Empty: the current branch's tracking remote, else `origin`, else the sole remote."
         },
+        "pipeview.languageServer": {
+          "type": "boolean",
+          "default": true,
+          "markdownDescription": "Run `pipeview lsp` for YAML and Makefile buffers: inline diagnostics on open/save (offline — never runs Make enrichment), hover docs for predefined `CI_*` / `GITHUB_*` variables, clickable `include:local` and local `uses:` references, and the *Pipeview: open pipeline report* code action. Changing this or the CLI settings restarts the server."
+        },
         "pipeview.extraArgs": {
           "type": "array",
           "items": {
@@ -160,11 +169,14 @@
     "build": "tsc -p ./",
     "watch": "tsc -w -p ./",
     "lint": "tsc --noEmit -p ./",
-    "test": "npm run build && node --test out/test/cli.test.js"
+    "test": "npm run build && node --test out/test/cli.test.js out/test/lsp.test.js"
   },
   "devDependencies": {
     "@types/node": "^18.19.0",
     "@types/vscode": "^1.85.0",
     "typescript": "^5.4.0"
+  },
+  "dependencies": {
+    "vscode-languageclient": "^9.0.1"
   }
 }

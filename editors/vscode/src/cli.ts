@@ -3,7 +3,7 @@
  * 'vscode' so its pure helpers run under plain `node --test`.
  */
 
-import { spawn } from "child_process";
+import { ChildProcessWithoutNullStreams, spawn } from "child_process";
 
 export interface CliCommand {
   /** Executable to spawn. */
@@ -163,37 +163,49 @@ export function batchSpawnArgs(
   return { file: comspec || "cmd.exe", args: ["/d", "/s", "/c", `"${line}"`] };
 }
 
-export function runProcess(
+export interface SpawnOptions {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  platform?: NodeJS.Platform;
+}
+
+/** Spawn pipeview with an argv — the one place that knows about
+ * .cmd/.bat wrappers, forced UTF-8 and hidden console windows, shared by
+ * the one-shot report runs and the long-lived `pipeview lsp` server. */
+export function spawnCli(
   cli: CliCommand,
   args: string[],
-  options: {
-    cwd?: string;
-    env?: NodeJS.ProcessEnv;
-    onOutput?: (chunk: string) => void;
-    platform?: NodeJS.Platform;
-  } = {},
-): Promise<RunResult> {
+  options: SpawnOptions = {},
+): ChildProcessWithoutNullStreams {
   const platform = options.platform ?? process.platform;
   const argv = [...cli.prefix, ...args];
   const env: NodeJS.ProcessEnv = {
     ...(options.env ?? process.env),
     // Windows Python writes the ANSI code page to pipes; the report
-    // paths parsed from stdout below are decoded as UTF-8 and a
-    // non-ASCII path (C:\Users\José\…) would come out mangled.
+    // paths parsed from stdout are decoded as UTF-8 and a non-ASCII
+    // path (C:\Users\José\…) would come out mangled.
     PYTHONUTF8: "1",
   };
+  const batch = isWindowsBatchFile(cli.command, platform)
+    ? batchSpawnArgs(cli.command, argv)
+    : undefined;
+  return spawn(batch?.file ?? cli.command, batch?.args ?? argv, {
+    cwd: options.cwd,
+    env,
+    shell: false,
+    windowsVerbatimArguments: batch !== undefined,
+    // no console window flashing over the editor per run
+    windowsHide: true,
+  });
+}
+
+export function runProcess(
+  cli: CliCommand,
+  args: string[],
+  options: SpawnOptions & { onOutput?: (chunk: string) => void } = {},
+): Promise<RunResult> {
   return new Promise((resolve, reject) => {
-    const batch = isWindowsBatchFile(cli.command, platform)
-      ? batchSpawnArgs(cli.command, argv)
-      : undefined;
-    const child = spawn(batch?.file ?? cli.command, batch?.args ?? argv, {
-      cwd: options.cwd,
-      env,
-      shell: false,
-      windowsVerbatimArguments: batch !== undefined,
-      // no console window flashing over the editor per run
-      windowsHide: true,
-    });
+    const child = spawnCli(cli, args, options);
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (d: Buffer) => {
