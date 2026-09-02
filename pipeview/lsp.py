@@ -55,6 +55,13 @@ _SEVERITY = {"error": 1, "warning": 2, "info": 3}
 CMD_OPEN_REPORT = "pipeview.openReport"
 CMD_OPEN_REPORT_OFFLINE = "pipeview.openReportOffline"
 
+ANNOUNCEMENT = (
+    "pipeview attached: diagnostics on save, hover on CI_*/GITHUB_* "
+    "variables, and the code action (ctrl-. / cmd-.) \u201cPipeview: open "
+    "pipeline report (browser)\u201d on any line of a Makefile, "
+    ".gitlab-ci.yml, or .github/workflows file."
+)
+
 _LOCAL_INCLUDE_RE = re.compile(
     r"""(?:-\s*)?local:\s*(['"]?)(?P<path>[^'"#\s]+)\1"""
 )
@@ -250,7 +257,7 @@ class LspServer:
     def _handlers(self):
         return {
             "initialize": self._initialize,
-            "initialized": lambda p: None,
+            "initialized": self._initialized,
             "shutdown": self._shutdown,
             "exit": self._exit,
             "$/cancelRequest": lambda p: None,
@@ -285,6 +292,16 @@ class LspServer:
             "serverInfo": {"name": "pipeview",
                            "version": pipeview.__version__},
         }
+
+    def _initialized(self, params: dict):
+        # Editors that host this server cannot add palette commands for
+        # it (Zed extensions register language servers, nothing else), so
+        # a first-time user has no way to discover what just attached.
+        # Say it once per server start; initializationOptions
+        # {"announce": false} silences it.
+        if self.options.get("announce", True):
+            self._show_message(3, ANNOUNCEMENT)
+        return None
 
     def _shutdown(self, params: dict):
         self._shutdown_received = True

@@ -35,6 +35,41 @@ generates; unresolved includes stay dashed ghost nodes.
 See [editors/README.md](../README.md) for how the Zed and VS Code
 integrations divide the same features.
 
+## Using it
+
+There is **no command-palette entry** — Zed extensions can register
+language servers, not commands. Everything happens inside a pipeline
+file's buffer:
+
+1. Open a `.gitlab-ci.yml`, a `.github/workflows/*.yml`, or a
+   `Makefile` (Makefiles need a Make language extension, else Zed treats
+   them as plain text and no server attaches).
+2. The server attaches and says so once: *"pipeview attached: …"*
+   (silence it with `"announce": false` in the settings below). The
+   language-server indicator in the status bar lists `pipeview` too.
+3. Save → diagnostics inline. Hover a `CI_*` / `GITHUB_*` name → docs.
+   `cmd-.` / `ctrl-.` on any line → *Pipeview: open pipeline report
+   (browser)*. Other YAML files, ones that belong to no pipeline root,
+   get nothing on purpose.
+
+### If nothing shows up
+
+- **No "pipeview attached" toast, no `pipeview` in the status-bar
+  language-server list** → the server did not start. Run
+  `debug: open language server logs` (or `zed: open log`) and look for
+  `pipeview`: the message names what was tried. Usual causes: pipeview
+  is not installed for the interpreter that was found (on Windows the
+  `py` launcher picks the newest Python — install there with
+  `py -m pip install .`, or point the `binary` setting below at the
+  right `pipeview.exe`), or nothing was found at all (the toast says so,
+  with the settings escape hatch).
+- **Toast appears but no code action** → the file belongs to no root:
+  the buffer must be a `Makefile` (with the Make language active), a
+  `.gitlab-ci.yml`, a `*.yml` under `.github/workflows/`, or a `*.mk` /
+  `*.yml` with one of those in a parent directory.
+- **Report generated but no browser** → the toast tells you the file
+  path; under WSL install `wslu` (`wslview`) or set `BROWSER`.
+
 ## Requirements
 
 Zed 0.205 or newer (extension API 0.7) and Python 3.10+ with pipeview
@@ -96,6 +131,7 @@ server:
       // to ["lsp"]. Windows: "C:\\Users\\me\\...\\Scripts\\pipeview.exe"
       "binary": { "path": "/path/to/pipeview" },
       "initialization_options": {
+        "announce": true,        // the one-time "pipeview attached" toast
         "upstream": true,        // resolve cross-repo includes via the
                                  // repo's git remote for reports
         "upstreamRemote": "",    // "" = tracking remote, else origin

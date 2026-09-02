@@ -563,6 +563,26 @@ class TestExecuteCommand:
 
 
 # ---------------------------------------------------------------------------
+# Discoverability
+# ---------------------------------------------------------------------------
+
+class TestAnnouncement:
+    def test_attach_is_announced_once(self):
+        # Zed cannot host palette commands for the extension, so the
+        # server itself says what it offers, once, when the client is up.
+        client = Client()
+        infos = [m for m in client.messages() if m["type"] == 3]
+        assert [m["message"] for m in infos] == [lsp_mod.ANNOUNCEMENT]
+        assert "ctrl-." in lsp_mod.ANNOUNCEMENT
+        # nothing else chatters before a document is opened
+        assert len(client.messages()) == 1
+
+    def test_announcement_can_be_silenced(self):
+        client = Client({"announce": False})
+        assert client.messages() == []
+
+
+# ---------------------------------------------------------------------------
 # Platform paths
 # ---------------------------------------------------------------------------
 
