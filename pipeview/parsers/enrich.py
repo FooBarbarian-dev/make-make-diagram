@@ -46,8 +46,14 @@ def enrich_make_report(report: Report, makefile_path: str) -> None:
             cwd=work_dir,
             capture_output=True,
             text=True,
+            errors="replace",
             timeout=TIMEOUT_SECONDS,
-            env={**os.environ, "LANG": "C"},
+            # The parser matches make's English database comments
+            # ("# Variables", "# makefile", …); LC_ALL outranks LANG and
+            # LC_MESSAGES, and LANGUAGE outranks both for gettext, so all
+            # three must be pinned or a localized desktop gets translated
+            # output and silently no enrichment.
+            env={**os.environ, "LC_ALL": "C", "LANG": "C", "LANGUAGE": "C"},
         )
         output = result.stdout
     except subprocess.TimeoutExpired:
