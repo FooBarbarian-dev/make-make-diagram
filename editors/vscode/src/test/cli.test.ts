@@ -175,7 +175,9 @@ test("batchSpawnArgs: one verbatim command line for cmd.exe /d /s /c", () => {
   assert.equal(file, "C:\\Windows\\System32\\cmd.exe");
   assert.deepEqual(args.slice(0, 3), ["/d", "/s", "/c"]);
   assert.equal(args[3], '"C:\\t\\pipeview.cmd ^^^"--version^^^""');
-  assert.equal(batchSpawnArgs("x.cmd", [], undefined).file, "cmd.exe");
+  // an empty ComSpec falls back to the bare name (undefined would read
+  // the real ComSpec through the parameter default — set on Windows)
+  assert.equal(batchSpawnArgs("x.cmd", [], "").file, "cmd.exe");
 });
 
 test("runProcess: forces UTF-8 Python I/O and captures output", async () => {
