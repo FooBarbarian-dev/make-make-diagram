@@ -77,7 +77,7 @@ file's buffer:
 
 ## Requirements
 
-Zed 0.205 or newer (extension API 0.7) and Python 3.10+ with pipeview
+Zed 0.205 or newer (extension API 0.7) and Python 3.11+ with pipeview
 installed. The extension finds the server as `pipeview` on PATH (run as
 `pipeview lsp`), falls back to `python3 -m pipeview lsp` (`python`, then
 `py -3 -m pipeview lsp` on Windows), or Zed uses an explicit binary from

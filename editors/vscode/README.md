@@ -12,7 +12,7 @@ docs for predefined CI variables, and clickable includes (see
 
 ## Requirements
 
-- Python 3.10+ with pipeview installed (`pip install .` from the
+- Python 3.11+ with pipeview installed (`pip install .` from the
   repository, or `pipx install .`). The extension finds it as `pipeview`
   on PATH, falls back to `python3 -m pipeview` (on Windows: `python`,
   then the `py -3 -m pipeview` launcher), or uses the `pipeview.cliPath`
