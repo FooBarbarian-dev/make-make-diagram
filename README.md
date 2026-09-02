@@ -330,6 +330,9 @@ or the `pipeview lsp` language server, never to extension code. See
   commands run `pipeview gitlab report`/`sync` (the rollup opens when
   produced), store a token in VS Code secret storage, or open an
   integrated terminal for the interactive `pipeview gitlab auth`.
+  Pipeline buffers also get `pipeview lsp`: inline diagnostics, hover
+  docs, clickable includes, and a report code action that lands in the
+  webview.
 - **[Zed](editors/zed/)** — Zed extensions cannot show webviews, so the
   extension wires up `pipeview lsp` instead: pipeview's diagnostics
   appear inline on save, predefined `CI_*` variables get hover docs
@@ -339,8 +342,9 @@ or the `pipeview lsp` language server, never to extension code. See
   self-contained `file://` HTML precisely so any browser is a full
   viewer.
 
-`pipeview lsp` is editor-agnostic; pointing the VS Code extension at it
-too is the designated follow-up.
+`pipeview lsp` is editor-agnostic — both extensions host it — and also
+ships as its own `pipeview-lsp` executable for editors that take a bare
+binary path with no arguments (Zed's `binary.path` setting).
 
 ## Fetching from GitLab (`pipeview gitlab`)
 
@@ -595,7 +599,8 @@ pipeview <path> [-o OUTDIR] [--format FMTS] [--no-enrich] [--trigger-docs FILE]
 pipeview scenarios [init|check|preview|verify] …
 pipeview gitlab [browse|auth|projects|report|track|untrack|tracked|sync] …
 pipeview github [browse|auth|repos|report|track|untrack|tracked|sync] …
-pipeview lsp     # language server over stdio (used by editors/)
+pipeview lsp     # language server over stdio (used by editors/);
+                 # also installed as the `pipeview-lsp` executable
 ```
 
 | Flag | Default | Description |

@@ -7,6 +7,24 @@ here and enriched by hand where a feature deserves the narrative.
 
 ## Unreleased
 
+**`pipeview lsp` in VS Code; a `pipeview-lsp` executable; the Zed
+`binary` setting told the truth.** The VS Code extension now hosts the
+same language server Zed does (`vscode-languageclient`): inline
+diagnostics on open/save, hover docs for predefined `CI_*`/`GITHUB_*`
+variables, document links for `include:local` and local `uses:`, and
+the report code action — rewritten client-side so it opens the webview
+panel rather than a browser (`pipeview.languageServer: false` turns it
+off). The `editors/README.md` matrix converges accordingly. On the Zed
+side, a configured `lsp.pipeview.binary.path` was documented as
+defaulting its arguments to `["lsp"]`; Zed in fact applies that
+setting itself, bypassing the extension, and runs the path with no
+arguments — so `pipeview` started as the report CLI and died with
+`the following arguments are required: path`. The dead extension
+branch is gone, the docs and the not-found message now say
+`"arguments": ["lsp"]`, and the server is additionally installed as
+`pipeview-lsp` (also `python -m pipeview.lsp`) so a bare binary path
+works as Zed runs it.
+
 **GitHub Actions in the editor integrations.** The GitHub Actions
 support that landed on `main` flows through both editors: repo reports
 include the `.github/workflows/` root (a workflows directory is now
